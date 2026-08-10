@@ -1,10 +1,40 @@
-#include "easyrpgsymbian/CoreLcf.h"
 #include "easyrpgsymbian/LcfProbe.h"
+#include "easyrpgsymbian/UpstreamLmuBridge.h"
 #include "easyrpgsymbian/ZipVfs.h"
 
 namespace
 {
 const TInt KMaxProbeFileSize = 4 * 1024 * 1024;
+
+enum TLcfProbeFileType
+{
+    ELcfDatabase = 1,
+    ELcfMapTree = 2,
+    ELcfMapUnit = 3
+};
+
+TInt NarrowAsciiPath(const TDesC& aSource, TDes8& aDestination)
+{
+    aDestination.Zero();
+    if (aSource.Length() + 1 > aDestination.MaxLength())
+        return KErrOverflow;
+
+    TInt index = 0;
+    for (index = 0; index < aSource.Length(); ++index)
+    {
+        const TUint16 value = aSource[index];
+        if (value > 0x7fu)
+            return KErrNotSupported;
+        aDestination.Append(static_cast<TUint8>(value));
+    }
+    aDestination.Append(static_cast<TUint8>(0));
+    return KErrNone;
+}
+
+const char* NarrowPathPtr(const TDesC8& aPath)
+{
+    return reinterpret_cast<const char*>(aPath.Ptr());
+}
 
 void CopyCoreName(const unsigned char* aSource,
                   TUint32 aSourceLength,
@@ -49,12 +79,9 @@ TInt TLcfProbe::ProbeProject(CZipVfs& aResources,
     aSummary.iSystemNameSjis.Zero();
     aSummary.iChipsetNameSjis.Zero();
 
-    // Resolve the active map first so the following LDB pass can select the
-    // exact chipset resource referenced by that map without keeping the full
-    // database resident in memory.
     TInt error = InspectFile(aResources,
                              _L("RPG_RT.lmt"),
-                             EASYRPG_LCF_MAP_TREE,
+                             ELcfMapTree,
                              aSummary);
     if (error == KErrNone)
     {
@@ -62,14 +89,14 @@ TInt TLcfProbe::ProbeProject(CZipVfs& aResources,
         startMapName.Format(_L("Map%04u.lmu"), aSummary.iStartMapId);
         error = InspectFile(aResources,
                             startMapName,
-                            EASYRPG_LCF_MAP_UNIT,
+                            ELcfMapUnit,
                             aSummary);
     }
     if (error == KErrNone)
     {
         error = InspectFile(aResources,
                             _L("RPG_RT.ldb"),
-                            EASYRPG_LCF_DATABASE,
+                            ELcfDatabase,
                             aSummary);
     }
 
@@ -88,108 +115,123 @@ TInt TLcfProbe::InspectFile(CZipVfs& aResources,
                             TInt aFileType,
                             TLcfProjectSummary& aSummary)
 {
-    HBufC8* buffer = NULL;
-    TRAPD(error, buffer = aResources.ReadFileLC(aFileName, KMaxProbeFileSize);
-                 CleanupStack::Pop(buffer));
-    if (error != KErrNone || !buffer)
-        return error != KErrNone ? error : KErrNoMemory;
-
-    const TPtrC8 bytes(*buffer);
-
-    EasyRpgCoreLcfSummary coreSummary;
-    const unsigned char* rawBytes =
-        reinterpret_cast<const unsigned char*>(bytes.Ptr());
-    const unsigned int rawSize = static_cast<unsigned int>(bytes.Length());
-    const TInt coreError = EasyRpgCoreInspectLcf(aFileType,
-                                                 rawBytes,
-                                                 rawSize,
-                                                 &coreSummary);
-
-    unsigned char chipsetName[EASYRPG_LCF_RESOURCE_NAME_CAPACITY];
-    unsigned int chipsetNameLength = 0;
-    TInt chipsetError = KErrNone;
-    if (coreError == 0 && aFileType == EASYRPG_LCF_DATABASE)
-    {
-        if (aSummary.iMapChipsetId == 0)
-        {
-            chipsetError = KErrNotReady;
-        }
-        else
-        {
-            const TInt coreChipsetError = EasyRpgCoreFindChipsetName(
-                rawBytes,
-                rawSize,
-                aSummary.iMapChipsetId,
-                chipsetName,
-                sizeof(chipsetName),
-                &chipsetNameLength);
-            if (coreChipsetError != 0)
-                chipsetError = KErrNotFound;
-        }
-    }
-
-    delete buffer;
-    buffer = NULL;
-
-    if (coreError != 0 || coreSummary.record_count == 0)
-        return KErrCorrupt;
-    if (chipsetError != KErrNone)
-        return chipsetError;
-
+    TFileName materializedPath;
+    TPtrC cacheName;
     switch (aFileType)
     {
-    case EASYRPG_LCF_DATABASE:
-        aSummary.iDatabaseRecords = coreSummary.record_count;
-        aSummary.iDatabaseHash = coreSummary.fnv1a;
-        CopyCoreName(coreSummary.title_name,
-                     coreSummary.title_name_length,
-                     aSummary.iTitleNameSjis);
-        CopyCoreName(coreSummary.system_name,
-                     coreSummary.system_name_length,
-                     aSummary.iSystemNameSjis);
-        CopyCoreName(chipsetName,
-                     chipsetNameLength,
-                     aSummary.iChipsetNameSjis);
-        if (aSummary.iTitleNameSjis.Length() == 0 ||
-            aSummary.iSystemNameSjis.Length() == 0 ||
-            aSummary.iChipsetNameSjis.Length() == 0)
-            return KErrCorrupt;
+    case ELcfDatabase:
+        cacheName.Set(_L("RPG_RT.ldb"));
         break;
-
-    case EASYRPG_LCF_MAP_TREE:
-        if (!coreSummary.terminator_seen || coreSummary.start_map_id == 0)
-            return KErrCorrupt;
-        aSummary.iMapTreeEntries = coreSummary.record_count;
-        aSummary.iMapTreeHash = coreSummary.fnv1a;
-        aSummary.iActiveNode = coreSummary.active_node;
-        aSummary.iStartMapId = coreSummary.start_map_id;
-        aSummary.iStartX = coreSummary.start_x;
-        aSummary.iStartY = coreSummary.start_y;
+    case ELcfMapTree:
+        cacheName.Set(_L("RPG_RT.lmt"));
         break;
-
-    case EASYRPG_LCF_MAP_UNIT:
-        if (!coreSummary.terminator_seen ||
-            coreSummary.map_width == 0 ||
-            coreSummary.map_height == 0)
-            return KErrCorrupt;
-        aSummary.iMapUnitRecords = coreSummary.record_count;
-        aSummary.iMapUnitHash = coreSummary.fnv1a;
-        aSummary.iMapChipsetId = coreSummary.map_chipset_id;
-        aSummary.iMapWidth = coreSummary.map_width;
-        aSummary.iMapHeight = coreSummary.map_height;
-        aSummary.iMapLowerLayerTiles = coreSummary.map_lower_layer_tiles;
-        aSummary.iMapUpperLayerTiles = coreSummary.map_upper_layer_tiles;
-        aSummary.iMapEventCount = coreSummary.map_event_count;
-        aSummary.iMapEventPageCount = coreSummary.map_event_page_count;
-        aSummary.iMapEventCommandCount = coreSummary.map_event_command_count;
-        aSummary.iMapSaveCount = coreSummary.map_save_count;
+    case ELcfMapUnit:
+        cacheName.Set(_L("active.lmu"));
         break;
-
     default:
         return KErrArgument;
     }
 
-    return KErrNone;
+    TRAPD(materializeError,
+          aResources.MaterializeFileL(aFileName,
+                                      cacheName,
+                                      materializedPath,
+                                      KMaxProbeFileSize));
+    if (materializeError != KErrNone)
+        return materializeError;
+
+    TBuf8<KMaxFileName + 1> narrowPath;
+    const TInt narrowError = NarrowAsciiPath(materializedPath, narrowPath);
+    if (narrowError != KErrNone)
+        return narrowError;
+
+    const char* path = NarrowPathPtr(narrowPath);
+
+    switch (aFileType)
+    {
+    case ELcfMapTree:
+    {
+        EasyRpgUpstreamLmtSummary upstream;
+        const TInt coreError = EasyRpgUpstreamLoadLmtSummary(path, "", &upstream);
+        if (coreError != 0 || upstream.start_map_id <= 0 || upstream.map_count == 0)
+            return KErrCorrupt;
+
+        aSummary.iMapTreeEntries = upstream.map_count;
+        aSummary.iActiveNode = static_cast<TUint32>(upstream.active_node);
+        aSummary.iStartMapId = static_cast<TUint32>(upstream.start_map_id);
+        aSummary.iStartX = static_cast<TUint32>(upstream.start_x);
+        aSummary.iStartY = static_cast<TUint32>(upstream.start_y);
+        return KErrNone;
+    }
+
+    case ELcfMapUnit:
+    {
+        EasyRpgUpstreamLmuSummary upstream;
+        const TInt coreError = EasyRpgUpstreamReadLmuSummary(path, "", &upstream);
+        if (coreError != 0 || upstream.width <= 0 || upstream.height <= 0)
+            return KErrCorrupt;
+
+        const TUint32 expectedTiles =
+            static_cast<TUint32>(upstream.width) * static_cast<TUint32>(upstream.height);
+        if (upstream.lower_layer_count != expectedTiles ||
+            upstream.upper_layer_count != expectedTiles)
+            return KErrCorrupt;
+
+        aSummary.iMapUnitRecords = 1;
+        aSummary.iMapChipsetId = static_cast<TUint32>(upstream.chipset_id);
+        aSummary.iMapWidth = static_cast<TUint32>(upstream.width);
+        aSummary.iMapHeight = static_cast<TUint32>(upstream.height);
+        aSummary.iMapLowerLayerTiles = upstream.lower_layer_count;
+        aSummary.iMapUpperLayerTiles = upstream.upper_layer_count;
+        aSummary.iMapEventCount = upstream.event_count;
+        aSummary.iMapEventPageCount = upstream.event_page_count;
+        aSummary.iMapEventCommandCount = upstream.event_command_count;
+        aSummary.iMapSaveCount = upstream.save_count;
+        return KErrNone;
+    }
+
+    case ELcfDatabase:
+    {
+        unsigned char titleName[96];
+        unsigned char systemName[96];
+        unsigned char chipsetName[96];
+        unsigned int titleNameLength = 0;
+        unsigned int systemNameLength = 0;
+        unsigned int chipsetNameLength = 0;
+        EasyRpgUpstreamLdbSummary upstream;
+
+        const TInt coreError = EasyRpgUpstreamLoadLdbSummary(
+            path,
+            "",
+            static_cast<int>(aSummary.iMapChipsetId),
+            &upstream,
+            titleName,
+            sizeof(titleName),
+            &titleNameLength,
+            systemName,
+            sizeof(systemName),
+            &systemNameLength,
+            chipsetName,
+            sizeof(chipsetName),
+            &chipsetNameLength);
+        if (coreError != 0 || upstream.chipset_count == 0)
+            return coreError == -3 ? KErrNotFound : KErrCorrupt;
+
+        aSummary.iDatabaseRecords = upstream.actor_count +
+                                    upstream.chipset_count +
+                                    upstream.common_event_count;
+        CopyCoreName(titleName, titleNameLength, aSummary.iTitleNameSjis);
+        CopyCoreName(systemName, systemNameLength, aSummary.iSystemNameSjis);
+        CopyCoreName(chipsetName, chipsetNameLength, aSummary.iChipsetNameSjis);
+        if (aSummary.iTitleNameSjis.Length() == 0 ||
+            aSummary.iSystemNameSjis.Length() == 0 ||
+            aSummary.iChipsetNameSjis.Length() == 0)
+            return KErrCorrupt;
+        return KErrNone;
+    }
+    }
+
+    return KErrArgument;
 }
 
 TInt TLcfProbe::ReadGameTitle(CZipVfs& aResources, TDes& aGameTitle)

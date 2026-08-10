@@ -5,7 +5,6 @@
 extern "C" {
 #endif
 
-/* S60 3rd FP2 Open C exposes errno through __errno(). */
 int* __errno(void);
 
 #ifdef __cplusplus

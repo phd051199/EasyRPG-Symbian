@@ -174,7 +174,6 @@ bool FindChipsetNameInArray(const unsigned char* aData,
                 break;
             }
 
-            // lcf::rpg::Chipset::chipset_name (the ChipSet image resource).
             if (entryId == aChipsetId && tag == 0x02)
             {
                 if (length == 0 || length >= aNameCapacity)
@@ -305,8 +304,6 @@ bool ParseSystemChunk(const unsigned char* aData,
             break;
         }
 
-        // RPG Maker 2000/2003 LDB System fields used for resource lookup.
-        // 17 = title_name, 19 = system_name.
         if (tag == 17)
             CopyResourceName(aSummary.title_name, aSummary.title_name_length, data, length);
         else if (tag == 19)
@@ -341,8 +338,6 @@ bool ParseDatabase(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
             return false;
     }
 
-    // LDB files commonly end exactly after the final top-level field rather
-    // than carrying a top-level 0 terminator.
     return true;
 }
 
@@ -405,8 +400,6 @@ bool ParseMapTree(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
     aSummary.first_tag = mapCount;
     aSummary.last_tag = mapCount;
 
-    // Array<rpg::MapInfo>: every entry starts with its BER id and then a
-    // tagged struct terminated by field id 0.
     for (unsigned int index = 0; index < mapCount; ++index)
     {
         unsigned int mapId = 0;
@@ -416,7 +409,6 @@ bool ParseMapTree(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
             return false;
     }
 
-    // TreeMap::tree_order is encoded as count + that many BER map ids.
     unsigned int treeOrderCount = 0;
     if (!ReadBer(aCursor, treeOrderCount))
         return false;
@@ -469,9 +461,6 @@ bool CountEventPages(const unsigned char* aData,
                 break;
             }
 
-            // EventPage::event_commands_size. The following 0x34 payload is
-            // the serialized command vector and is parsed by the interpreter
-            // layer later; the declared count is enough for bootstrap checks.
             if (tag == 0x33)
             {
                 unsigned int commandCount = 0;
@@ -533,7 +522,6 @@ bool CountEventArray(const unsigned char* aData,
                 break;
             }
 
-            // Event::pages = 0x05.
             if (tag == 0x05 &&
                 !CountEventPages(data, length, aPageCount, aCommandCount))
                 return false;
@@ -552,9 +540,7 @@ bool CountEventArray(const unsigned char* aData,
 
 bool ParseMapUnit(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
 {
-    // Defaults from lcf::rpg::Map. These values matter because RPG Maker
-    // omits fields that are equal to their defaults (Map0001 does this for
-    // chipset/width/height in NobihazaVH).
+
     aSummary.map_chipset_id = 1;
     aSummary.map_width = 20;
     aSummary.map_height = 15;
@@ -582,37 +568,37 @@ bool ParseMapUnit(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
         unsigned int integerValue = 0;
         switch (tag)
         {
-        case 0x01: // ChunkMap::chipset_id
+        case 0x01:
             if (!ReadChunkInteger(data, length, integerValue))
                 return false;
             aSummary.map_chipset_id = integerValue;
             break;
-        case 0x02: // ChunkMap::width
+        case 0x02:
             if (!ReadChunkInteger(data, length, integerValue) || integerValue == 0)
                 return false;
             aSummary.map_width = integerValue;
             break;
-        case 0x03: // ChunkMap::height
+        case 0x03:
             if (!ReadChunkInteger(data, length, integerValue) || integerValue == 0)
                 return false;
             aSummary.map_height = integerValue;
             break;
-        case 0x0B: // ChunkMap::scroll_type
+        case 0x0B:
             if (!ReadChunkInteger(data, length, integerValue))
                 return false;
             aSummary.map_scroll_type = integerValue;
             break;
-        case 0x47: // ChunkMap::lower_layer, vector<int16_t>
+        case 0x47:
             if ((length & 1u) != 0)
                 return false;
             aSummary.map_lower_layer_tiles = length / 2u;
             break;
-        case 0x48: // ChunkMap::upper_layer, vector<int16_t>
+        case 0x48:
             if ((length & 1u) != 0)
                 return false;
             aSummary.map_upper_layer_tiles = length / 2u;
             break;
-        case 0x51: // ChunkMap::events, Array<Event>
+        case 0x51:
             if (!CountEventArray(data,
                                  length,
                                  aSummary.map_event_count,
@@ -620,7 +606,7 @@ bool ParseMapUnit(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
                                  aSummary.map_event_command_count))
                 return false;
             break;
-        case 0x5B: // ChunkMap::save_count
+        case 0x5B:
             if (!ReadChunkInteger(data, length, integerValue))
                 return false;
             aSummary.map_save_count = integerValue;
@@ -727,7 +713,6 @@ extern "C" int EasyRpgCoreFindChipsetName(const unsigned char* aData,
         if (terminator)
             break;
 
-        // RPG_RT.ldb top-level chunk 20 is Array<rpg::Chipset>.
         if (tag == 20)
         {
             unsigned int nameLength = 0;

@@ -13,12 +13,11 @@ SOURCE            SymbianDocument.cpp
 SOURCE            SymbianAppUi.cpp
 SOURCE            FrameTimer.cpp
 SOURCE            Framebuffer.cpp
+SOURCE            DisplaySurface.cpp
 SOURCE            GameLocator.cpp
 SOURCE            ZipVfs.cpp
 SOURCE            LcfProbe.cpp
 SOURCE            Encoding.cpp
-SOURCE            XyzImage.cpp
-SOURCE            PngImage.cpp
 SOURCE            PlayerRuntime.cpp
 SOURCE            GameView.cpp
 

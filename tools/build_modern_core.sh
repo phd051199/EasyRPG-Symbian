@@ -23,16 +23,33 @@ SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
 WIN_BUILD_DIR="C:\\work\\EasyRPGSymbian\\build\\modern-core\\$SDK_CFG"
 GENERATED_DIR="$PROJECT_DIR/build/generated"
 GENERATED_CP932="$GENERATED_DIR/CoreCp932Table.cpp"
+GENERATED_READER_STRUCT="$GENERATED_DIR/reader_struct.cpp"
+LIBLCF_ROOT="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
+LIBLCF_GENERATED_ROOT="$LIBLCF_ROOT/generated"
 SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
-    "$PROJECT_DIR/src/core/CoreLcf.cpp"
     "$PROJECT_DIR/src/core/CoreZipCrypto.cpp"
-    "$PROJECT_DIR/third_party/liblcf-0.5.0/src/reader_lcf.cpp"
+    "$LIBLCF_ROOT/reader_lcf.cpp"
+    "$LIBLCF_ROOT/data.cpp"
+    "$LIBLCF_ROOT/rpg_setup.cpp"
+    "$LIBLCF_ROOT/ldb_reader.cpp"
+    "$LIBLCF_ROOT/lmt_reader.cpp"
+    "$LIBLCF_ROOT/lmu_reader.cpp"
+    "$LIBLCF_ROOT/writer_lcf.cpp"
+    "$LIBLCF_ROOT/writer_xml.cpp"
+    "$GENERATED_READER_STRUCT"
     "$PROJECT_DIR/third_party/libcxx-4.0.1/src/string.cpp"
     "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp"
     "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp"
+    "$PROJECT_DIR/src/core/LiblcfXmlReaderSymbian.cpp"
+    "$PROJECT_DIR/src/core/UpstreamLmuBridge.cpp"
+    "$PROJECT_DIR/src/core/UpstreamLcfLinkAnchor.cpp"
     "$GENERATED_CP932"
 )
+
+while IFS= read -r generated_source; do
+    SOURCES+=("$generated_source")
+done < <(find "$LIBLCF_GENERATED_ROOT" -maxdepth 1 -type f -name '*.cpp' | sort)
 
 find_wine() {
     if [[ -n $WINE_BIN && -x $WINE_BIN ]]; then
@@ -73,6 +90,7 @@ fi
 
 mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR" "$GENERATED_DIR"
 python3 "$PROJECT_DIR/tools/generate_cp932_table.py" --output "$GENERATED_CP932"
+python3 "$PROJECT_DIR/tools/generate_symbian_reader_struct.py" "$GENERATED_READER_STRUCT"
 rm -f "$LIBRARY"
 
 objects=()
@@ -118,7 +136,8 @@ for source in "${SOURCES[@]}"; do
         -nostdinc++ \
         -I "$PROJECT_DIR/third_party/libcxx-4.0.1/include" \
         -I "$PROJECT_DIR/inc/easyrpgsymbian/libc_compat" \
-        -I "$PROJECT_DIR/third_party/liblcf-0.5.0/src" \
+        -I "$LIBLCF_ROOT" \
+        -I "$LIBLCF_GENERATED_ROOT" \
         -I "$PROJECT_DIR/inc" \
         -S "$source" \
         -o "$assembly_raw"
@@ -136,6 +155,7 @@ for source in "${SOURCES[@]}"; do
         -e 's/^([[:space:]]*)lsr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsr \6/' \
         -e 's/^([[:space:]]*)asr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, asr \6/' \
         -e 's/^([[:space:]]*)ror([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, ror \6/' \
+        -e 's/"awGR"/"awG"/g' \
         "$assembly_raw" > "$assembly"
 
     WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
@@ -151,7 +171,7 @@ WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreInspectLcf EasyRpgCoreFindChipsetName EasyRpgCoreExtractMapLayers EasyRpgCoreExtractChipset EasyRpgCoreCp932ToUtf16 EasyRpgCoreWinZipAesDecrypt _ZN10ReaderUtil6Recode _ZN9LcfReaderC1; do
+for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreWinZipAesDecrypt EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "Modern core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2
@@ -163,5 +183,5 @@ cp -f "$LIBRARY" "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"
 
 printf 'Modern C++11 -> CSL EABI4 core: %s (%s bytes, %s objects)\n' \
     "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
-printf 'Verified symbols: legacy core API + upstream LcfReader + Symbian ReaderUtil::Recode adapter\n'
+printf 'Verified symbols: upstream LDB/LMT/LMU read path + CP932/ZIP platform adapters\n'
 printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"

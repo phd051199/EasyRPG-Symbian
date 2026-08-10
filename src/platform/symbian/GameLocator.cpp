@@ -2,8 +2,8 @@
 
 namespace
 {
+_LIT(KEasyRpgGamesPhone, "C:\\Data\\EasyRPG\\Games\\");
 _LIT(KEasyRpgGamesMemoryCard, "E:\\EasyRPG\\Games\\");
-_LIT(KEasyRpgGamesPhone, "C:\\EasyRPG\\Games\\");
 _LIT(KZipPattern, "*.zip");
 _LIT(KZipExtension, ".zip");
 }
@@ -15,14 +15,12 @@ void TGameLocator::ListGameArchivesL(RFs& aFs,
     aDisplayNames.Reset();
     aArchivePaths.Reset();
 
-    // Keep the user-visible order stable and aligned with the documented
-    // locations: memory card first, then phone storage.
     AppendGameArchivesL(aFs,
-                        KEasyRpgGamesMemoryCard,
+                        KEasyRpgGamesPhone,
                         aDisplayNames,
                         aArchivePaths);
     AppendGameArchivesL(aFs,
-                        KEasyRpgGamesPhone,
+                        KEasyRpgGamesMemoryCard,
                         aDisplayNames,
                         aArchivePaths);
 }
@@ -70,8 +68,6 @@ void TGameLocator::AppendGameArchivesL(RFs& aFs,
             title.SetLength(title.Length() - KZipExtension().Length());
         }
 
-        // A drive suffix disambiguates archives with the same filename on C:
-        // and E: without exposing the full filesystem path in the LCDUI list.
         TBuf<KMaxFileName> displayName;
         if (title.Length() > displayName.MaxLength() - 6)
             title.SetLength(displayName.MaxLength() - 6);

@@ -72,10 +72,6 @@ void CFrameTimer::RunL()
 
     ++iLogicFrame;
 
-    // Arm before running game work. If a frame takes close to one logic tick,
-    // the timer can complete while the frame is being processed and the next
-    // RunL is dispatched immediately after returning instead of accumulating
-    // an extra frame of drift.
     Arm();
 
     const TBool renderFrame = ((iLogicFrame % KRenderDivisor) == 0);
@@ -84,7 +80,7 @@ void CFrameTimer::RunL()
         Stop();
 }
 
-TInt CFrameTimer::RunError(TInt /*aError*/)
+TInt CFrameTimer::RunError(TInt)
 {
     Stop();
     return KErrNone;

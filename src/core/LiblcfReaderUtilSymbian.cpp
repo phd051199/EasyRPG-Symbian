@@ -106,7 +106,7 @@ std::string Cp932ToUtf8(const std::string& input) {
     delete[] utf16;
     return output;
 }
-}  // namespace
+}
 
 std::string ReaderUtil::Recode(const std::string& str_to_encode,
                                const std::string& src_enc,
@@ -120,7 +120,5 @@ std::string ReaderUtil::Recode(const std::string& str_to_encode,
     if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc))
         return Cp932ToUtf8(str_to_encode);
 
-    // Match the non-ICU upstream behavior when iconv_open() cannot provide a
-    // requested conversion: leave the original bytes untouched.
     return str_to_encode;
 }

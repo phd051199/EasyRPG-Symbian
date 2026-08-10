@@ -6,10 +6,6 @@
 
 class CZipVfsEntry;
 
-// Read-only RPG Maker project filesystem backed directly by one ZIP archive.
-// The central directory is indexed once at mount time. Resource names are
-// decoded from the archive metadata (UTF-8/Unicode Path/CP932), normalized,
-// and never depend on filenames produced by an external extractor.
 class CZipVfs : public CBase
 {
 public:
@@ -25,9 +21,13 @@ public:
 
     TBool Exists(const TDesC& aRelativePath) const;
 
-    // Returns a newly allocated buffer on the Cleanup Stack.
     HBufC8* ReadFileLC(const TDesC& aRelativePath,
                        TInt aMaxBytes = KDefaultMaxFileBytes) const;
+
+    void MaterializeFileL(const TDesC& aRelativePath,
+                          const TDesC& aCacheFileName,
+                          TDes& aMaterializedPath,
+                          TInt aMaxBytes = KDefaultMaxFileBytes) const;
 
     const TDesC& ArchivePath() const;
     const TDesC& ProjectPrefix() const;

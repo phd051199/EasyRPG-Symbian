@@ -18,9 +18,9 @@ void CEasyRpgAppUi::ConstructL()
     if (StatusPane())
         StatusPane()->MakeVisible(EFalse);
     if (Cba())
-        Cba()->MakeVisible(EFalse);
+        Cba()->MakeVisible(ETrue);
 
-    iGameView = CGameView::NewL(ApplicationRect());
+    iGameView = CGameView::NewL(ClientRect());
     AddToStackL(iGameView);
 }
 
@@ -50,7 +50,7 @@ void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 void CEasyRpgAppUi::HandleStatusPaneSizeChange()
 {
     if (iGameView)
-        iGameView->SetRect(ApplicationRect());
+        iGameView->SetRect(ClientRect());
 }
 
 void CEasyRpgAppUi::HandleForegroundEventL(TBool aForeground)

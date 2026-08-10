@@ -11,6 +11,7 @@ ASSEMBLER="$CSL_BIN/arm-none-symbianelf-as.exe"
 NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
 BUILD_DIR="$PROJECT_DIR/build/upstream-armv5-probe"
 WIN_BUILD_DIR="C:\\work\\EasyRPGSymbian\\build\\upstream-armv5-probe"
+SYMBIAN_READER_STRUCT="$BUILD_DIR/generated/reader_struct.cpp"
 LIBLCF_ROOT="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
 LIBCXX_ROOT="$PROJECT_DIR/third_party/libcxx-4.0.1"
 LIBLCF_INCLUDE="$LIBLCF_ROOT"
@@ -20,6 +21,7 @@ LIBC_COMPAT_INCLUDE="$PROJECT_DIR/inc/easyrpgsymbian/libc_compat"
 SOURCES=(
     "$LIBLCF_ROOT/reader_lcf.cpp"
     "$LIBLCF_ROOT/lmu_reader.cpp"
+    "$SYMBIAN_READER_STRUCT"
     "$LIBCXX_ROOT/src/string.cpp"
     "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp"
     "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp"
@@ -59,6 +61,8 @@ if [[ ! -d $SDK_ROOT/epoc32 ]]; then
     echo "UPSTREAM ARMv5 PROBE: invalid S60 SDK: $SDK_ROOT" >&2
     exit 20
 fi
+mkdir -p "$(dirname "$SYMBIAN_READER_STRUCT")"
+python3 "$PROJECT_DIR/tools/generate_symbian_reader_struct.py" "$SYMBIAN_READER_STRUCT"
 for source in "${SOURCES[@]}"; do
     if [[ ! -f $source ]]; then
         echo "UPSTREAM ARMv5 PROBE: upstream source missing: $source" >&2
@@ -153,6 +157,7 @@ compile_object() {
         -e 's/^([[:space:]]*)lsr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsr \6/' \
         -e 's/^([[:space:]]*)asr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, asr \6/' \
         -e 's/^([[:space:]]*)ror([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, ror \6/' \
+        -e 's/"awGR"/"awG"/g' \
         "$assembly_raw" > "$assembly"
 
     WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
@@ -164,11 +169,21 @@ compile_object() {
 
 compile_object "$LIBLCF_ROOT/reader_lcf.cpp" reader_lcf
 compile_object "$LIBLCF_ROOT/lmu_reader.cpp" lmu_reader
+compile_object "$SYMBIAN_READER_STRUCT" reader_struct
 compile_object "$LIBCXX_ROOT/src/string.cpp" libcxx_string
 compile_object "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp" libcxx_vector_runtime
 compile_object "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp" liblcf_reader_util_symbian
 
-for stem in reader_lcf lmu_reader libcxx_string libcxx_vector_runtime liblcf_reader_util_symbian; do
+generated_stems=()
+while IFS= read -r source; do
+    base=$(basename "$source" .cpp)
+    stem="liblcf_generated_$base"
+    compile_object "$source" "$stem"
+    generated_stems+=("$stem")
+done < <(find "$LIBLCF_GENERATED_INCLUDE" -maxdepth 1 -type f -name '*.cpp' | sort)
+printf 'Generated RPG model objects: %s\n' "${#generated_stems[@]}"
+
+for stem in reader_lcf lmu_reader reader_struct libcxx_string libcxx_vector_runtime liblcf_reader_util_symbian; do
     printf '\nUndefined symbols: %s.o\n' "$stem"
     WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
         "$WINE_BIN" "$NM" -u "$WIN_BUILD_DIR\\$stem.o" || true

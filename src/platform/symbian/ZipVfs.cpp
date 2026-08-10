@@ -18,6 +18,7 @@ const TUint16 KExtraUnicodePath = 0x7075u;
 const TUint16 KExtraWinZipAes = 0x9901u;
 const TInt KEndOfCentralDirectoryBytes = 22;
 const TInt KMaxZipCommentBytes = 65535;
+_LIT(KLcfCacheDirectory, "C:\\Data\\EasyRPG\\Cache\\");
 
 TUint16 Read16(const TUint8* aBytes)
 {
@@ -105,7 +106,6 @@ TBool ParseAesExtra(const TDesC8& aExtra,
     if (!FindExtraField(aExtra, KExtraWinZipAes, payload) || payload.Length() != 7)
         return EFalse;
 
-    // Layout: version(2), vendor "AE"(2), strength(1), actual method(2).
     if (payload[2] != 'A' || payload[3] != 'E')
         return EFalse;
     if (payload[4] < 1 || payload[4] > 3)
@@ -292,7 +292,7 @@ void CZipVfs::BuildIndexL()
         User::Leave(KErrNotSupported);
     if (totalEntries == 0xffffu || centralSize32 == 0xffffffffu ||
         centralOffset32 == 0xffffffffu)
-        User::Leave(KErrNotSupported); // ZIP64
+        User::Leave(KErrNotSupported);
     if (centralSize32 > static_cast<TUint32>(KMaxCentralDirectoryBytes))
         User::Leave(KErrTooBig);
     if (centralOffset32 > static_cast<TUint32>(fileSize) ||
@@ -444,7 +444,7 @@ void CZipVfs::AddEntryL(const TDesC& aPath,
         return;
 
     if (FindFullPath(aPath))
-        return; // NFC/case normalization can make equivalent archive aliases.
+        return;
 
     CZipVfsEntry* entry = CZipVfsEntry::NewLC(aPath,
                                                aFlags,
@@ -524,6 +524,47 @@ HBufC8* CZipVfs::ReadFileLC(const TDesC& aRelativePath, TInt aMaxBytes) const
     if (!entry)
         User::Leave(KErrNotFound);
     return DecodeEntryLC(*entry, aMaxBytes);
+}
+
+void CZipVfs::MaterializeFileL(const TDesC& aRelativePath,
+                               const TDesC& aCacheFileName,
+                               TDes& aMaterializedPath,
+                               TInt aMaxBytes) const
+{
+    if (aCacheFileName.Length() == 0 || aMaxBytes < 0)
+        User::Leave(KErrArgument);
+
+    TInt index = 0;
+    for (index = 0; index < aCacheFileName.Length(); ++index)
+    {
+        const TUint16 value = aCacheFileName[index];
+        if (value == '/' || value == '\\' || value == ':')
+            User::Leave(KErrArgument);
+    }
+
+    TFileName destination;
+    if (KLcfCacheDirectory().Length() + aCacheFileName.Length() > destination.MaxLength() ||
+        KLcfCacheDirectory().Length() + aCacheFileName.Length() > aMaterializedPath.MaxLength())
+        User::Leave(KErrOverflow);
+    destination.Copy(KLcfCacheDirectory);
+    destination.Append(aCacheFileName);
+
+    const TInt mkdirError = iFs.MkDirAll(KLcfCacheDirectory);
+    if (mkdirError != KErrNone && mkdirError != KErrAlreadyExists)
+        User::Leave(mkdirError);
+
+    HBufC8* data = ReadFileLC(aRelativePath, aMaxBytes);
+    RFile output;
+    User::LeaveIfError(output.Replace(iFs,
+                                      destination,
+                                      EFileWrite | EFileShareExclusive));
+    CleanupClosePushL(output);
+    User::LeaveIfError(output.Write(*data));
+    User::LeaveIfError(output.Flush());
+    CleanupStack::PopAndDestroy(&output);
+    CleanupStack::PopAndDestroy(data);
+
+    aMaterializedPath.Copy(destination);
 }
 
 HBufC8* CZipVfs::DecodeEntryLC(const CZipVfsEntry& aEntry, TInt aMaxBytes) const

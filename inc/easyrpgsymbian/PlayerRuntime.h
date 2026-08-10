@@ -3,7 +3,7 @@
 
 #include <e32base.h>
 
-class CFrameBuffer;
+class CSymbianDisplaySurface;
 class CZipVfs;
 
 class CPlayerRuntime : public CBase
@@ -23,34 +23,21 @@ public:
 
     static CPlayerRuntime* NewL(CZipVfs* aResources,
                                 const TDesC& aGameSource,
-                                CFrameBuffer& aFrameBuffer);
+                                CSymbianDisplaySurface& aDisplaySurface);
     ~CPlayerRuntime();
 
     void SetKeyState(TUint32 aKey, TBool aPressed);
     void ReleaseAllKeys();
     void TickL(TUint32 aLogicFrame, TBool aRenderFrame);
 
-    const TDesC& StatusText() const;
-    const TDesC& GameTitle() const;
-    const TDesC& GameRoot() const;
-    TUint32 PressedKeys() const;
-
 private:
-    CPlayerRuntime(CZipVfs* aResources, CFrameBuffer& aFrameBuffer);
+    CPlayerRuntime(CZipVfs* aResources, CSymbianDisplaySurface& aDisplaySurface);
     void ConstructL(const TDesC& aGameSource);
-    void RenderDiagnosticL(TUint32 aLogicFrame);
 
 private:
-    CZipVfs* iResources; // borrowed; owned by CGameView and outlives runtime
-    CFrameBuffer& iFrameBuffer;
-    TFileName iGameRoot;
-    TBuf<96> iStatusText;
-    TBuf<96> iGameTitle;
+    CZipVfs* iResources;
+    CSymbianDisplaySurface& iDisplaySurface;
     TUint32 iPressedKeys;
-    TBool iLcfReady;
-    TBool iTitleReady;
-    TInt iMarkerX;
-    TInt iMarkerY;
 };
 
 #endif

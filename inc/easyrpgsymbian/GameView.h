@@ -9,8 +9,8 @@
 #include "easyrpgsymbian/FrameTimer.h"
 
 class CAknSingleStyleListBox;
-class CFrameBuffer;
 class CPlayerRuntime;
+class CSymbianDisplaySurface;
 class CZipVfs;
 
 class CGameView : public CCoeControl,
@@ -29,6 +29,7 @@ private:
 
     void Draw(const TRect& aRect) const;
     void SizeChanged();
+    void HandleResourceChange(TInt aType);
     void FocusChanged(TDrawNow aDrawNow);
     TInt CountComponentControls() const;
     CCoeControl* ComponentControl(TInt aIndex) const;
@@ -42,14 +43,13 @@ private:
     void ShowLoadErrorL(TInt aError);
     TUint32 MapPlayerKey(const TKeyEvent& aKeyEvent) const;
     TPoint FrameOrigin() const;
-    void DrawOverlay(CWindowGc& aGc) const;
 
 private:
     RFs iFs;
     CAknSingleStyleListBox* iListBox;
     CDesCArrayFlat* iListItems;
     CDesCArrayFlat* iArchivePaths;
-    CFrameBuffer* iFrameBuffer;
+    CSymbianDisplaySurface* iDisplaySurface;
     CZipVfs* iResources;
     CPlayerRuntime* iRuntime;
     CFrameTimer* iFrameTimer;

@@ -335,9 +335,6 @@ bool ExpandAesKey(const unsigned char* aKey,
         for (unsigned int index = 0; index < 4; ++index)
             temp[index] = aExpandedKey[(wordIndex - 1u) * 4u + index];
 
-        // Avoid ARM EABI integer-division helpers in the freestanding modern
-        // core. The only valid AES Nk values are 4, 6 and 8, so resolve the
-        // tiny quotient/remainder explicitly instead of using / and %.
         unsigned int remainder = 0;
         unsigned int quotient = 0;
         if (nk == 4u)

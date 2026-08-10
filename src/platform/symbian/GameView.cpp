@@ -1,13 +1,16 @@
+#include <aknappui.h>
 #include <aknlists.h>
 #include <aknnotewrappers.h>
 #include <coemain.h>
 #include <e32keys.h>
+#include <eikbtgpc.h>
 #include <eikclbd.h>
+#include <eikenv.h>
 #include <eikscrlb.h>
 #include <gdi.h>
 #include <w32std.h>
 
-#include "easyrpgsymbian/Framebuffer.h"
+#include "easyrpgsymbian/DisplaySurface.h"
 #include "easyrpgsymbian/GameLocator.h"
 #include "easyrpgsymbian/GameView.h"
 #include "easyrpgsymbian/PlayerRuntime.h"
@@ -48,7 +51,7 @@ CGameView::CGameView()
     : iListBox(NULL),
       iListItems(NULL),
       iArchivePaths(NULL),
-      iFrameBuffer(NULL),
+      iDisplaySurface(NULL),
       iResources(NULL),
       iRuntime(NULL),
       iFrameTimer(NULL),
@@ -97,8 +100,8 @@ CGameView::~CGameView()
     delete iResources;
     iResources = NULL;
 
-    delete iFrameBuffer;
-    iFrameBuffer = NULL;
+    delete iDisplaySurface;
+    iDisplaySurface = NULL;
 
     delete iListBox;
     iListBox = NULL;
@@ -156,13 +159,10 @@ void CGameView::StartSelectedGameL()
     TFileName selectedArchive;
     selectedArchive.Copy((*iArchivePaths)[index]);
 
-    // Nothing game-specific is allocated or mounted before this point. The
-    // list screen is deliberately filesystem-enumeration only.
-    CFrameBuffer* frameBuffer = CFrameBuffer::NewL(TSize(KGameWidth, KGameHeight));
-    CleanupStack::PushL(frameBuffer);
+    CSymbianDisplaySurface* displaySurface =
+        CSymbianDisplaySurface::NewL(TSize(KGameWidth, KGameHeight));
+    CleanupStack::PushL(displaySurface);
 
-    // The first compatibility target uses this AES password. Supplying it is
-    // harmless for ordinary unencrypted ZIP archives.
     CZipVfs* resources = CZipVfs::OpenL(iFs,
                                         selectedArchive,
                                         KTargetArchivePassword);
@@ -170,7 +170,7 @@ void CGameView::StartSelectedGameL()
 
     CPlayerRuntime* runtime = CPlayerRuntime::NewL(resources,
                                                    selectedArchive,
-                                                   *frameBuffer);
+                                                   *displaySurface);
     CleanupStack::PushL(runtime);
 
     CFrameTimer* frameTimer = CFrameTimer::NewL(*this);
@@ -179,9 +179,9 @@ void CGameView::StartSelectedGameL()
     CleanupStack::Pop(frameTimer);
     CleanupStack::Pop(runtime);
     CleanupStack::Pop(resources);
-    CleanupStack::Pop(frameBuffer);
+    CleanupStack::Pop(displaySurface);
 
-    iFrameBuffer = frameBuffer;
+    iDisplaySurface = displaySurface;
     iResources = resources;
     iRuntime = runtime;
     iFrameTimer = frameTimer;
@@ -189,6 +189,11 @@ void CGameView::StartSelectedGameL()
 
     iListBox->SetFocus(EFalse);
     iListBox->MakeVisible(EFalse);
+
+    CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
+    if (appUi->Cba())
+        appUi->Cba()->MakeVisible(EFalse);
+    SetRect(appUi->ApplicationRect());
 
     if (iForeground)
         iFrameTimer->Start();
@@ -230,9 +235,9 @@ void CGameView::SetForeground(TBool aForeground)
     }
 }
 
-void CGameView::Draw(const TRect& /*aRect*/) const
+void CGameView::Draw(const TRect&) const
 {
-    // In launcher mode the child Avkon list box owns the entire client area.
+
     if (!iRuntime)
         return;
 
@@ -242,10 +247,8 @@ void CGameView::Draw(const TRect& /*aRect*/) const
     gc.SetBrushColor(TRgb(0, 0, 0));
     gc.DrawRect(Rect());
 
-    if (iFrameBuffer)
-        gc.BitBlt(FrameOrigin(), &iFrameBuffer->Bitmap());
-
-    DrawOverlay(gc);
+    if (iDisplaySurface)
+        gc.BitBlt(FrameOrigin(), &iDisplaySurface->Bitmap());
 }
 
 void CGameView::SizeChanged()
@@ -253,8 +256,16 @@ void CGameView::SizeChanged()
     if (iListBox)
         iListBox->SetRect(Rect());
 
-    // The internal RPG Maker surface intentionally remains 320x240. The E72
-    // is a native 320x240 target; other emulator screen sizes are centered.
+}
+
+void CGameView::HandleResourceChange(TInt aType)
+{
+    CCoeControl::HandleResourceChange(aType);
+    if (aType == KEikDynamicLayoutVariantSwitch)
+    {
+        CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
+        SetRect(iRuntime ? appUi->ApplicationRect() : appUi->ClientRect());
+    }
 }
 
 void CGameView::FocusChanged(TDrawNow aDrawNow)
@@ -402,35 +413,4 @@ TPoint CGameView::FrameOrigin() const
     const TRect rect = Rect();
     return TPoint(rect.iTl.iX + (rect.Width() - KGameWidth) / 2,
                   rect.iTl.iY + (rect.Height() - KGameHeight) / 2);
-}
-
-void CGameView::DrawOverlay(CWindowGc& aGc) const
-{
-    if (!iRuntime || !iCoeEnv)
-        return;
-
-    const CFont* font = iCoeEnv->NormalFont();
-    if (!font)
-        return;
-
-    aGc.UseFont(font);
-    aGc.SetPenStyle(CGraphicsContext::ESolidPen);
-    aGc.SetPenColor(TRgb(235, 235, 235));
-    aGc.SetBrushStyle(CGraphicsContext::ENullBrush);
-
-    const TPoint origin = FrameOrigin();
-    const TInt baseline = origin.iY + font->HeightInPixels() + 12;
-    aGc.DrawText(iRuntime->StatusText(), TPoint(origin.iX + 8, baseline));
-
-    aGc.SetPenColor(TRgb(190, 205, 220));
-    if (iRuntime->GameTitle().Length() > 0)
-        aGc.DrawText(iRuntime->GameTitle(),
-                     TPoint(origin.iX + 8,
-                            baseline + font->HeightInPixels() + 2));
-    else
-        aGc.DrawText(iRuntime->GameRoot(),
-                     TPoint(origin.iX + 8,
-                            baseline + font->HeightInPixels() + 2));
-
-    aGc.DiscardFont();
 }

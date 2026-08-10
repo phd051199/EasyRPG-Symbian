@@ -28,13 +28,11 @@ typedef struct EasyRpgCoreLcfSummary
     unsigned int fnv1a;
     int terminator_seen;
 
-    /* RPG_RT.lmt TreeMap data. */
     unsigned int active_node;
     unsigned int start_map_id;
     unsigned int start_x;
     unsigned int start_y;
 
-    /* RPG Map bootstrap metadata from the inspected LMU. */
     unsigned int map_chipset_id;
     unsigned int map_width;
     unsigned int map_height;
@@ -46,7 +44,6 @@ typedef struct EasyRpgCoreLcfSummary
     unsigned int map_event_command_count;
     unsigned int map_save_count;
 
-    /* RPG_RT.ldb System strings. Raw RPG Maker 2000 bytes (CP932/SJIS). */
     unsigned int title_name_length;
     unsigned char title_name[EASYRPG_LCF_RESOURCE_NAME_CAPACITY];
     unsigned int system_name_length;
