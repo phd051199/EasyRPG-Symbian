@@ -1,0 +1,9 @@
+; Replace UID, vendor, paths, version, and signing policy.
+#{"MyApp"},(0xE0000001),1,0,0
+%{"Vendor"}
+:"Vendor"
+[0x101F7961], 0, 0, 0, {"S60ProductID"}
+
+"$(EPOCROOT)Epoc32\release\$(PLATFORM)\$(TARGET)\MyApp.exe" - "!:\sys\bin\MyApp.exe"
+"$(EPOCROOT)Epoc32\data\z\resource\apps\MyApp.rsc" - "!:\resource\apps\MyApp.rsc"
+"$(EPOCROOT)Epoc32\data\z\private\10003a3f\import\apps\MyApp_reg.rsc" - "!:\private\10003a3f\import\apps\MyApp_reg.rsc"

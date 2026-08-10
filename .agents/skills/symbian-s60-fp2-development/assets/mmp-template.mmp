@@ -1,0 +1,29 @@
+TARGET          MyApp.exe
+TARGETTYPE      exe
+UID             0x100039CE 0xE0000001
+SECUREID        0xE0000001
+CAPABILITY      None
+
+SOURCEPATH      ..\src
+SOURCE          MyAppApplication.cpp
+SOURCE          MyAppDocument.cpp
+SOURCE          MyAppAppUi.cpp
+SOURCE          MyAppAppView.cpp
+
+USERINCLUDE     ..\inc
+SYSTEMINCLUDE   \epoc32\include
+
+START RESOURCE  ..\data\MyApp.rss
+HEADER
+TARGETPATH      resource\apps
+END
+
+START RESOURCE  ..\data\MyApp_reg.rss
+TARGETPATH      \private\10003a3f\import\apps
+END
+
+LIBRARY         euser.lib
+LIBRARY         apparc.lib
+LIBRARY         cone.lib
+LIBRARY         eikcore.lib
+LIBRARY         avkon.lib

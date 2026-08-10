@@ -1,0 +1,6 @@
+interface:
+  display_name: "Symbian S60 FP2 Development"
+  short_description: "Build and debug native Symbian C++ apps for S60 3rd FP2."
+  default_prompt: "Use this skill to find existing S60 APIs, design the architecture, and implement or debug the requested Symbian C++ feature without inventing unavailable APIs."
+policy:
+  allow_implicit_invocation: true
