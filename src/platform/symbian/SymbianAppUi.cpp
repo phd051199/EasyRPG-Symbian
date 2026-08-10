@@ -13,10 +13,10 @@ CEasyRpgAppUi::CEasyRpgAppUi()
 void CEasyRpgAppUi::ConstructL()
 {
     BaseConstructL(CAknAppUi::EAknEnableSkin);
-    SetFullScreenApp(ETrue);
+    SetFullScreenApp(EFalse);
 
     if (StatusPane())
-        StatusPane()->MakeVisible(EFalse);
+        StatusPane()->MakeVisible(ETrue);
     if (Cba())
         Cba()->MakeVisible(ETrue);
 
@@ -32,6 +32,15 @@ CEasyRpgAppUi::~CEasyRpgAppUi()
         delete iGameView;
         iGameView = NULL;
     }
+}
+
+void CEasyRpgAppUi::EnterGameFullscreen()
+{
+    SetFullScreenApp(ETrue);
+    if (StatusPane())
+        StatusPane()->MakeVisible(EFalse);
+    if (Cba())
+        Cba()->MakeVisible(EFalse);
 }
 
 void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
@@ -50,7 +59,7 @@ void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 void CEasyRpgAppUi::HandleStatusPaneSizeChange()
 {
     if (iGameView)
-        iGameView->SetRect(ClientRect());
+        iGameView->UpdateLayout();
 }
 
 void CEasyRpgAppUi::HandleForegroundEventL(TBool aForeground)

@@ -28,7 +28,7 @@ RESOURCE CBA r_main_cba
         CBA_BUTTON
         {
             id = EAknSoftkeyOptions;
-            txt = qtn_command;
+            txt = qtn_options;
         },
         CBA_BUTTON
         {

@@ -405,7 +405,7 @@ bool ReadPNGBytes(const uint8_t* data,
             g = palette[index * 3u + 1u];
             b = palette[index * 3u + 2u];
             if (transparent)
-                a = index < alpha_bytes ? alpha_table[index] : 255;
+                a = index < alpha_bytes ? alpha_table[index] : (index == 0 ? 0 : 255);
         } else if (color_type == 0) {
             r = g = b = scanlines[i];
         } else if (color_type == 2) {

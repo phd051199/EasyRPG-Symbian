@@ -10,28 +10,40 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 
 class __easyrpg_string_stream_base {
 public:
+    __easyrpg_string_stream_base() : width_(0), fill_(' ') {}
     const string& str_ref() const { return value_; }
     string str_value() const { return value_; }
-    void append(const string& value) { value_ += value; }
-    void append(const char* value) { if (value) value_ += value; }
-    void append(char value) { value_ += value; }
+    void set_width(int value) { width_ = value > 0 ? value : 0; }
+    void set_fill(char value) { fill_ = value; }
+    void append(const string& value) { append_width(value.c_str(), value.size()); }
+    void append(const char* value) { if (value) append_width(value, string(value).size()); }
+    void append(char value) { append_width(&value, 1); }
     void append_signed(long long value) {
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "%lld", value);
-        value_ += buffer;
+        append_width(buffer, string(buffer).size());
     }
     void append_unsigned(unsigned long long value) {
         char buffer[32];
         snprintf(buffer, sizeof(buffer), "%llu", value);
-        value_ += buffer;
+        append_width(buffer, string(buffer).size());
     }
     void append_double(double value) {
         char buffer[48];
         snprintf(buffer, sizeof(buffer), "%g", value);
-        value_ += buffer;
+        append_width(buffer, string(buffer).size());
     }
 protected:
+    void append_width(const char* value, size_t length) {
+        if (width_ > static_cast<int>(length)) {
+            value_.append(static_cast<size_t>(width_ - static_cast<int>(length)), fill_);
+        }
+        value_.append(value, length);
+        width_ = 0;
+    }
     string value_;
+    int width_;
+    char fill_;
 };
 
 template <>

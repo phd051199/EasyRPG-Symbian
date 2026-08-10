@@ -22,6 +22,7 @@ public:
     ~CGameView();
 
     void SetForeground(TBool aForeground);
+    void UpdateLayout();
 
 private:
     CGameView();

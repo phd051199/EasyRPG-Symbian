@@ -12,6 +12,7 @@ public:
     ~CEasyRpgAppUi();
 
     void ConstructL();
+    void EnterGameFullscreen();
     void HandleCommandL(TInt aCommand);
     void HandleStatusPaneSizeChange();
     void HandleForegroundEventL(TBool aForeground);

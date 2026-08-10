@@ -14,6 +14,7 @@
 #include "easyrpgsymbian/GameLocator.h"
 #include "easyrpgsymbian/GameView.h"
 #include "easyrpgsymbian/PlayerRuntime.h"
+#include "easyrpgsymbian/SymbianAppUi.h"
 #include "easyrpgsymbian/ZipVfs.h"
 
 namespace
@@ -176,6 +177,12 @@ void CGameView::StartSelectedGameL()
     CFrameTimer* frameTimer = CFrameTimer::NewL(*this);
     CleanupStack::PushL(frameTimer);
 
+    if (iListBox->ScrollBarFrame())
+    {
+        iListBox->ScrollBarFrame()->SetScrollBarVisibilityL(
+            CEikScrollBarFrame::EOff, CEikScrollBarFrame::EOff);
+    }
+
     CleanupStack::Pop(frameTimer);
     CleanupStack::Pop(runtime);
     CleanupStack::Pop(resources);
@@ -190,10 +197,9 @@ void CGameView::StartSelectedGameL()
     iListBox->SetFocus(EFalse);
     iListBox->MakeVisible(EFalse);
 
-    CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
-    if (appUi->Cba())
-        appUi->Cba()->MakeVisible(EFalse);
-    SetRect(appUi->ApplicationRect());
+    CEasyRpgAppUi* appUi = static_cast<CEasyRpgAppUi*>(CEikonEnv::Static()->EikAppUi());
+    appUi->EnterGameFullscreen();
+    UpdateLayout();
 
     if (iForeground)
         iFrameTimer->Start();
@@ -235,6 +241,19 @@ void CGameView::SetForeground(TBool aForeground)
     }
 }
 
+void CGameView::UpdateLayout()
+{
+    CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
+    if (!iRuntime)
+    {
+        SetRect(appUi->ClientRect());
+        return;
+    }
+
+    const TSize screenSize = CCoeEnv::Static()->ScreenDevice()->SizeInPixels();
+    SetRect(TRect(TPoint(0, 0), screenSize));
+}
+
 void CGameView::Draw(const TRect&) const
 {
 
@@ -253,9 +272,8 @@ void CGameView::Draw(const TRect&) const
 
 void CGameView::SizeChanged()
 {
-    if (iListBox)
+    if (iListBox && !iRuntime)
         iListBox->SetRect(Rect());
-
 }
 
 void CGameView::HandleResourceChange(TInt aType)
@@ -263,8 +281,7 @@ void CGameView::HandleResourceChange(TInt aType)
     CCoeControl::HandleResourceChange(aType);
     if (aType == KEikDynamicLayoutVariantSwitch)
     {
-        CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
-        SetRect(iRuntime ? appUi->ApplicationRect() : appUi->ClientRect());
+        UpdateLayout();
     }
 }
 
@@ -285,12 +302,12 @@ void CGameView::FocusChanged(TDrawNow aDrawNow)
 
 TInt CGameView::CountComponentControls() const
 {
-    return iListBox != NULL ? 1 : 0;
+    return iListBox != NULL && !iRuntime ? 1 : 0;
 }
 
 CCoeControl* CGameView::ComponentControl(TInt aIndex) const
 {
-    return aIndex == 0 ? iListBox : NULL;
+    return aIndex == 0 && !iRuntime ? iListBox : NULL;
 }
 
 TKeyResponse CGameView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType)
