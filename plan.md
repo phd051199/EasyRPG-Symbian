@@ -220,17 +220,15 @@ Do not blindly copy current desktop dependencies into the E72 build.
 
 ### Core groups to bring up in order
 
-#### Phase 2A — liblcf read path
+#### Phase 2A — upstream liblcf 0.5.0 read path
 
-Goal: parse the target's real database/map tree/Map0001 through the modern-core static library.
+Goal: compile and use the vendored **upstream liblcf 0.5.0 implementation** for LDB/LMT/LMU/LSD. Do not extend the hand-written `CoreLcf.cpp` parser with additional RPG Maker semantics.
 
-Implement/adapt:
+Source of truth:
 
-- LCF binary reader
-- LDB
-- LMT
-- LMU
-- required CP932 -> Unicode conversion adapter
+- `third_party/liblcf-0.5.0/` — real upstream release source, pinned in `third_party/UPSTREAM.md`
+- Symbian-specific CP932/filesystem adaptation stays at the platform boundary
+- `CoreLcf.cpp` is legacy bootstrap/probe code only and must leave the runtime once upstream liblcf is linkable on ARMv5
 - no full RTP search yet; report missing resources deterministically
 
 Acceptance / current state:
@@ -266,7 +264,9 @@ Initial cache policy:
 - explicit purge at map transition / memory pressure
 - no duplicate decoded copy after RGB565 upload if not required by alpha/effects
 
-#### Phase 2C — Player renderer
+#### Phase 2C — upstream EasyRPG Player renderer
+
+Use the vendored **EasyRPG Player 0.5.0 source** in `third_party/easyrpg-player-0.5.0/`. Do not recreate Tilemap/Bitmap/Scene behavior in a parallel Symbian renderer. Symbian provides display/pixel presentation and any necessary low-level acceleration behind the upstream interfaces.
 
 Bring up in this order:
 
@@ -280,9 +280,11 @@ Bring up in this order:
 
 Present remains native 320x240; no scaling pass on E72.
 
-#### Phase 2D — interpreter/runtime
+#### Phase 2D — upstream interpreter/runtime
 
-Bring across the RPG2k interpreter required by the target:
+Compile and run the upstream EasyRPG Player 0.5.0 interpreter directly. `game_interpreter.cpp`, `game_map.cpp`, scenes and game-state classes are the behavior source of truth; do not reimplement event commands in Symbian-specific code.
+
+Bring up the required path:
 
 - game state
 - switches / variables

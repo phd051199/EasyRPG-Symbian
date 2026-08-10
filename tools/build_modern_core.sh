@@ -95,6 +95,7 @@ for source in "${SOURCES[@]}"; do
         --target=arm-none-eabi \
         -march=armv5t \
         -mfloat-abi=soft \
+        -fshort-wchar \
         -std=c++11 \
         -O2 \
         -ffreestanding \
@@ -112,15 +113,19 @@ for source in "${SOURCES[@]}"; do
         -S "$source" \
         -o "$assembly_raw"
 
-    # CSL's old assembler predates these metadata directives and does not
-    # accept the modern GNU assembler aliases `stm`/`ldm` without an explicit
-    # addressing mode. ARM's default alias is increment-after, so normalize
-    # only those spellings to `stmia`/`ldmia`; generated operands/instructions
-    # are otherwise left unchanged. -march below supplies the CPU contract.
+    # CSL's old assembler predates these metadata directives and some modern
+    # GNU assembler spellings. ARM's default stm/ldm alias is increment-after.
+    # Clang also emits three-operand register shifts (e.g. lsl r2,r9,r1), while
+    # CSL requires the equivalent data-processing spelling (mov r2,r9,lsl r1).
+    # Normalize syntax only; instruction semantics remain unchanged.
     sed -E \
         -e '/^[[:space:]]*\.(eabi_attribute|cpu)([[:space:]]|$)/d' \
         -e 's/^([[:space:]]*)stm([[:space:]])/\1stmia\2/' \
         -e 's/^([[:space:]]*)ldm([[:space:]])/\1ldmia\2/' \
+        -e 's/^([[:space:]]*)lsl([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsl \6/' \
+        -e 's/^([[:space:]]*)lsr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsr \6/' \
+        -e 's/^([[:space:]]*)asr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, asr \6/' \
+        -e 's/^([[:space:]]*)ror([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, ror \6/' \
         "$assembly_raw" > "$assembly"
 
     WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \

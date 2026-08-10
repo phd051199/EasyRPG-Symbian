@@ -86,6 +86,42 @@ unsigned int HashWords(const std::vector<unsigned short>& values)
     }
     return hash;
 }
+
+void PrintTileBlocks(const char* label, const std::vector<unsigned short>& values)
+{
+    unsigned int blocks[7] = {};
+    unsigned short minimum = 0xffffu;
+    unsigned short maximum = 0;
+    for (std::size_t index = 0; index < values.size(); ++index)
+    {
+        const unsigned short value = values[index];
+        if (value < minimum)
+            minimum = value;
+        if (value > maximum)
+            maximum = value;
+
+        unsigned int block = 6;
+        if (value < 1000) block = 0;
+        else if (value < 2000) block = 1;
+        else if (value < 3000) block = 2;
+        else if (value < 4000) block = 3;
+        else if (value < 5000) block = 4;
+        else if (value < 10000) block = 5;
+        ++blocks[block];
+    }
+
+    std::cout << label
+              << " min=" << minimum
+              << " max=" << maximum
+              << " A=" << blocks[0]
+              << " B=" << blocks[1]
+              << " AB3=" << blocks[2]
+              << " C=" << blocks[3]
+              << " D=" << blocks[4]
+              << " E=" << blocks[5]
+              << " F=" << blocks[6]
+              << "\n";
+}
 }
 
 int main(int argc, char** argv)
@@ -181,6 +217,8 @@ int main(int argc, char** argv)
     ok &= Expect(layerTileCount == 300, "Map0001 extracted tile count must be 300");
     ok &= Expect(HashWords(lowerLayer) == 0x3202eee5u, "Map0001 lower layer checksum changed");
     ok &= Expect(HashWords(upperLayer) == 0xe1fb9c55u, "Map0001 upper layer checksum changed");
+    PrintTileBlocks("lower", lowerLayer);
+    PrintTileBlocks("upper", upperLayer);
     if (ok)
     {
         ok &= Expect(mapUnit.record_count == 5, "Map0001 top-level record count must be 5");
