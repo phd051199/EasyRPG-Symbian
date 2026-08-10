@@ -21,7 +21,14 @@ BUILD_DIR="$PROJECT_DIR/build/modern-core/$SDK_CFG"
 LIBRARY="$BUILD_DIR/EasyRpgModernCore.lib"
 SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
 WIN_BUILD_DIR="C:\\work\\EasyRPGSymbian\\build\\modern-core\\$SDK_CFG"
-SOURCES=(ModernCoreProbe.cpp CoreLcf.cpp)
+GENERATED_DIR="$PROJECT_DIR/build/generated"
+GENERATED_CP932="$GENERATED_DIR/CoreCp932Table.cpp"
+SOURCES=(
+    "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
+    "$PROJECT_DIR/src/core/CoreLcf.cpp"
+    "$PROJECT_DIR/src/core/CoreZipCrypto.cpp"
+    "$GENERATED_CP932"
+)
 
 find_wine() {
     if [[ -n $WINE_BIN && -x $WINE_BIN ]]; then
@@ -60,14 +67,15 @@ if [[ ! -d $SDK_ROOT/epoc32 ]]; then
     exit 1
 fi
 
-mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR"
+mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR" "$GENERATED_DIR"
+python3 "$PROJECT_DIR/tools/generate_cp932_table.py" --output "$GENERATED_CP932"
 rm -f "$LIBRARY"
 
 objects=()
 win_objects=()
-for source_name in "${SOURCES[@]}"; do
+for source in "${SOURCES[@]}"; do
+    source_name=$(basename -- "$source")
     base=${source_name%.cpp}
-    source="$PROJECT_DIR/src/core/$source_name"
     assembly_raw="$BUILD_DIR/$base.clang.s"
     assembly="$BUILD_DIR/$base.gcce.s"
     object="$BUILD_DIR/$base.o"
@@ -128,7 +136,7 @@ WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreInspectLcf EasyRpgCoreFindChipsetName; do
+for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreInspectLcf EasyRpgCoreFindChipsetName EasyRpgCoreExtractMapLayers EasyRpgCoreExtractChipset EasyRpgCoreCp932ToUtf16 EasyRpgCoreWinZipAesDecrypt; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "Modern core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2
@@ -140,5 +148,5 @@ cp -f "$LIBRARY" "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"
 
 printf 'Modern C++11 -> CSL EABI4 core: %s (%s bytes, %s objects)\n' \
     "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
-printf 'Verified symbols: EasyRpgModernCoreProbe, EasyRpgCoreInspectLcf, EasyRpgCoreFindChipsetName\n'
+printf 'Verified symbols: EasyRpgModernCoreProbe, EasyRpgCoreInspectLcf, EasyRpgCoreFindChipsetName, EasyRpgCoreExtractMapLayers, EasyRpgCoreExtractChipset, EasyRpgCoreCp932ToUtf16, EasyRpgCoreWinZipAesDecrypt\n'
 printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"

@@ -1,0 +1,78 @@
+#ifndef EASYRPG_SYMBIAN_ZIP_VFS_H
+#define EASYRPG_SYMBIAN_ZIP_VFS_H
+
+#include <e32base.h>
+#include <f32file.h>
+
+class CZipVfsEntry;
+
+// Read-only RPG Maker project filesystem backed directly by one ZIP archive.
+// The central directory is indexed once at mount time. Resource names are
+// decoded from the archive metadata (UTF-8/Unicode Path/CP932), normalized,
+// and never depend on filenames produced by an external extractor.
+class CZipVfs : public CBase
+{
+public:
+    enum
+    {
+        KDefaultMaxFileBytes = 8 * 1024 * 1024
+    };
+
+    static CZipVfs* OpenL(RFs& aFs,
+                          const TDesC& aArchivePath,
+                          const TDesC8& aPassword);
+    ~CZipVfs();
+
+    TBool Exists(const TDesC& aRelativePath) const;
+
+    // Returns a newly allocated buffer on the Cleanup Stack.
+    HBufC8* ReadFileLC(const TDesC& aRelativePath,
+                       TInt aMaxBytes = KDefaultMaxFileBytes) const;
+
+    const TDesC& ArchivePath() const;
+    const TDesC& ProjectPrefix() const;
+    TInt EntryCount() const;
+
+private:
+    enum
+    {
+        KBucketCount = 64,
+        KMaxCentralDirectoryBytes = 2 * 1024 * 1024,
+        KMaxArchivePathChars = KMaxFileName
+    };
+
+    CZipVfs(RFs& aFs);
+    void ConstructL(const TDesC& aArchivePath, const TDesC8& aPassword);
+    void BuildIndexL();
+    void ResolveProjectRootL();
+    void AddEntryL(const TDesC& aPath,
+                   TUint16 aFlags,
+                   TUint16 aMethod,
+                   TUint32 aCrc32,
+                   TUint32 aCompressedSize,
+                   TUint32 aUncompressedSize,
+                   TUint32 aLocalHeaderOffset,
+                   TUint8 aAesStrength,
+                   TUint16 aAesMethod);
+
+    const CZipVfsEntry* FindEntry(const TDesC& aRelativePath) const;
+    const CZipVfsEntry* FindFullPath(const TDesC& aFullPath) const;
+    void BuildFullPathL(const TDesC& aRelativePath, TDes& aFullPath) const;
+    HBufC8* DecodeEntryLC(const CZipVfsEntry& aEntry, TInt aMaxBytes) const;
+
+    static TUint32 HashPath(const TDesC& aPath);
+    static TBool PathEquals(const TDesC& aLeft, const TDesC& aRight);
+    static TBool PathEndsWith(const TDesC& aPath, const TDesC& aSuffix);
+    static void NormalizePathInPlaceL(TDes& aPath);
+
+private:
+    RFs& iFs;
+    RFile iArchive;
+    TFileName iArchivePath;
+    HBufC8* iPassword;
+    HBufC* iProjectPrefix;
+    RPointerArray<CZipVfsEntry> iEntries;
+    RArray<TInt> iBuckets[KBucketCount];
+};
+
+#endif

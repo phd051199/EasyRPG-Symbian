@@ -8,6 +8,7 @@
 
 class CFrameBuffer;
 class CPlayerRuntime;
+class CZipVfs;
 
 class CGameView : public CCoeControl, public MFrameTimerObserver
 {
@@ -34,6 +35,7 @@ private:
 private:
     RFs iFs;
     CFrameBuffer* iFrameBuffer;
+    CZipVfs* iResources;
     CPlayerRuntime* iRuntime;
     CFrameTimer* iFrameTimer;
     TBool iForeground;

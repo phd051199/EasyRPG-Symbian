@@ -14,9 +14,11 @@ SOURCE            SymbianAppUi.cpp
 SOURCE            FrameTimer.cpp
 SOURCE            Framebuffer.cpp
 SOURCE            GameLocator.cpp
+SOURCE            ZipVfs.cpp
 SOURCE            LcfProbe.cpp
 SOURCE            Encoding.cpp
 SOURCE            XyzImage.cpp
+SOURCE            PngImage.cpp
 SOURCE            PlayerRuntime.cpp
 SOURCE            GameView.cpp
 
@@ -47,7 +49,6 @@ LIBRARY           bitgdi.lib
 LIBRARY           eikcore.lib
 LIBRARY           avkon.lib
 LIBRARY           efsrv.lib
-LIBRARY           charconv.lib
 LIBRARY           ezlib.lib
 STATICLIBRARY     EasyRpgModernCore.lib
 

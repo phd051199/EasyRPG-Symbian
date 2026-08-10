@@ -3,7 +3,9 @@
 #include "easyrpgsymbian/Framebuffer.h"
 #include "easyrpgsymbian/LcfProbe.h"
 #include "easyrpgsymbian/ModernCoreProbe.h"
+#include "easyrpgsymbian/PngImage.h"
 #include "easyrpgsymbian/XyzImage.h"
+#include "easyrpgsymbian/ZipVfs.h"
 
 namespace
 {
@@ -24,19 +26,19 @@ TInt Clamp(TInt aValue, TInt aMinimum, TInt aMaximum)
 }
 }
 
-CPlayerRuntime* CPlayerRuntime::NewL(RFs& aFs,
-                                    const TDesC& aGameRoot,
+CPlayerRuntime* CPlayerRuntime::NewL(CZipVfs* aResources,
+                                    const TDesC& aGameSource,
                                     CFrameBuffer& aFrameBuffer)
 {
-    CPlayerRuntime* self = new (ELeave) CPlayerRuntime(aFs, aFrameBuffer);
+    CPlayerRuntime* self = new (ELeave) CPlayerRuntime(aResources, aFrameBuffer);
     CleanupStack::PushL(self);
-    self->ConstructL(aGameRoot);
+    self->ConstructL(aGameSource);
     CleanupStack::Pop(self);
     return self;
 }
 
-CPlayerRuntime::CPlayerRuntime(RFs& aFs, CFrameBuffer& aFrameBuffer)
-    : iFs(aFs),
+CPlayerRuntime::CPlayerRuntime(CZipVfs* aResources, CFrameBuffer& aFrameBuffer)
+    : iResources(aResources),
       iFrameBuffer(aFrameBuffer),
       iPressedKeys(0),
       iLcfReady(EFalse),
@@ -46,15 +48,15 @@ CPlayerRuntime::CPlayerRuntime(RFs& aFs, CFrameBuffer& aFrameBuffer)
 {
 }
 
-void CPlayerRuntime::ConstructL(const TDesC& aGameRoot)
+void CPlayerRuntime::ConstructL(const TDesC& aGameSource)
 {
-    iGameRoot.Copy(aGameRoot.Left(iGameRoot.MaxLength()));
+    iGameRoot.Copy(aGameSource.Left(iGameRoot.MaxLength()));
     iGameTitle.Zero();
 
-    if (iGameRoot.Length() > 0)
+    if (iResources)
     {
         TLcfProjectSummary projectSummary;
-        const TInt probeError = TLcfProbe::ProbeProject(iGameRoot, iGameTitle, projectSummary);
+        const TInt probeError = TLcfProbe::ProbeProject(*iResources, iGameTitle, projectSummary);
         iLcfReady = (probeError == KErrNone);
         if (iLcfReady)
         {
@@ -63,11 +65,9 @@ void CPlayerRuntime::ConstructL(const TDesC& aGameRoot)
             {
                 TRAPD(titleError,
                     TBuf<96> titleAssetName;
-                    TEncoding::ShiftJisToUnicodeL(iFs,
-                                                  projectSummary.iTitleNameSjis,
+                    TEncoding::ShiftJisToUnicodeL(projectSummary.iTitleNameSjis,
                                                   titleAssetName);
-                    CXyzImage* title = CXyzImage::LoadNamedL(iFs,
-                                                            iGameRoot,
+                    CXyzImage* title = CXyzImage::LoadNamedL(*iResources,
                                                             _L("Title"),
                                                             titleAssetName);
                     CleanupStack::PushL(title);
@@ -79,18 +79,40 @@ void CPlayerRuntime::ConstructL(const TDesC& aGameRoot)
                 );
                 iTitleReady = (titleError == KErrNone);
 
+                TInt chipsetError = KErrNotReady;
                 if (iTitleReady)
                 {
-                    iStatusText.Format(_L("M%u %ux%u C%u E%u XYZ OK"),
+                    TRAP(chipsetError,
+                        TBuf<96> chipsetAssetName;
+                        TEncoding::ShiftJisToUnicodeL(projectSummary.iChipsetNameSjis,
+                                                      chipsetAssetName);
+                        CPngImage* chipset = CPngImage::LoadNamedL(*iResources,
+                                                                  _L("ChipSet"),
+                                                                  chipsetAssetName);
+                        CleanupStack::PushL(chipset);
+                        const TSize chipsetSize = chipset->Size();
+                        if (chipsetSize.iWidth != 480 || chipsetSize.iHeight != 256)
+                            User::Leave(KErrCorrupt);
+                        CleanupStack::PopAndDestroy(chipset);
+                    );
+                }
+
+                if (iTitleReady && chipsetError == KErrNone)
+                {
+                    iStatusText.Format(_L("ZIP %d M%u %ux%u C%u OK"),
+                                       iResources->EntryCount(),
                                        projectSummary.iStartMapId,
                                        projectSummary.iMapWidth,
                                        projectSummary.iMapHeight,
-                                       projectSummary.iMapChipsetId,
-                                       projectSummary.iMapEventCount);
+                                       projectSummary.iMapChipsetId);
+                }
+                else if (!iTitleReady)
+                {
+                    iStatusText.Format(_L("LCF OK, XYZ failed: %d"), titleError);
                 }
                 else
                 {
-                    iStatusText.Format(_L("LCF OK, XYZ failed: %d"), titleError);
+                    iStatusText.Format(_L("Title OK, ChipSet PNG: %d"), chipsetError);
                 }
             }
             else
@@ -106,7 +128,7 @@ void CPlayerRuntime::ConstructL(const TDesC& aGameRoot)
     else
     {
         iLcfReady = EFalse;
-        iStatusText.Copy(_L("Game data not found"));
+        iStatusText.Copy(_L("Game ZIP not found"));
     }
 
     if (!iTitleReady)

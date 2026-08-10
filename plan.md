@@ -2,10 +2,10 @@
 
 ## 1. Goal
 
-Build a native EasyRPG Player port for **Nokia E72** (Symbian 9.3 / S60 3rd Edition FP2, ARMv5), with the first compatibility target being the extracted game in:
+Build a native EasyRPG Player port for **Nokia E72** (Symbian 9.3 / S60 3rd Edition FP2, ARMv5), with the first compatibility target being the original game archive loaded directly through the runtime ZIP VFS:
 
-- host test data: `.games/NobihazaVH/`
-- device canonical path: `E:\EasyRPG\Games\NobihazaVH\`
+- host reference extraction: `.games/NobihazaVH/`
+- legacy extracted device path (obsolete; runtime uses the ZIP path documented below): `E:\EasyRPG\Games\NobihazaVH\`
 
 The first target game is confirmed locally as an RPG Maker 2000 project:
 
@@ -151,21 +151,21 @@ Pressed states are cleared on focus/foreground loss.
 - clear pressed keys
 - restart timer only when foregrounded
 
-### DONE — game locator
+### DONE — game archive locator + ZIP VFS
 
-Preferred roots:
+Runtime locates `.zip` archives directly. On the target E72, internal storage is preferred and the canonical location is `C:\\Data\\EasyRPG\\Games\\Nobihaza VH.zip`:
 
-1. `E:\EasyRPG\Games\NobihazaVH\`
-2. `E:\EasyRPG\Games\Nobihaza VH\`
-3. `E:\Nobihaza VH\`
-4. `C:\Data\EasyRPG\Games\NobihazaVH\`
-5. `C:\Data\EasyRPG\Games\Nobihaza VH\`
+1. `C:\Data\EasyRPG\Games\NobihazaVH.zip`
+2. `C:\Data\EasyRPG\Games\Nobihaza VH.zip`
+3. `C:\Data\NobihazaVH.zip`
+4. `C:\Data\Nobihaza VH.zip`
+5. optional memory-card fallbacks under `E:\EasyRPG\Games\` and `E:\`
 
-A root is accepted only when both `RPG_RT.ldb` and `RPG_RT.lmt` exist.
+`CZipVfs` opens the archive once, indexes the central directory into hash buckets, resolves the internal project prefix from `RPG_RT.ldb` + `RPG_RT.lmt`, normalizes archive resource names, and reads members directly by local-header offset.
 
 ### DONE — native LCF/core bootstrap
 
-The device shell uses `RFs/RFile` only for I/O, then passes raw bytes through the C ABI into the modern C++11 core. The current core now validates/parses enough real LCF structure to bootstrap the target:
+The device shell keeps one `RFile` open for the mounted ZIP, gets game bytes through `CZipVfs`, then passes LCF bytes through the C ABI into the modern C++11 core. The current core now validates/parses enough real LCF structure to bootstrap the target:
 
 - `RPG_RT.ldb`: top-level tagged records + `System.title_name` / `System.system_name` raw CP932 bytes
 - `RPG_RT.lmt`: MapInfo array count, tree order, active node, and New Game start map/x/y
@@ -182,9 +182,9 @@ This separates Symbian filesystem/path failures from core parser/interpreter fai
 
 The build pipeline now deletes the previous target EXE before ABLD. A stale EXE therefore cannot be repackaged after a failed linker invocation.
 
-## 5. NobihazaVH staging and filename compatibility
+## 5. NobihazaVH ZIP VFS and filename compatibility
 
-The extracted target has 21 MiB of data and includes:
+The reference extraction has 21 MiB of data and includes:
 
 - 389 XYZ images
 - 202 LMU maps
@@ -208,7 +208,7 @@ The staging validator currently selects 865 game files / 18,893,078 bytes after 
 - skips existing `Save*.lsd` by default for clean-device testing;
 - leaves `.games/NobihazaVH` untouched.
 
-The device runtime does **not** need to decrypt/extract the distribution ZIP in phase 1. It consumes an extracted, normalized project directory. This keeps ZIP/AES/Unicode archive handling out of the E72 hot path and lowers memory/code size.
+The device runtime now mounts the original ZIP directly. Central-directory scanning happens once at startup; resource loads use hash lookup + positional `RFile::Read`, WinZip AES authentication/decryption when needed, and raw DEFLATE inflation. No external extraction or Japanese filename rename step is required, and ZIP scanning is not part of the per-frame render path.
 
 ## 6. EasyRPG core integration plan
 
@@ -242,7 +242,11 @@ Acceptance / current state:
 - [x] native Symbian Shift-JIS -> Unicode adapter using `CCnvCharacterSetConverter`
 - [x] parse start LMU top-level structure
 - [x] report stable checksum/summary back through C ABI
-- [ ] parse Map dimensions/chipset/lower+upper layers/event array into runtime structures
+- [x] parse Map defaults/dimensions/chipset id and validate lower+upper layer lengths
+- [x] parse event array bootstrap metadata: event/page/declared command counts
+- [x] resolve the active map chipset resource name generically from LDB by chipset id
+- [x] expose lower/upper tile ids through a bounded C ABI extraction path for runtime ownership
+- [ ] parse EventPage fields and serialized EventCommand opcodes/parameters
 - [ ] identify all 0.5-era liblcf behaviors required by the target beyond the bootstrap subset
 
 #### Phase 2B — image loading
@@ -426,7 +430,12 @@ Output:
 - [x] CP932 title/system resource bytes extracted correctly
 - [x] LMT resolves `active_node=53`, New Game `Map0001`, `(1,0)`
 - [x] host regression test locks exact target checksums/summary
-- [ ] Map fields/layers/events parsed into runtime-owned structures
+- [x] Map defaults/dimensions/chipset/layer sizes parsed and validated
+- [x] event/page/declared-command counts parsed from nested Event/EventPage arrays
+- [x] chipset resource name resolved from the referenced chipset id
+- [x] lower/upper tile ids exposed through `EasyRpgCoreExtractMapLayers` with target regression checksums
+- [x] chipset terrain/lower-passability/upper-passability exposed through `EasyRpgCoreExtractChipset`
+- [ ] EventPage/EventCommand payloads parsed into interpreter-owned structures
 - [ ] remaining liblcf 0.5 semantics needed by target
 
 ### M3 — first real graphics — PARTIAL, TITLE XYZ PATH IMPLEMENTED
@@ -437,8 +446,12 @@ Output:
 - [x] palette-indexed XYZ -> clipped RGB565 framebuffer blit
 - [x] target title XYZ is released immediately after framebuffer upload
 - [ ] physical E72 verification of title display
-- [ ] System/ChipSet/Character/Picture resource loaders
-- [ ] PNG decoder path
+- [x] exact current ChipSet resource lookup from LDB by map chipset id
+- [x] compact target PNG decoder: indexed 8-bit, PLTE/tRNS, IDAT/EZLib, filters 0-4, RGB565 alpha blit
+- [x] current start-map chipset PNG decodes and validates as 480x256 during bootstrap, then is released
+- [ ] retain/use ChipSet pixels only when entering the real map scene
+- [ ] port tilemap block/autotile/transparency/z-order semantics before enabling real map rendering; do not use a naive atlas blit
+- [ ] System/Character/Picture resource loaders
 - [ ] remove diagnostic renderer after the real title/map scenes own the full frame
 
 ### M4 — title scene

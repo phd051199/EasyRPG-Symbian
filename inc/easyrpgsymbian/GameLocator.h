@@ -7,12 +7,10 @@
 class TGameLocator
 {
 public:
-    static TInt FindNobihazaRoot(RFs& aFs, TFileName& aRoot);
-    static TBool IsRpg2kProject(RFs& aFs, const TDesC& aRoot);
+    static TInt FindNobihazaArchive(RFs& aFs, TFileName& aArchivePath);
 
 private:
     static TBool FileExists(RFs& aFs, const TDesC& aPath);
-    static TBool TestRoot(RFs& aFs, const TDesC& aCandidate, TFileName& aRoot);
 };
 
 #endif

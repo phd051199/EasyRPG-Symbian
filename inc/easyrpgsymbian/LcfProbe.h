@@ -2,7 +2,8 @@
 #define EASYRPG_SYMBIAN_LCF_PROBE_H
 
 #include <e32base.h>
-#include <f32file.h>
+
+class CZipVfs;
 
 struct TLcfProjectSummary
 {
@@ -24,6 +25,8 @@ struct TLcfProjectSummary
     TUint32 iMapLowerLayerTiles;
     TUint32 iMapUpperLayerTiles;
     TUint32 iMapEventCount;
+    TUint32 iMapEventPageCount;
+    TUint32 iMapEventCommandCount;
     TUint32 iMapSaveCount;
 
     TBuf8<96> iTitleNameSjis;
@@ -34,17 +37,16 @@ struct TLcfProjectSummary
 class TLcfProbe
 {
 public:
-    static TInt ProbeProject(const TDesC& aGameRoot,
+    static TInt ProbeProject(CZipVfs& aResources,
                              TDes& aGameTitle,
                              TLcfProjectSummary& aSummary);
 
 private:
-    static TInt InspectFile(RFs& aFs,
-                            const TDesC& aGameRoot,
+    static TInt InspectFile(CZipVfs& aResources,
                             const TDesC& aFileName,
                             TInt aFileType,
                             TLcfProjectSummary& aSummary);
-    static TInt ReadGameTitle(RFs& aFs, const TDesC& aGameRoot, TDes& aGameTitle);
+    static TInt ReadGameTitle(CZipVfs& aResources, TDes& aGameTitle);
 };
 
 #endif

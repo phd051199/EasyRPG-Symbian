@@ -95,6 +95,13 @@ unsigned int Fnv1a(const unsigned char* aData, unsigned int aSize)
     return hash;
 }
 
+unsigned short ReadLittleEndian16(const unsigned char* aData)
+{
+    return static_cast<unsigned short>(
+        static_cast<unsigned int>(aData[0]) |
+        (static_cast<unsigned int>(aData[1]) << 8));
+}
+
 bool ReadHeader(ByteCursor& aCursor, const char* aExpected, unsigned int aExpectedLength)
 {
     unsigned int headerLength = 0;
@@ -183,6 +190,95 @@ bool FindChipsetNameInArray(const unsigned char* aData,
             return false;
         if (entryId == aChipsetId && aNameLength > 0)
             return true;
+    }
+
+    return false;
+}
+
+bool ExtractChipsetInArray(const unsigned char* aData,
+                           unsigned int aLength,
+                           unsigned int aChipsetId,
+                           EasyRpgCoreChipsetData& aChipset)
+{
+    if (!aData || aLength == 0 || aChipsetId == 0)
+        return false;
+
+    ByteCursor cursor = { aData, aLength, 0 };
+    unsigned int count = 0;
+    if (!ReadBer(cursor, count))
+        return false;
+
+    for (unsigned int index = 0; index < count; ++index)
+    {
+        unsigned int entryId = 0;
+        if (!ReadBer(cursor, entryId) || entryId == 0)
+            return false;
+
+        bool terminatorSeen = false;
+        while (cursor.position < cursor.size)
+        {
+            unsigned int tag = 0;
+            unsigned int length = 0;
+            const unsigned char* data = 0;
+            bool terminator = false;
+            if (!ReadChunk(cursor, tag, data, length, terminator))
+                return false;
+            if (terminator)
+            {
+                terminatorSeen = true;
+                break;
+            }
+
+            if (entryId != aChipsetId)
+                continue;
+
+            if (tag == 0x02)
+            {
+                if (length == 0 || length >= EASYRPG_LCF_RESOURCE_NAME_CAPACITY)
+                    return false;
+                CopyResourceName(aChipset.name,
+                                 aChipset.name_length,
+                                 data,
+                                 length);
+            }
+            else if (tag == 0x03)
+            {
+                if ((length & 1u) != 0 || length / 2u > 162u)
+                    return false;
+                aChipset.terrain_count = length / 2u;
+                for (unsigned int valueIndex = 0;
+                     valueIndex < aChipset.terrain_count;
+                     ++valueIndex)
+                {
+                    aChipset.terrain[valueIndex] =
+                        ReadLittleEndian16(data + valueIndex * 2u);
+                }
+            }
+            else if (tag == 0x04)
+            {
+                if (length > 162u)
+                    return false;
+                aChipset.lower_passability_count = length;
+                for (unsigned int valueIndex = 0; valueIndex < length; ++valueIndex)
+                    aChipset.lower_passability[valueIndex] = data[valueIndex];
+            }
+            else if (tag == 0x05)
+            {
+                if (length > 144u)
+                    return false;
+                aChipset.upper_passability_count = length;
+                for (unsigned int valueIndex = 0; valueIndex < length; ++valueIndex)
+                    aChipset.upper_passability[valueIndex] = data[valueIndex];
+            }
+        }
+
+        if (!terminatorSeen)
+            return false;
+        if (entryId == aChipsetId)
+        {
+            aChipset.chipset_id = entryId;
+            return aChipset.name_length > 0;
+        }
     }
 
     return false;
@@ -339,11 +435,75 @@ bool ParseMapTree(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
     return aCursor.position == aCursor.size;
 }
 
+bool CountEventPages(const unsigned char* aData,
+                     unsigned int aLength,
+                     unsigned int& aPageCount,
+                     unsigned int& aCommandCount)
+{
+    if (!aData || aLength == 0)
+        return false;
+
+    ByteCursor cursor = { aData, aLength, 0 };
+    unsigned int count = 0;
+    if (!ReadBer(cursor, count))
+        return false;
+
+    for (unsigned int pageIndex = 0; pageIndex < count; ++pageIndex)
+    {
+        unsigned int pageId = 0;
+        if (!ReadBer(cursor, pageId) || pageId == 0)
+            return false;
+
+        bool terminatorSeen = false;
+        while (cursor.position < cursor.size)
+        {
+            unsigned int tag = 0;
+            unsigned int length = 0;
+            const unsigned char* data = 0;
+            bool terminator = false;
+            if (!ReadChunk(cursor, tag, data, length, terminator))
+                return false;
+            if (terminator)
+            {
+                terminatorSeen = true;
+                break;
+            }
+
+            // EventPage::event_commands_size. The following 0x34 payload is
+            // the serialized command vector and is parsed by the interpreter
+            // layer later; the declared count is enough for bootstrap checks.
+            if (tag == 0x33)
+            {
+                unsigned int commandCount = 0;
+                if (!ReadChunkInteger(data, length, commandCount))
+                    return false;
+                if (commandCount > 0xffffffffu - aCommandCount)
+                    return false;
+                aCommandCount += commandCount;
+            }
+        }
+
+        if (!terminatorSeen)
+            return false;
+    }
+
+    if (cursor.position != cursor.size)
+        return false;
+    if (count > 0xffffffffu - aPageCount)
+        return false;
+    aPageCount += count;
+    return true;
+}
+
 bool CountEventArray(const unsigned char* aData,
                      unsigned int aLength,
-                     unsigned int& aEventCount)
+                     unsigned int& aEventCount,
+                     unsigned int& aPageCount,
+                     unsigned int& aCommandCount)
 {
     aEventCount = 0;
+    aPageCount = 0;
+    aCommandCount = 0;
     if (!aData || aLength == 0)
         return false;
 
@@ -355,9 +515,31 @@ bool CountEventArray(const unsigned char* aData,
     for (unsigned int index = 0; index < count; ++index)
     {
         unsigned int eventId = 0;
-        if (!ReadBer(cursor, eventId))
+        if (!ReadBer(cursor, eventId) || eventId == 0)
             return false;
-        if (!SkipTaggedStruct(cursor))
+
+        bool terminatorSeen = false;
+        while (cursor.position < cursor.size)
+        {
+            unsigned int tag = 0;
+            unsigned int length = 0;
+            const unsigned char* data = 0;
+            bool terminator = false;
+            if (!ReadChunk(cursor, tag, data, length, terminator))
+                return false;
+            if (terminator)
+            {
+                terminatorSeen = true;
+                break;
+            }
+
+            // Event::pages = 0x05.
+            if (tag == 0x05 &&
+                !CountEventPages(data, length, aPageCount, aCommandCount))
+                return false;
+        }
+
+        if (!terminatorSeen)
             return false;
     }
 
@@ -431,7 +613,11 @@ bool ParseMapUnit(ByteCursor& aCursor, EasyRpgCoreLcfSummary& aSummary)
             aSummary.map_upper_layer_tiles = length / 2u;
             break;
         case 0x51: // ChunkMap::events, Array<Event>
-            if (!CountEventArray(data, length, aSummary.map_event_count))
+            if (!CountEventArray(data,
+                                 length,
+                                 aSummary.map_event_count,
+                                 aSummary.map_event_page_count,
+                                 aSummary.map_event_command_count))
                 return false;
             break;
         case 0x5B: // ChunkMap::save_count
@@ -553,6 +739,118 @@ extern "C" int EasyRpgCoreFindChipsetName(const unsigned char* aData,
                                         nameLength))
                 return -4;
             *aNameLength = nameLength;
+            return 0;
+        }
+    }
+
+    return -4;
+}
+
+extern "C" int EasyRpgCoreExtractMapLayers(const unsigned char* aData,
+                                             unsigned int aSize,
+                                             unsigned short* aLowerLayer,
+                                             unsigned short* aUpperLayer,
+                                             unsigned int aTileCapacity,
+                                             unsigned int* aWidth,
+                                             unsigned int* aHeight,
+                                             unsigned int* aTileCount)
+{
+    if (!aData || aSize == 0 || !aLowerLayer || !aUpperLayer ||
+        !aWidth || !aHeight || !aTileCount)
+        return -1;
+
+    *aWidth = 0;
+    *aHeight = 0;
+    *aTileCount = 0;
+
+    EasyRpgCoreLcfSummary summary = {};
+    const int inspectError = EasyRpgCoreInspectLcf(EASYRPG_LCF_MAP_UNIT,
+                                                    aData,
+                                                    aSize,
+                                                    &summary);
+    if (inspectError != 0)
+        return -2;
+    if (summary.map_width == 0 || summary.map_height == 0 ||
+        summary.map_width > 0xffffffffu / summary.map_height)
+        return -3;
+
+    const unsigned int tileCount = summary.map_width * summary.map_height;
+    if (tileCount > aTileCapacity)
+        return -4;
+    if (summary.map_lower_layer_tiles != tileCount ||
+        summary.map_upper_layer_tiles != tileCount)
+        return -5;
+
+    ByteCursor cursor = { aData, aSize, 0 };
+    if (!ReadHeader(cursor, "LcfMapUnit", 10))
+        return -6;
+
+    bool lowerSeen = false;
+    bool upperSeen = false;
+    while (cursor.position < cursor.size)
+    {
+        unsigned int tag = 0;
+        unsigned int length = 0;
+        const unsigned char* data = 0;
+        bool terminator = false;
+        if (!ReadChunk(cursor, tag, data, length, terminator))
+            return -7;
+        if (terminator)
+            break;
+
+        if (tag != 0x47 && tag != 0x48)
+            continue;
+        if (length != tileCount * 2u)
+            return -8;
+
+        unsigned short* destination = tag == 0x47 ? aLowerLayer : aUpperLayer;
+        for (unsigned int index = 0; index < tileCount; ++index)
+            destination[index] = ReadLittleEndian16(data + index * 2u);
+
+        if (tag == 0x47)
+            lowerSeen = true;
+        else
+            upperSeen = true;
+    }
+
+    if (!lowerSeen || !upperSeen)
+        return -9;
+
+    *aWidth = summary.map_width;
+    *aHeight = summary.map_height;
+    *aTileCount = tileCount;
+    return 0;
+}
+
+extern "C" int EasyRpgCoreExtractChipset(const unsigned char* aData,
+                                           unsigned int aSize,
+                                           unsigned int aChipsetId,
+                                           EasyRpgCoreChipsetData* aChipset)
+{
+    if (!aData || aSize == 0 || aChipsetId == 0 || !aChipset)
+        return -1;
+
+    EasyRpgCoreChipsetData chipset = {};
+    ByteCursor cursor = { aData, aSize, 0 };
+    if (!ReadHeader(cursor, "LcfDataBase", 11))
+        return -2;
+
+    while (cursor.position < cursor.size)
+    {
+        unsigned int tag = 0;
+        unsigned int length = 0;
+        const unsigned char* data = 0;
+        bool terminator = false;
+        if (!ReadChunk(cursor, tag, data, length, terminator))
+            return -3;
+        if (terminator)
+            break;
+
+        if (tag == 20)
+        {
+            if (!ExtractChipsetInArray(data, length, aChipsetId, chipset))
+                return -4;
+            *aChipset = chipset;
             return 0;
         }
     }

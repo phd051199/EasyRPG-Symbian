@@ -72,6 +72,20 @@ bool EqualBytes(const unsigned char* actual,
     }
     return true;
 }
+
+unsigned int HashWords(const std::vector<unsigned short>& values)
+{
+    unsigned int hash = 2166136261u;
+    for (std::size_t index = 0; index < values.size(); ++index)
+    {
+        const unsigned short value = values[index];
+        hash ^= static_cast<unsigned char>(value & 0xffu);
+        hash *= 16777619u;
+        hash ^= static_cast<unsigned char>((value >> 8) & 0xffu);
+        hash *= 16777619u;
+    }
+    return hash;
+}
 }
 
 int main(int argc, char** argv)
@@ -120,6 +134,18 @@ int main(int argc, char** argv)
                             sizeof(kChipsetName)),
                  "chipset #1 resource must be CP932 基本");
 
+    EasyRpgCoreChipsetData chipset = {};
+    const int chipsetDataRc = databaseBytes.empty()
+        ? -99
+        : EasyRpgCoreExtractChipset(&databaseBytes[0],
+                                    static_cast<unsigned int>(databaseBytes.size()),
+                                    1,
+                                    &chipset);
+    ok &= Expect(chipsetDataRc == 0, "chipset #1 data extraction must succeed");
+    ok &= Expect(chipset.terrain_count == 162, "chipset #1 terrain table must contain 162 entries");
+    ok &= Expect(chipset.lower_passability_count == 162, "chipset #1 lower passability must contain 162 entries");
+    ok &= Expect(chipset.upper_passability_count == 144, "chipset #1 upper passability must contain 144 entries");
+
     EasyRpgCoreLcfSummary mapTree = {};
     ok &= Inspect(root, "RPG_RT.lmt", EASYRPG_LCF_MAP_TREE, mapTree);
     if (ok)
@@ -134,6 +160,27 @@ int main(int argc, char** argv)
 
     EasyRpgCoreLcfSummary mapUnit = {};
     ok &= Inspect(root, "Map0001.lmu", EASYRPG_LCF_MAP_UNIT, mapUnit);
+    const std::vector<unsigned char> mapBytes = ReadFile(root + "/Map0001.lmu");
+    std::vector<unsigned short> lowerLayer(300);
+    std::vector<unsigned short> upperLayer(300);
+    unsigned int layerWidth = 0;
+    unsigned int layerHeight = 0;
+    unsigned int layerTileCount = 0;
+    const int layerRc = mapBytes.empty()
+        ? -99
+        : EasyRpgCoreExtractMapLayers(&mapBytes[0],
+                                      static_cast<unsigned int>(mapBytes.size()),
+                                      &lowerLayer[0],
+                                      &upperLayer[0],
+                                      static_cast<unsigned int>(lowerLayer.size()),
+                                      &layerWidth,
+                                      &layerHeight,
+                                      &layerTileCount);
+    ok &= Expect(layerRc == 0, "Map0001 layer extraction must succeed");
+    ok &= Expect(layerWidth == 20 && layerHeight == 15, "Map0001 extracted dimensions must be 20x15");
+    ok &= Expect(layerTileCount == 300, "Map0001 extracted tile count must be 300");
+    ok &= Expect(HashWords(lowerLayer) == 0x3202eee5u, "Map0001 lower layer checksum changed");
+    ok &= Expect(HashWords(upperLayer) == 0xe1fb9c55u, "Map0001 upper layer checksum changed");
     if (ok)
     {
         ok &= Expect(mapUnit.record_count == 5, "Map0001 top-level record count must be 5");
@@ -145,6 +192,8 @@ int main(int argc, char** argv)
         ok &= Expect(mapUnit.map_lower_layer_tiles == 300, "Map0001 lower layer must contain 300 tiles");
         ok &= Expect(mapUnit.map_upper_layer_tiles == 300, "Map0001 upper layer must contain 300 tiles");
         ok &= Expect(mapUnit.map_event_count == 1, "Map0001 must contain one event");
+        ok &= Expect(mapUnit.map_event_page_count == 2, "Map0001 event must contain two pages");
+        ok &= Expect(mapUnit.map_event_command_count == 121, "Map0001 event pages must declare 121 commands total");
         ok &= Expect(mapUnit.map_save_count == 196, "Map0001 save count must be 196");
     }
 
@@ -160,7 +209,11 @@ int main(int argc, char** argv)
               << " map=" << mapUnit.map_width << "x" << mapUnit.map_height
               << " chipset=" << mapUnit.map_chipset_id
               << " events=" << mapUnit.map_event_count
+              << " pages=" << mapUnit.map_event_page_count
+              << " commands=" << mapUnit.map_event_command_count
               << " saveCount=" << mapUnit.map_save_count
+              << " lowerHash=0x" << std::hex << HashWords(lowerLayer)
+              << " upperHash=0x" << HashWords(upperLayer) << std::dec
               << "\n";
     return EXIT_SUCCESS;
 }

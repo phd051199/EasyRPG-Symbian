@@ -2,6 +2,7 @@
 
 #include "easyrpgsymbian/Framebuffer.h"
 #include "easyrpgsymbian/XyzImage.h"
+#include "easyrpgsymbian/ZipVfs.h"
 
 namespace
 {
@@ -33,17 +34,16 @@ void AppendPathComponentL(TFileName& aPath, const TDesC& aComponent)
 }
 }
 
-CXyzImage* CXyzImage::LoadL(RFs& aFs, const TDesC& aPath)
+CXyzImage* CXyzImage::LoadL(const TDesC8& aBytes)
 {
     CXyzImage* self = new (ELeave) CXyzImage;
     CleanupStack::PushL(self);
-    self->ConstructL(aFs, aPath);
+    self->ConstructL(aBytes);
     CleanupStack::Pop(self);
     return self;
 }
 
-CXyzImage* CXyzImage::LoadNamedL(RFs& aFs,
-                                 const TDesC& aGameRoot,
+CXyzImage* CXyzImage::LoadNamedL(CZipVfs& aResources,
                                  const TDesC& aSubdirectory,
                                  const TDesC& aBaseName)
 {
@@ -51,9 +51,6 @@ CXyzImage* CXyzImage::LoadNamedL(RFs& aFs,
         User::Leave(KErrArgument);
 
     TFileName path;
-    path.Copy(aGameRoot.Left(path.MaxLength()));
-    if (path.Length() != aGameRoot.Length())
-        User::Leave(KErrOverflow);
     AppendPathComponentL(path, aSubdirectory);
 
     TFileName fileName;
@@ -63,36 +60,9 @@ CXyzImage* CXyzImage::LoadNamedL(RFs& aFs,
     fileName.Append(_L(".xyz"));
     AppendPathComponentL(path, fileName);
 
-    return CXyzImage::LoadL(aFs, path);
-}
-
-CXyzImage* CXyzImage::LoadFirstL(RFs& aFs,
-                                 const TDesC& aGameRoot,
-                                 const TDesC& aSubdirectory)
-{
-    TFileName wildcard;
-    wildcard.Copy(aGameRoot.Left(wildcard.MaxLength()));
-    if (wildcard.Length() != aGameRoot.Length())
-        User::Leave(KErrOverflow);
-
-    AppendPathComponentL(wildcard, aSubdirectory);
-    AppendPathComponentL(wildcard, _L("*.xyz"));
-
-    CDir* entries = NULL;
-    User::LeaveIfError(aFs.GetDir(wildcard, KEntryAttNormal, ESortByName, entries));
-    CleanupStack::PushL(entries);
-    if (entries->Count() <= 0)
-        User::Leave(KErrNotFound);
-
-    TFileName path;
-    path.Copy(aGameRoot.Left(path.MaxLength()));
-    if (path.Length() != aGameRoot.Length())
-        User::Leave(KErrOverflow);
-    AppendPathComponentL(path, aSubdirectory);
-    AppendPathComponentL(path, (*entries)[0].iName);
-
-    CXyzImage* image = CXyzImage::LoadL(aFs, path);
-    CleanupStack::PopAndDestroy(entries);
+    HBufC8* bytes = aResources.ReadFileLC(path, KMaxCompressedBytes + KHeaderBytes);
+    CXyzImage* image = CXyzImage::LoadL(*bytes);
+    CleanupStack::PopAndDestroy(bytes);
     return image;
 }
 
@@ -102,19 +72,13 @@ CXyzImage::CXyzImage()
 {
 }
 
-void CXyzImage::ConstructL(RFs& aFs, const TDesC& aPath)
+void CXyzImage::ConstructL(const TDesC8& aBytes)
 {
-    RFile file;
-    User::LeaveIfError(file.Open(aFs, aPath, EFileRead | EFileShareReadersOnly));
-    CleanupClosePushL(file);
-
-    TInt fileSize = 0;
-    User::LeaveIfError(file.Size(fileSize));
+    const TInt fileSize = aBytes.Length();
     if (fileSize <= KHeaderBytes || fileSize > KMaxCompressedBytes + KHeaderBytes)
         User::Leave(KErrTooBig);
 
-    TBuf8<KHeaderBytes> header;
-    User::LeaveIfError(file.Read(header, KHeaderBytes));
+    const TPtrC8 header = aBytes.Left(KHeaderBytes);
     if (header.Length() != KHeaderBytes || header.Left(KXyzMagic().Length()).Compare(KXyzMagic) != 0)
         User::Leave(KErrCorrupt);
 
@@ -131,11 +95,7 @@ void CXyzImage::ConstructL(RFs& aFs, const TDesC& aPath)
     const TInt decodedSize = KPaletteBytes + pixelCount;
     const TInt compressedSize = fileSize - KHeaderBytes;
 
-    HBufC8* compressed = HBufC8::NewLC(compressedSize);
-    TPtr8 compressedBytes = compressed->Des();
-    User::LeaveIfError(file.Read(compressedBytes, compressedSize));
-    if (compressedBytes.Length() != compressedSize)
-        User::Leave(KErrEof);
+    const TPtrC8 compressedBytes = aBytes.Mid(KHeaderBytes, compressedSize);
 
     iDecoded = HBufC8::NewL(decodedSize);
     TPtr8 decodedBytes = iDecoded->Des();
@@ -145,8 +105,6 @@ void CXyzImage::ConstructL(RFs& aFs, const TDesC& aPath)
 
     iSize = TSize(width, height);
 
-    CleanupStack::PopAndDestroy(compressed);
-    CleanupStack::PopAndDestroy(&file);
 }
 
 CXyzImage::~CXyzImage()

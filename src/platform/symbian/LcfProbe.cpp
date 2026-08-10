@@ -1,28 +1,10 @@
 #include "easyrpgsymbian/CoreLcf.h"
 #include "easyrpgsymbian/LcfProbe.h"
+#include "easyrpgsymbian/ZipVfs.h"
 
 namespace
 {
 const TInt KMaxProbeFileSize = 4 * 1024 * 1024;
-
-TInt BuildPath(const TDesC& aRoot, const TDesC& aName, TFileName& aPath)
-{
-    if (aRoot.Length() + aName.Length() + 1 > aPath.MaxLength())
-        return KErrOverflow;
-
-    aPath.Copy(aRoot);
-    if (aPath.Length() > 0)
-    {
-        const TChar last = aPath[aPath.Length() - 1];
-        if (last != '\\' && last != '/')
-            aPath.Append(_L("\\"));
-    }
-
-    if (aPath.Length() + aName.Length() > aPath.MaxLength())
-        return KErrOverflow;
-    aPath.Append(aName);
-    return KErrNone;
-}
 
 void CopyCoreName(const unsigned char* aSource,
                   TUint32 aSourceLength,
@@ -39,7 +21,7 @@ void CopyCoreName(const unsigned char* aSource,
 }
 }
 
-TInt TLcfProbe::ProbeProject(const TDesC& aGameRoot,
+TInt TLcfProbe::ProbeProject(CZipVfs& aResources,
                              TDes& aGameTitle,
                              TLcfProjectSummary& aSummary)
 {
@@ -60,41 +42,32 @@ TInt TLcfProbe::ProbeProject(const TDesC& aGameRoot,
     aSummary.iMapLowerLayerTiles = 0;
     aSummary.iMapUpperLayerTiles = 0;
     aSummary.iMapEventCount = 0;
+    aSummary.iMapEventPageCount = 0;
+    aSummary.iMapEventCommandCount = 0;
     aSummary.iMapSaveCount = 0;
     aSummary.iTitleNameSjis.Zero();
     aSummary.iSystemNameSjis.Zero();
     aSummary.iChipsetNameSjis.Zero();
 
-    if (aGameRoot.Length() == 0)
-        return KErrNotFound;
-
-    RFs fs;
-    TInt error = fs.Connect();
-    if (error != KErrNone)
-        return error;
-
     // Resolve the active map first so the following LDB pass can select the
     // exact chipset resource referenced by that map without keeping the full
     // database resident in memory.
-    error = InspectFile(fs,
-                        aGameRoot,
-                        _L("RPG_RT.lmt"),
-                        EASYRPG_LCF_MAP_TREE,
-                        aSummary);
+    TInt error = InspectFile(aResources,
+                             _L("RPG_RT.lmt"),
+                             EASYRPG_LCF_MAP_TREE,
+                             aSummary);
     if (error == KErrNone)
     {
         TFileName startMapName;
         startMapName.Format(_L("Map%04u.lmu"), aSummary.iStartMapId);
-        error = InspectFile(fs,
-                            aGameRoot,
+        error = InspectFile(aResources,
                             startMapName,
                             EASYRPG_LCF_MAP_UNIT,
                             aSummary);
     }
     if (error == KErrNone)
     {
-        error = InspectFile(fs,
-                            aGameRoot,
+        error = InspectFile(aResources,
                             _L("RPG_RT.ldb"),
                             EASYRPG_LCF_DATABASE,
                             aSummary);
@@ -102,65 +75,26 @@ TInt TLcfProbe::ProbeProject(const TDesC& aGameRoot,
 
     if (error == KErrNone)
     {
-        const TInt titleError = ReadGameTitle(fs, aGameRoot, aGameTitle);
+        const TInt titleError = ReadGameTitle(aResources, aGameTitle);
         if (titleError != KErrNone)
             aGameTitle.Copy(_L("RPG Maker 2000 project"));
     }
 
-    fs.Close();
     return error;
 }
 
-TInt TLcfProbe::InspectFile(RFs& aFs,
-                            const TDesC& aGameRoot,
+TInt TLcfProbe::InspectFile(CZipVfs& aResources,
                             const TDesC& aFileName,
                             TInt aFileType,
                             TLcfProjectSummary& aSummary)
 {
-    TFileName path;
-    TInt error = BuildPath(aGameRoot, aFileName, path);
-    if (error != KErrNone)
-        return error;
-
-    RFile file;
-    error = file.Open(aFs, path, EFileRead | EFileShareReadersOnly);
-    if (error != KErrNone)
-        return error;
-
-    TInt fileSize = 0;
-    error = file.Size(fileSize);
-    if (error != KErrNone)
-    {
-        file.Close();
-        return error;
-    }
-    if (fileSize <= 0 || fileSize > KMaxProbeFileSize)
-    {
-        file.Close();
-        return KErrTooBig;
-    }
-
     HBufC8* buffer = NULL;
-    TRAP(error, buffer = HBufC8::NewL(fileSize));
+    TRAPD(error, buffer = aResources.ReadFileLC(aFileName, KMaxProbeFileSize);
+                 CleanupStack::Pop(buffer));
     if (error != KErrNone || !buffer)
-    {
-        file.Close();
         return error != KErrNone ? error : KErrNoMemory;
-    }
 
-    TPtr8 bytes = buffer->Des();
-    error = file.Read(bytes, fileSize);
-    file.Close();
-    if (error != KErrNone)
-    {
-        delete buffer;
-        return error;
-    }
-    if (bytes.Length() != fileSize)
-    {
-        delete buffer;
-        return KErrEof;
-    }
+    const TPtrC8 bytes(*buffer);
 
     EasyRpgCoreLcfSummary coreSummary;
     const unsigned char* rawBytes =
@@ -246,6 +180,8 @@ TInt TLcfProbe::InspectFile(RFs& aFs,
         aSummary.iMapLowerLayerTiles = coreSummary.map_lower_layer_tiles;
         aSummary.iMapUpperLayerTiles = coreSummary.map_upper_layer_tiles;
         aSummary.iMapEventCount = coreSummary.map_event_count;
+        aSummary.iMapEventPageCount = coreSummary.map_event_page_count;
+        aSummary.iMapEventCommandCount = coreSummary.map_event_command_count;
         aSummary.iMapSaveCount = coreSummary.map_save_count;
         break;
 
@@ -256,28 +192,24 @@ TInt TLcfProbe::InspectFile(RFs& aFs,
     return KErrNone;
 }
 
-TInt TLcfProbe::ReadGameTitle(RFs& aFs, const TDesC& aGameRoot, TDes& aGameTitle)
+TInt TLcfProbe::ReadGameTitle(CZipVfs& aResources, TDes& aGameTitle)
 {
-    TFileName path;
-    TInt error = BuildPath(aGameRoot, _L("RPG_RT.ini"), path);
-    if (error != KErrNone)
-        return error;
+    HBufC8* fileData = NULL;
+    TRAPD(error, fileData = aResources.ReadFileLC(_L("RPG_RT.ini"), 64 * 1024);
+                 CleanupStack::Pop(fileData));
+    if (error != KErrNone || !fileData)
+        return error != KErrNone ? error : KErrNoMemory;
 
-    RFile file;
-    error = file.Open(aFs, path, EFileRead | EFileShareReadersOnly);
-    if (error != KErrNone)
-        return error;
-
-    TBuf8<512> bytes;
-    error = file.Read(bytes);
-    file.Close();
-    if (error != KErrNone)
-        return error;
+    const TPtrC8 allBytes(*fileData);
+    const TPtrC8 bytes = allBytes.Left(allBytes.Length() > 512 ? 512 : allBytes.Length());
 
     _LIT8(KGameTitleKey, "GameTitle=");
     const TInt keyPosition = bytes.Find(KGameTitleKey);
     if (keyPosition == KErrNotFound)
+    {
+        delete fileData;
         return KErrNotFound;
+    }
 
     TInt position = keyPosition + KGameTitleKey().Length();
     aGameTitle.Zero();
@@ -289,5 +221,7 @@ TInt TLcfProbe::ReadGameTitle(RFs& aFs, const TDesC& aGameRoot, TDes& aGameTitle
         aGameTitle.Append(static_cast<TUint16>(value));
     }
 
-    return aGameTitle.Length() > 0 ? KErrNone : KErrNotFound;
+    const TInt result = aGameTitle.Length() > 0 ? KErrNone : KErrNotFound;
+    delete fileData;
+    return result;
 }

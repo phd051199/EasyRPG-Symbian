@@ -2,9 +2,9 @@
 #define EASYRPG_SYMBIAN_PLAYER_RUNTIME_H
 
 #include <e32base.h>
-#include <f32file.h>
 
 class CFrameBuffer;
+class CZipVfs;
 
 class CPlayerRuntime : public CBase
 {
@@ -21,8 +21,8 @@ public:
         EKeyDebug = 0x00000080
     };
 
-    static CPlayerRuntime* NewL(RFs& aFs,
-                                const TDesC& aGameRoot,
+    static CPlayerRuntime* NewL(CZipVfs* aResources,
+                                const TDesC& aGameSource,
                                 CFrameBuffer& aFrameBuffer);
     ~CPlayerRuntime();
 
@@ -36,12 +36,12 @@ public:
     TUint32 PressedKeys() const;
 
 private:
-    CPlayerRuntime(RFs& aFs, CFrameBuffer& aFrameBuffer);
-    void ConstructL(const TDesC& aGameRoot);
+    CPlayerRuntime(CZipVfs* aResources, CFrameBuffer& aFrameBuffer);
+    void ConstructL(const TDesC& aGameSource);
     void RenderDiagnosticL(TUint32 aLogicFrame);
 
 private:
-    RFs& iFs;
+    CZipVfs* iResources; // borrowed; owned by CGameView and outlives runtime
     CFrameBuffer& iFrameBuffer;
     TFileName iGameRoot;
     TBuf<96> iStatusText;

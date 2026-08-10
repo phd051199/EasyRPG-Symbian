@@ -7,6 +7,7 @@
 #include "easyrpgsymbian/GameLocator.h"
 #include "easyrpgsymbian/GameView.h"
 #include "easyrpgsymbian/PlayerRuntime.h"
+#include "easyrpgsymbian/ZipVfs.h"
 
 namespace
 {
@@ -25,6 +26,7 @@ CGameView* CGameView::NewL(const TRect& aRect)
 
 CGameView::CGameView()
     : iFrameBuffer(NULL),
+      iResources(NULL),
       iRuntime(NULL),
       iFrameTimer(NULL),
       iForeground(ETrue)
@@ -40,10 +42,17 @@ void CGameView::ConstructL(const TRect& aRect)
     User::LeaveIfError(iFs.Connect());
     iFrameBuffer = CFrameBuffer::NewL(TSize(KGameWidth, KGameHeight));
 
-    if (TGameLocator::FindNobihazaRoot(iFs, iGameRoot) != KErrNone)
+    if (TGameLocator::FindNobihazaArchive(iFs, iGameRoot) == KErrNone)
+    {
+        _LIT8(KNobihazaArchivePassword, "nbhzvn");
+        iResources = CZipVfs::OpenL(iFs, iGameRoot, KNobihazaArchivePassword);
+    }
+    else
+    {
         iGameRoot.Zero();
+    }
 
-    iRuntime = CPlayerRuntime::NewL(iFs, iGameRoot, *iFrameBuffer);
+    iRuntime = CPlayerRuntime::NewL(iResources, iGameRoot, *iFrameBuffer);
     iFrameTimer = CFrameTimer::NewL(*this);
 
     ActivateL();
@@ -60,6 +69,9 @@ CGameView::~CGameView()
 
     delete iRuntime;
     iRuntime = NULL;
+
+    delete iResources;
+    iResources = NULL;
 
     delete iFrameBuffer;
     iFrameBuffer = NULL;
@@ -240,7 +252,7 @@ void CGameView::DrawOverlay(CWindowGc& aGc) const
     }
     else
     {
-        _LIT(KCopyHint, "Copy game to E:\\EasyRPG\\Games\\NobihazaVH\\");
+        _LIT(KCopyHint, "Copy Nobihaza VH.zip to C:\\Data\\EasyRPG\\Games\\");
         aGc.SetPenColor(TRgb(220, 175, 105));
         aGc.DrawText(KCopyHint, TPoint(origin.iX + 8, baseline + font->HeightInPixels() + 2));
     }

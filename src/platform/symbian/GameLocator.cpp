@@ -1,31 +1,5 @@
 #include "easyrpgsymbian/GameLocator.h"
 
-namespace
-{
-void NormalizeRoot(TFileName& aPath)
-{
-    if (aPath.Length() == 0)
-        return;
-
-    const TChar last = aPath[aPath.Length() - 1];
-    if (last != '\\' && last != '/')
-        aPath.Append(_L("\\"));
-}
-
-TBool BuildChildPath(const TDesC& aRoot, const TDesC& aName, TFileName& aOut)
-{
-    if (aRoot.Length() + aName.Length() + 1 > aOut.MaxLength())
-        return EFalse;
-
-    aOut.Copy(aRoot);
-    NormalizeRoot(aOut);
-    if (aOut.Length() + aName.Length() > aOut.MaxLength())
-        return EFalse;
-    aOut.Append(aName);
-    return ETrue;
-}
-}
-
 TBool TGameLocator::FileExists(RFs& aFs, const TDesC& aPath)
 {
     TEntry entry;
@@ -33,52 +7,62 @@ TBool TGameLocator::FileExists(RFs& aFs, const TDesC& aPath)
     return error == KErrNone && !entry.IsDir();
 }
 
-TBool TGameLocator::IsRpg2kProject(RFs& aFs, const TDesC& aRoot)
+TInt TGameLocator::FindNobihazaArchive(RFs& aFs, TFileName& aArchivePath)
 {
-    TFileName databasePath;
-    TFileName treePath;
+    aArchivePath.Zero();
 
-    if (!BuildChildPath(aRoot, _L("RPG_RT.ldb"), databasePath))
-        return EFalse;
-    if (!BuildChildPath(aRoot, _L("RPG_RT.lmt"), treePath))
-        return EFalse;
+    // Prefer the E72 internal user-data drive. No extraction/renaming step is
+    // required; CZipVfs reads archive metadata directly so Japanese resource
+    // names are preserved. Memory-card paths remain optional fallbacks.
+    _LIT(KPhoneCanonical, "C:\\Data\\EasyRPG\\Games\\NobihazaVH.zip");
+    _LIT(KPhoneDisplayName, "C:\\Data\\EasyRPG\\Games\\Nobihaza VH.zip");
+    _LIT(KPhoneDataCanonical, "C:\\Data\\NobihazaVH.zip");
+    _LIT(KPhoneDataDisplayName, "C:\\Data\\Nobihaza VH.zip");
+    _LIT(KMemoryCardCanonical, "E:\\EasyRPG\\Games\\NobihazaVH.zip");
+    _LIT(KMemoryCardDisplayName, "E:\\EasyRPG\\Games\\Nobihaza VH.zip");
+    _LIT(KMemoryCardRootCanonical, "E:\\NobihazaVH.zip");
+    _LIT(KMemoryCardRootDisplayName, "E:\\Nobihaza VH.zip");
 
-    return FileExists(aFs, databasePath) && FileExists(aFs, treePath);
-}
-
-TBool TGameLocator::TestRoot(RFs& aFs, const TDesC& aCandidate, TFileName& aRoot)
-{
-    if (!IsRpg2kProject(aFs, aCandidate))
-        return EFalse;
-
-    aRoot.Copy(aCandidate);
-    NormalizeRoot(aRoot);
-    return ETrue;
-}
-
-TInt TGameLocator::FindNobihazaRoot(RFs& aFs, TFileName& aRoot)
-{
-    aRoot.Zero();
-
-    // Prefer the memory card. The first port intentionally consumes an
-    // already-extracted RPG Maker project instead of decoding AES ZIP data on
-    // the E72. tools/prepare_nobihaza.py stages to this canonical directory.
-    _LIT(KMemoryCardCanonical, "E:\\EasyRPG\\Games\\NobihazaVH\\");
-    _LIT(KMemoryCardDisplayName, "E:\\EasyRPG\\Games\\Nobihaza VH\\");
-    _LIT(KMemoryCardRoot, "E:\\Nobihaza VH\\");
-    _LIT(KPhoneCanonical, "C:\\Data\\EasyRPG\\Games\\NobihazaVH\\");
-    _LIT(KPhoneDisplayName, "C:\\Data\\EasyRPG\\Games\\Nobihaza VH\\");
-
-    if (TestRoot(aFs, KMemoryCardCanonical, aRoot))
+    if (FileExists(aFs, KPhoneCanonical))
+    {
+        aArchivePath.Copy(KPhoneCanonical);
         return KErrNone;
-    if (TestRoot(aFs, KMemoryCardDisplayName, aRoot))
+    }
+    if (FileExists(aFs, KPhoneDisplayName))
+    {
+        aArchivePath.Copy(KPhoneDisplayName);
         return KErrNone;
-    if (TestRoot(aFs, KMemoryCardRoot, aRoot))
+    }
+    if (FileExists(aFs, KPhoneDataCanonical))
+    {
+        aArchivePath.Copy(KPhoneDataCanonical);
         return KErrNone;
-    if (TestRoot(aFs, KPhoneCanonical, aRoot))
+    }
+    if (FileExists(aFs, KPhoneDataDisplayName))
+    {
+        aArchivePath.Copy(KPhoneDataDisplayName);
         return KErrNone;
-    if (TestRoot(aFs, KPhoneDisplayName, aRoot))
+    }
+    if (FileExists(aFs, KMemoryCardCanonical))
+    {
+        aArchivePath.Copy(KMemoryCardCanonical);
         return KErrNone;
+    }
+    if (FileExists(aFs, KMemoryCardDisplayName))
+    {
+        aArchivePath.Copy(KMemoryCardDisplayName);
+        return KErrNone;
+    }
+    if (FileExists(aFs, KMemoryCardRootCanonical))
+    {
+        aArchivePath.Copy(KMemoryCardRootCanonical);
+        return KErrNone;
+    }
+    if (FileExists(aFs, KMemoryCardRootDisplayName))
+    {
+        aArchivePath.Copy(KMemoryCardRootDisplayName);
+        return KErrNone;
+    }
 
     return KErrNotFound;
 }

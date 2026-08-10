@@ -2,21 +2,17 @@
 #define EASYRPG_SYMBIAN_XYZ_IMAGE_H
 
 #include <e32base.h>
-#include <f32file.h>
 
 class CFrameBuffer;
+class CZipVfs;
 
 class CXyzImage : public CBase
 {
 public:
-    static CXyzImage* LoadL(RFs& aFs, const TDesC& aPath);
-    static CXyzImage* LoadNamedL(RFs& aFs,
-                                 const TDesC& aGameRoot,
+    static CXyzImage* LoadL(const TDesC8& aBytes);
+    static CXyzImage* LoadNamedL(CZipVfs& aResources,
                                  const TDesC& aSubdirectory,
                                  const TDesC& aBaseName);
-    static CXyzImage* LoadFirstL(RFs& aFs,
-                                 const TDesC& aGameRoot,
-                                 const TDesC& aSubdirectory);
     ~CXyzImage();
 
     const TSize& Size() const;
@@ -24,7 +20,7 @@ public:
 
 private:
     CXyzImage();
-    void ConstructL(RFs& aFs, const TDesC& aPath);
+    void ConstructL(const TDesC8& aBytes);
 
 private:
     enum

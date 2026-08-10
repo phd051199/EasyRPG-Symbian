@@ -42,6 +42,8 @@ typedef struct EasyRpgCoreLcfSummary
     unsigned int map_lower_layer_tiles;
     unsigned int map_upper_layer_tiles;
     unsigned int map_event_count;
+    unsigned int map_event_page_count;
+    unsigned int map_event_command_count;
     unsigned int map_save_count;
 
     /* RPG_RT.ldb System strings. Raw RPG Maker 2000 bytes (CP932/SJIS). */
@@ -62,6 +64,33 @@ int EasyRpgCoreFindChipsetName(const unsigned char* aData,
                                unsigned char* aName,
                                unsigned int aNameCapacity,
                                unsigned int* aNameLength);
+
+int EasyRpgCoreExtractMapLayers(const unsigned char* aData,
+                                unsigned int aSize,
+                                unsigned short* aLowerLayer,
+                                unsigned short* aUpperLayer,
+                                unsigned int aTileCapacity,
+                                unsigned int* aWidth,
+                                unsigned int* aHeight,
+                                unsigned int* aTileCount);
+
+typedef struct EasyRpgCoreChipsetData
+{
+    unsigned int chipset_id;
+    unsigned int name_length;
+    unsigned char name[EASYRPG_LCF_RESOURCE_NAME_CAPACITY];
+    unsigned int terrain_count;
+    unsigned short terrain[162];
+    unsigned int lower_passability_count;
+    unsigned char lower_passability[162];
+    unsigned int upper_passability_count;
+    unsigned char upper_passability[144];
+} EasyRpgCoreChipsetData;
+
+int EasyRpgCoreExtractChipset(const unsigned char* aData,
+                              unsigned int aSize,
+                              unsigned int aChipsetId,
+                              EasyRpgCoreChipsetData* aChipset);
 
 #ifdef __cplusplus
 }
