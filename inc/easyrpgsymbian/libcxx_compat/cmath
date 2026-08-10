@@ -1,0 +1,48 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_CMATH
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_CMATH
+
+extern "C" {
+double sin(double);
+double cos(double);
+double tan(double);
+double asin(double);
+double acos(double);
+double atan(double);
+double atan2(double, double);
+double sqrt(double);
+double pow(double, double);
+double floor(double);
+double ceil(double);
+double fmod(double, double);
+double fabs(double);
+float sinf(float);
+float cosf(float);
+float sqrtf(float);
+float floorf(float);
+float ceilf(float);
+}
+
+#include <__config>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+using ::sin;
+using ::cos;
+using ::tan;
+using ::asin;
+using ::acos;
+using ::atan;
+using ::atan2;
+using ::sqrt;
+using ::pow;
+using ::floor;
+using ::ceil;
+using ::fmod;
+using ::fabs;
+using ::sinf;
+using ::cosf;
+using ::sqrtf;
+using ::floorf;
+using ::ceilf;
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

@@ -26,6 +26,9 @@ GENERATED_CP932="$GENERATED_DIR/CoreCp932Table.cpp"
 GENERATED_READER_STRUCT="$GENERATED_DIR/reader_struct.cpp"
 LIBLCF_ROOT="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
 LIBLCF_GENERATED_ROOT="$LIBLCF_ROOT/generated"
+LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/easyrpgsymbian/libcxx_compat"
+PLAYER_ROOT="$PROJECT_DIR/third_party/easyrpg-player-0.5.0/src"
+PIXMAN_ROOT="$PROJECT_DIR/third_party/pixman-0.34.0/pixman"
 SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
     "$PROJECT_DIR/src/core/CoreZipCrypto.cpp"
@@ -44,6 +47,15 @@ SOURCES=(
     "$PROJECT_DIR/src/core/LiblcfXmlReaderSymbian.cpp"
     "$PROJECT_DIR/src/core/UpstreamLmuBridge.cpp"
     "$PROJECT_DIR/src/core/UpstreamLcfLinkAnchor.cpp"
+    "$PLAYER_ROOT/color.cpp"
+    "$PLAYER_ROOT/rect.cpp"
+    "$PLAYER_ROOT/tone.cpp"
+    "$PLAYER_ROOT/bitmap.cpp"
+    "$PLAYER_ROOT/effects.cpp"
+    "$PLAYER_ROOT/tilemap_layer.cpp"
+    "$PLAYER_ROOT/tilemap.cpp"
+    "$PLAYER_ROOT/sprite.cpp"
+    "$PLAYER_ROOT/graphics.cpp"
     "$GENERATED_CP932"
 )
 
@@ -113,6 +125,11 @@ for source in "${SOURCES[@]}"; do
     # only as frontend/optimizer/code generator. The final object is produced
     # by the original S60 CSL assembler so its ELF/EABI format is linkable by
     # the SDK's arm-none-symbianelf-ld and elf2e32.
+    source_define=
+    if [[ $source == "$PLAYER_ROOT/"* ]]; then
+        source_define=-D_3DS
+    fi
+
     "$CLANGXX" \
         --target=arm-none-eabi \
         -march=armv5t \
@@ -133,9 +150,13 @@ for source in "${SOURCES[@]}"; do
         -fdata-sections \
         -ffunction-sections \
         -D_LIBCPP_HAS_NO_THREADS \
+        $source_define \
         -nostdinc++ \
+        -I "$LIBCXX_COMPAT_INCLUDE" \
         -I "$PROJECT_DIR/third_party/libcxx-4.0.1/include" \
         -I "$PROJECT_DIR/inc/easyrpgsymbian/libc_compat" \
+        -I "$PLAYER_ROOT" \
+        -I "$PIXMAN_ROOT" \
         -I "$LIBLCF_ROOT" \
         -I "$LIBLCF_GENERATED_ROOT" \
         -I "$PROJECT_DIR/inc" \

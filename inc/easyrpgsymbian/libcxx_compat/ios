@@ -1,0 +1,22 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_IOS
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_IOS
+
+#include <__config>
+#include <iosfwd>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+class ios_base {
+public:
+    typedef unsigned int openmode;
+    static const openmode in = 1u << 0;
+    static const openmode out = 1u << 1;
+    static const openmode ate = 1u << 2;
+    static const openmode app = 1u << 3;
+    static const openmode trunc = 1u << 4;
+    static const openmode binary = 1u << 5;
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

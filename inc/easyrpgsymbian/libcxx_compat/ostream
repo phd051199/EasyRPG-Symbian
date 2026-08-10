@@ -1,0 +1,6 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_OSTREAM
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_OSTREAM
+
+#include <iosfwd>
+
+#endif

@@ -1,0 +1,81 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_SSTREAM
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_SSTREAM
+
+#include <__config>
+#include <iosfwd>
+#include <string>
+#include <stdio.h>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+class __easyrpg_string_stream_base {
+public:
+    const string& str_ref() const { return value_; }
+    string str_value() const { return value_; }
+    void append(const string& value) { value_ += value; }
+    void append(const char* value) { if (value) value_ += value; }
+    void append(char value) { value_ += value; }
+    void append_signed(long long value) {
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%lld", value);
+        value_ += buffer;
+    }
+    void append_unsigned(unsigned long long value) {
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%llu", value);
+        value_ += buffer;
+    }
+    void append_double(double value) {
+        char buffer[48];
+        snprintf(buffer, sizeof(buffer), "%g", value);
+        value_ += buffer;
+    }
+protected:
+    string value_;
+};
+
+template <>
+class basic_ostringstream<char, char_traits<char>, allocator<char> > : public __easyrpg_string_stream_base {
+public:
+    basic_ostringstream() {}
+    string str() const { return str_value(); }
+    basic_ostringstream& operator<<(const string& value) { append(value); return *this; }
+    basic_ostringstream& operator<<(const char* value) { append(value); return *this; }
+    basic_ostringstream& operator<<(char value) { append(value); return *this; }
+    basic_ostringstream& operator<<(bool value) { append(value ? "1" : "0"); return *this; }
+    basic_ostringstream& operator<<(short value) { append_signed(value); return *this; }
+    basic_ostringstream& operator<<(unsigned short value) { append_unsigned(value); return *this; }
+    basic_ostringstream& operator<<(int value) { append_signed(value); return *this; }
+    basic_ostringstream& operator<<(unsigned int value) { append_unsigned(value); return *this; }
+    basic_ostringstream& operator<<(long value) { append_signed(value); return *this; }
+    basic_ostringstream& operator<<(unsigned long value) { append_unsigned(value); return *this; }
+    basic_ostringstream& operator<<(long long value) { append_signed(value); return *this; }
+    basic_ostringstream& operator<<(unsigned long long value) { append_unsigned(value); return *this; }
+    basic_ostringstream& operator<<(float value) { append_double(value); return *this; }
+    basic_ostringstream& operator<<(double value) { append_double(value); return *this; }
+};
+
+template <>
+class basic_stringstream<char, char_traits<char>, allocator<char> > : public __easyrpg_string_stream_base {
+public:
+    basic_stringstream() {}
+    string str() const { return str_value(); }
+    basic_stringstream& operator<<(const string& value) { append(value); return *this; }
+    basic_stringstream& operator<<(const char* value) { append(value); return *this; }
+    basic_stringstream& operator<<(char value) { append(value); return *this; }
+    basic_stringstream& operator<<(bool value) { append(value ? "1" : "0"); return *this; }
+    basic_stringstream& operator<<(short value) { append_signed(value); return *this; }
+    basic_stringstream& operator<<(unsigned short value) { append_unsigned(value); return *this; }
+    basic_stringstream& operator<<(int value) { append_signed(value); return *this; }
+    basic_stringstream& operator<<(unsigned int value) { append_unsigned(value); return *this; }
+    basic_stringstream& operator<<(long value) { append_signed(value); return *this; }
+    basic_stringstream& operator<<(unsigned long value) { append_unsigned(value); return *this; }
+    basic_stringstream& operator<<(long long value) { append_signed(value); return *this; }
+    basic_stringstream& operator<<(unsigned long long value) { append_unsigned(value); return *this; }
+    basic_stringstream& operator<<(float value) { append_double(value); return *this; }
+    basic_stringstream& operator<<(double value) { append_double(value); return *this; }
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

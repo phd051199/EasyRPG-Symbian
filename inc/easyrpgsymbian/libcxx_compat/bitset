@@ -1,0 +1,64 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_BITSET
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_BITSET
+
+#include <__config>
+#include <cstddef>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template <size_t N>
+class bitset {
+    static const size_t kWordBits = sizeof(unsigned long) * 8;
+    static const size_t kWordCount = (N + kWordBits - 1) / kWordBits;
+public:
+    class reference {
+    public:
+        reference(unsigned long* word, unsigned long mask) : word_(word), mask_(mask) {}
+        reference& operator=(bool value) {
+            if (value) *word_ |= mask_;
+            else *word_ &= ~mask_;
+            return *this;
+        }
+        reference& operator=(const reference& value) { return operator=(static_cast<bool>(value)); }
+        operator bool() const { return (*word_ & mask_) != 0; }
+    private:
+        unsigned long* word_;
+        unsigned long mask_;
+    };
+
+    bitset() { reset(); }
+
+    bitset& reset() {
+        for (size_t i = 0; i < kWordCount; ++i) words_[i] = 0;
+        return *this;
+    }
+
+    bitset& set(size_t pos, bool value = true) {
+        (*this)[pos] = value;
+        return *this;
+    }
+
+    reference operator[](size_t pos) {
+        return reference(&words_[pos / kWordBits], static_cast<unsigned long>(1) << (pos % kWordBits));
+    }
+
+    bool operator[](size_t pos) const {
+        return (words_[pos / kWordBits] & (static_cast<unsigned long>(1) << (pos % kWordBits))) != 0;
+    }
+
+    bool any() const {
+        for (size_t i = 0; i < kWordCount; ++i) {
+            if (words_[i] != 0) return true;
+        }
+        return false;
+    }
+
+    bool none() const { return !any(); }
+
+private:
+    unsigned long words_[kWordCount == 0 ? 1 : kWordCount];
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

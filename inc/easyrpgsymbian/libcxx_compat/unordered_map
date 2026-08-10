@@ -1,0 +1,35 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_UNORDERED_MAP
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_UNORDERED_MAP
+
+#include <__config>
+#include <functional>
+#include <map>
+#include <memory>
+#include <utility>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template <class Key,
+          class T,
+          class Hash = hash<Key>,
+          class Pred = equal_to<Key>,
+          class Alloc = allocator<pair<const Key, T> > >
+class unordered_map : public map<Key, T, less<Key>, Alloc> {
+    typedef map<Key, T, less<Key>, Alloc> base_type;
+public:
+    typedef typename base_type::iterator iterator;
+    typedef typename base_type::const_iterator const_iterator;
+    typedef typename base_type::value_type value_type;
+    typedef typename base_type::size_type size_type;
+
+    unordered_map() : base_type() {}
+
+    template <class InputIt>
+    unordered_map(InputIt first, InputIt last) : base_type(first, last) {}
+
+    void reserve(size_type) {}
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif
