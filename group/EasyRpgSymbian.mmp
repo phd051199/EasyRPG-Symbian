@@ -1,0 +1,62 @@
+TARGET            EasyRpgSymbian_0xE31EA5A1.exe
+TARGETTYPE        exe
+UID               0x100039CE 0xE31EA5A1
+
+EPOCHEAPSIZE      0x100000 0x2800000
+EPOCSTACKSIZE     0x10000
+OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
+
+SOURCEPATH        ..\src\platform\symbian
+SOURCE            SymbianMain.cpp
+SOURCE            SymbianApplication.cpp
+SOURCE            SymbianDocument.cpp
+SOURCE            SymbianAppUi.cpp
+SOURCE            FrameTimer.cpp
+SOURCE            Framebuffer.cpp
+SOURCE            GameLocator.cpp
+SOURCE            LcfProbe.cpp
+SOURCE            Encoding.cpp
+SOURCE            XyzImage.cpp
+SOURCE            PlayerRuntime.cpp
+SOURCE            GameView.cpp
+
+SOURCEPATH        ..\platform\symbian\resources
+
+START RESOURCE    Resources.rss
+HEADER
+TARGET            EasyRpgSymbian_0xE31EA5A1
+TARGETPATH        resource\apps
+END
+
+START RESOURCE    Registration.rss
+TARGET            EasyRpgSymbian_0xE31EA5A1_reg
+TARGETPATH        \private\10003a3f\apps
+END
+
+USERINCLUDE       ..\inc
+USERINCLUDE       ..\platform\symbian\resources
+SYSTEMINCLUDE     \epoc32\include
+
+LIBRARY           euser.lib
+LIBRARY           apparc.lib
+LIBRARY           cone.lib
+LIBRARY           ws32.lib
+LIBRARY           gdi.lib
+LIBRARY           fbscli.lib
+LIBRARY           bitgdi.lib
+LIBRARY           eikcore.lib
+LIBRARY           avkon.lib
+LIBRARY           efsrv.lib
+LIBRARY           charconv.lib
+LIBRARY           ezlib.lib
+STATICLIBRARY     EasyRpgModernCore.lib
+
+LANG              SC
+
+VENDORID          0
+SECUREID          0xE31EA5A1
+CAPABILITY        None
+
+#ifdef ENABLE_ABIV2_MODE
+DEBUGGABLE_UDEBONLY
+#endif

@@ -1,0 +1,12 @@
+&EN
+
+#{"EasyRPG Player"},(0xE31EA5A1),0,1,0
+
+%{"EasyRPG Symbian Port"}
+:"EasyRPG Symbian Port"
+
+[0x101F7961], 0, 0, 0, {"Series60ProductID"}
+
+"stage\EasyRpgSymbian_0xE31EA5A1.exe" - "!:\sys\bin\EasyRpgSymbian_0xE31EA5A1.exe"
+"stage\EasyRpgSymbian_0xE31EA5A1.rsc" - "!:\resource\apps\EasyRpgSymbian_0xE31EA5A1.rsc"
+"stage\EasyRpgSymbian_0xE31EA5A1_reg.rsc" - "!:\private\10003a3f\import\apps\EasyRpgSymbian_0xE31EA5A1_reg.rsc"

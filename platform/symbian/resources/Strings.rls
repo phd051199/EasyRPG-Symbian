@@ -1,0 +1,3 @@
+#define qtn_caption_string "EasyRPG Player"
+#define qtn_exit "Exit"
+#define qtn_loc_resource_file_1 "\\resource\\apps\\EasyRpgSymbian_0xE31EA5A1"
