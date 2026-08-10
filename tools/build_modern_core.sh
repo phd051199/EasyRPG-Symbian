@@ -85,6 +85,14 @@ SOURCES=(
     "$PLAYER_ROOT/tilemap.cpp"
     "$PLAYER_ROOT/sprite.cpp"
     "$PLAYER_ROOT/graphics.cpp"
+    "$PLAYER_ROOT/game_character.cpp"
+    "$PLAYER_ROOT/game_event.cpp"
+    "$PLAYER_ROOT/game_player.cpp"
+    "$PLAYER_ROOT/game_commonevent.cpp"
+    "$PLAYER_ROOT/game_vehicle.cpp"
+    "$PLAYER_ROOT/game_interpreter.cpp"
+    "$PLAYER_ROOT/game_interpreter_map.cpp"
+    "$PLAYER_ROOT/game_map.cpp"
     "$GENERATED_CP932"
 )
 

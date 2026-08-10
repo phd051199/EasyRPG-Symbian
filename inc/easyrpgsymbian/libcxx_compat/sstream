@@ -51,6 +51,7 @@ class basic_ostringstream<char, char_traits<char>, allocator<char> > : public __
 public:
     basic_ostringstream() {}
     string str() const { return str_value(); }
+    void str(const string& value) { value_ = value; width_ = 0; }
     basic_ostringstream& operator<<(const string& value) { append(value); return *this; }
     basic_ostringstream& operator<<(const char* value) { append(value); return *this; }
     basic_ostringstream& operator<<(char value) { append(value); return *this; }
@@ -72,6 +73,7 @@ class basic_stringstream<char, char_traits<char>, allocator<char> > : public __e
 public:
     basic_stringstream() {}
     string str() const { return str_value(); }
+    void str(const string& value) { value_ = value; width_ = 0; }
     basic_stringstream& operator<<(const string& value) { append(value); return *this; }
     basic_stringstream& operator<<(const char* value) { append(value); return *this; }
     basic_stringstream& operator<<(char value) { append(value); return *this; }

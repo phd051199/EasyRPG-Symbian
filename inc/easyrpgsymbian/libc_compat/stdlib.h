@@ -3,6 +3,10 @@
 
 #include <stddef.h>
 
+#ifndef RAND_MAX
+#define RAND_MAX 0x7fffffff
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -1,0 +1,53 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_IOMANIP
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_IOMANIP
+
+#include <__config>
+#include <sstream>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+struct __easyrpg_setw {
+    int width;
+};
+
+struct __easyrpg_setfill {
+    char fill;
+};
+
+inline __easyrpg_setw setw(int width) {
+    __easyrpg_setw value = { width };
+    return value;
+}
+
+inline __easyrpg_setfill setfill(char fill) {
+    __easyrpg_setfill value = { fill };
+    return value;
+}
+
+inline basic_ostringstream<char, char_traits<char>, allocator<char> >&
+operator<<(basic_ostringstream<char, char_traits<char>, allocator<char> >& stream, __easyrpg_setw value) {
+    stream.set_width(value.width);
+    return stream;
+}
+
+inline basic_ostringstream<char, char_traits<char>, allocator<char> >&
+operator<<(basic_ostringstream<char, char_traits<char>, allocator<char> >& stream, __easyrpg_setfill value) {
+    stream.set_fill(value.fill);
+    return stream;
+}
+
+inline basic_stringstream<char, char_traits<char>, allocator<char> >&
+operator<<(basic_stringstream<char, char_traits<char>, allocator<char> >& stream, __easyrpg_setw value) {
+    stream.set_width(value.width);
+    return stream;
+}
+
+inline basic_stringstream<char, char_traits<char>, allocator<char> >&
+operator<<(basic_stringstream<char, char_traits<char>, allocator<char> >& stream, __easyrpg_setfill value) {
+    stream.set_fill(value.fill);
+    return stream;
+}
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif
