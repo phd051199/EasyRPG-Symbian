@@ -19,6 +19,7 @@ SOURCE            GameLocator.cpp
 SOURCE            ZipVfs.cpp
 SOURCE            LcfProbe.cpp
 SOURCE            Encoding.cpp
+SOURCE            SymbianDirent.cpp
 SOURCE            PlayerRuntime.cpp
 SOURCE            GameView.cpp
 

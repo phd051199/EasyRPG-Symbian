@@ -1,0 +1,26 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_ARRAY
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_ARRAY
+
+#include <__config>
+#include <cstddef>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template<class T, size_t N>
+struct array {
+    typedef T value_type;
+    typedef T* iterator;
+    typedef const T* const_iterator;
+    T elems[N ? N : 1];
+    T& operator[](size_t i) { return elems[i]; }
+    const T& operator[](size_t i) const { return elems[i]; }
+    iterator begin() { return elems; }
+    const_iterator begin() const { return elems; }
+    iterator end() { return elems + N; }
+    const_iterator end() const { return elems + N; }
+    size_t size() const { return N; }
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

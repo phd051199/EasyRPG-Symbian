@@ -165,6 +165,57 @@ void TEncoding::Utf8ToUnicodeL(const TDesC8& aSource,
     NormalizeJapaneseNfcInPlace(aDestination);
 }
 
+void TEncoding::UnicodeToUtf8L(const TDesC& aSource,
+                               TDes8& aDestination)
+{
+    aDestination.Zero();
+    TInt position = 0;
+    while (position < aSource.Length())
+    {
+        TUint32 codePoint = aSource[position++];
+        if (codePoint >= 0xd800u && codePoint <= 0xdbffu)
+        {
+            if (position >= aSource.Length())
+                User::Leave(KErrCorrupt);
+            const TUint32 low = aSource[position++];
+            if (low < 0xdc00u || low > 0xdfffu)
+                User::Leave(KErrCorrupt);
+            codePoint = 0x10000u + ((codePoint - 0xd800u) << 10) + (low - 0xdc00u);
+        }
+        else if (codePoint >= 0xdc00u && codePoint <= 0xdfffu)
+        {
+            User::Leave(KErrCorrupt);
+        }
+
+        TInt bytes = codePoint < 0x80u ? 1 : codePoint < 0x800u ? 2 : codePoint < 0x10000u ? 3 : 4;
+        if (aDestination.MaxLength() - aDestination.Length() < bytes)
+            User::Leave(KErrOverflow);
+
+        if (bytes == 1)
+        {
+            aDestination.Append(static_cast<TUint8>(codePoint));
+        }
+        else if (bytes == 2)
+        {
+            aDestination.Append(static_cast<TUint8>(0xc0u | (codePoint >> 6)));
+            aDestination.Append(static_cast<TUint8>(0x80u | (codePoint & 0x3fu)));
+        }
+        else if (bytes == 3)
+        {
+            aDestination.Append(static_cast<TUint8>(0xe0u | (codePoint >> 12)));
+            aDestination.Append(static_cast<TUint8>(0x80u | ((codePoint >> 6) & 0x3fu)));
+            aDestination.Append(static_cast<TUint8>(0x80u | (codePoint & 0x3fu)));
+        }
+        else
+        {
+            aDestination.Append(static_cast<TUint8>(0xf0u | (codePoint >> 18)));
+            aDestination.Append(static_cast<TUint8>(0x80u | ((codePoint >> 12) & 0x3fu)));
+            aDestination.Append(static_cast<TUint8>(0x80u | ((codePoint >> 6) & 0x3fu)));
+            aDestination.Append(static_cast<TUint8>(0x80u | (codePoint & 0x3fu)));
+        }
+    }
+}
+
 void TEncoding::NormalizeJapaneseNfcInPlace(TDes& aText)
 {
     TInt writePosition = 0;

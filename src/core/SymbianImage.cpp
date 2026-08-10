@@ -43,12 +43,6 @@ bool ReadWholeFile(FILE* stream, unsigned char*& data, unsigned& length) {
 }
 }
 
-namespace FileFinder {
-FILE* fopenUTF8(const std::string& name_utf8, char const* mode) {
-    return fopen(name_utf8.c_str(), mode);
-}
-}
-
 namespace ImageXYZ {
 bool ReadXYZ(const uint8_t* data, unsigned len, bool transparent, int& width, int& height, void*& pixels) {
     pixels = 0;

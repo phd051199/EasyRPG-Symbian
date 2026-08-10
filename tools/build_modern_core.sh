@@ -93,6 +93,17 @@ SOURCES=(
     "$PLAYER_ROOT/game_interpreter.cpp"
     "$PLAYER_ROOT/game_interpreter_map.cpp"
     "$PLAYER_ROOT/game_map.cpp"
+    "$PLAYER_ROOT/main_data.cpp"
+    "$PLAYER_ROOT/game_switches.cpp"
+    "$PLAYER_ROOT/game_variables.cpp"
+    "$PLAYER_ROOT/game_temp.cpp"
+    "$PLAYER_ROOT/game_targets.cpp"
+    "$PLAYER_ROOT/game_message.cpp"
+    "$PLAYER_ROOT/audio.cpp"
+    "$PLAYER_ROOT/game_actors.cpp"
+    "$PLAYER_ROOT/game_party_base.cpp"
+    "$PLAYER_ROOT/input.cpp"
+    "$PLAYER_ROOT/filefinder.cpp"
     "$GENERATED_CP932"
 )
 
@@ -163,7 +174,11 @@ for source in "${SOURCES[@]}"; do
     # by the original S60 CSL assembler so its ELF/EABI format is linkable by
     # the SDK's arm-none-symbianelf-ld and elf2e32.
     source_define=
-    if [[ $source == "$PLAYER_ROOT/"* || $source == "$PROJECT_DIR/src/core/Symbian"*.cpp ]]; then
+    if [[ $source == "$PLAYER_ROOT/main_data.cpp" ]]; then
+        source_define='-DUSE_SDL -DNO_SDL_MIXER'
+    elif [[ $source == "$PLAYER_ROOT/filefinder.cpp" ]]; then
+        source_define='-D_3DS -Dfopen=EasyRpgFopen'
+    elif [[ $source == "$PLAYER_ROOT/"* || $source == "$PROJECT_DIR/src/core/Symbian"*.cpp ]]; then
         source_define=-D_3DS
     fi
     language_flag=-xc++

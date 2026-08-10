@@ -1,0 +1,6 @@
+#ifndef EASYRPG_SYMBIAN_LIBC_COMPAT_SYS_TYPES_H
+#define EASYRPG_SYMBIAN_LIBC_COMPAT_SYS_TYPES_H
+
+#include <stddef.h>
+
+#endif

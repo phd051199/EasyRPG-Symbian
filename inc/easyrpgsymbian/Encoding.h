@@ -10,6 +10,8 @@ public:
                                    TDes& aDestination);
     static void Utf8ToUnicodeL(const TDesC8& aSource,
                                TDes& aDestination);
+    static void UnicodeToUtf8L(const TDesC& aSource,
+                               TDes8& aDestination);
     static void NormalizeJapaneseNfcInPlace(TDes& aText);
 };
 

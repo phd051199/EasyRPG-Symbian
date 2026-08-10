@@ -1,0 +1,44 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_FSTREAM
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_FSTREAM
+
+#include <__config>
+#include <ios>
+#include <cstdio>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template<class CharT, class Traits>
+class basic_fstream {
+public:
+    basic_fstream() : file_(0) {}
+    basic_fstream(const char* path, ios_base::openmode mode) : file_(0) { open(path, mode); }
+    ~basic_fstream() { close(); }
+    void open(const char* path, ios_base::openmode mode) {
+        close();
+        const bool rd = (mode & ios_base::in) != 0;
+        const bool wr = (mode & ios_base::out) != 0;
+        const bool append = (mode & ios_base::app) != 0;
+        const bool truncate = (mode & ios_base::trunc) != 0;
+        const bool binary = (mode & ios_base::binary) != 0;
+        const char* base = rd && wr ? (truncate ? "w+" : "r+") : wr ? (append ? "a" : "w") : "r";
+        char mode_buf[4];
+        mode_buf[0] = base[0];
+        int i = 1;
+        if (base[1]) mode_buf[i++] = base[1];
+        if (binary) mode_buf[i++] = 'b';
+        mode_buf[i] = 0;
+        file_ = fopen(path, mode_buf);
+        if (file_ && (mode & ios_base::ate)) fseek(file_, 0, SEEK_END);
+    }
+    void close() { if (file_) { fclose(file_); file_ = 0; } }
+    operator bool() const { return file_ != 0; }
+    FILE* native_handle() const { return file_; }
+private:
+    basic_fstream(const basic_fstream&);
+    basic_fstream& operator=(const basic_fstream&);
+    FILE* file_;
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif
