@@ -1,68 +1,85 @@
 #include "easyrpgsymbian/GameLocator.h"
 
-TBool TGameLocator::FileExists(RFs& aFs, const TDesC& aPath)
+namespace
 {
-    TEntry entry;
-    const TInt error = aFs.Entry(aPath, entry);
-    return error == KErrNone && !entry.IsDir();
+_LIT(KEasyRpgGamesMemoryCard, "E:\\EasyRPG\\Games\\");
+_LIT(KEasyRpgGamesPhone, "C:\\EasyRPG\\Games\\");
+_LIT(KZipPattern, "*.zip");
+_LIT(KZipExtension, ".zip");
 }
 
-TInt TGameLocator::FindNobihazaArchive(RFs& aFs, TFileName& aArchivePath)
+void TGameLocator::ListGameArchivesL(RFs& aFs,
+                                     CDesCArrayFlat& aDisplayNames,
+                                     CDesCArrayFlat& aArchivePaths)
 {
-    aArchivePath.Zero();
+    aDisplayNames.Reset();
+    aArchivePaths.Reset();
 
-    // Prefer the E72 internal user-data drive. No extraction/renaming step is
-    // required; CZipVfs reads archive metadata directly so Japanese resource
-    // names are preserved. Memory-card paths remain optional fallbacks.
-    _LIT(KPhoneCanonical, "C:\\Data\\EasyRPG\\Games\\NobihazaVH.zip");
-    _LIT(KPhoneDisplayName, "C:\\Data\\EasyRPG\\Games\\Nobihaza VH.zip");
-    _LIT(KPhoneDataCanonical, "C:\\Data\\NobihazaVH.zip");
-    _LIT(KPhoneDataDisplayName, "C:\\Data\\Nobihaza VH.zip");
-    _LIT(KMemoryCardCanonical, "E:\\EasyRPG\\Games\\NobihazaVH.zip");
-    _LIT(KMemoryCardDisplayName, "E:\\EasyRPG\\Games\\Nobihaza VH.zip");
-    _LIT(KMemoryCardRootCanonical, "E:\\NobihazaVH.zip");
-    _LIT(KMemoryCardRootDisplayName, "E:\\Nobihaza VH.zip");
+    // Keep the user-visible order stable and aligned with the documented
+    // locations: memory card first, then phone storage.
+    AppendGameArchivesL(aFs,
+                        KEasyRpgGamesMemoryCard,
+                        aDisplayNames,
+                        aArchivePaths);
+    AppendGameArchivesL(aFs,
+                        KEasyRpgGamesPhone,
+                        aDisplayNames,
+                        aArchivePaths);
+}
 
-    if (FileExists(aFs, KPhoneCanonical))
+void TGameLocator::AppendGameArchivesL(RFs& aFs,
+                                       const TDesC& aDirectory,
+                                       CDesCArrayFlat& aDisplayNames,
+                                       CDesCArrayFlat& aArchivePaths)
+{
+    TFileName pattern;
+    if (aDirectory.Length() + KZipPattern().Length() > pattern.MaxLength())
+        User::Leave(KErrOverflow);
+
+    pattern.Copy(aDirectory);
+    pattern.Append(KZipPattern);
+
+    CDir* directory = NULL;
+    const TInt error = aFs.GetDir(pattern,
+                                  KEntryAttNormal,
+                                  ESortByName,
+                                  directory);
+    if (error == KErrNotFound || error == KErrPathNotFound ||
+        error == KErrNotReady)
+        return;
+    User::LeaveIfError(error);
+    CleanupStack::PushL(directory);
+
+    for (TInt index = 0; index < directory->Count(); ++index)
     {
-        aArchivePath.Copy(KPhoneCanonical);
-        return KErrNone;
-    }
-    if (FileExists(aFs, KPhoneDisplayName))
-    {
-        aArchivePath.Copy(KPhoneDisplayName);
-        return KErrNone;
-    }
-    if (FileExists(aFs, KPhoneDataCanonical))
-    {
-        aArchivePath.Copy(KPhoneDataCanonical);
-        return KErrNone;
-    }
-    if (FileExists(aFs, KPhoneDataDisplayName))
-    {
-        aArchivePath.Copy(KPhoneDataDisplayName);
-        return KErrNone;
-    }
-    if (FileExists(aFs, KMemoryCardCanonical))
-    {
-        aArchivePath.Copy(KMemoryCardCanonical);
-        return KErrNone;
-    }
-    if (FileExists(aFs, KMemoryCardDisplayName))
-    {
-        aArchivePath.Copy(KMemoryCardDisplayName);
-        return KErrNone;
-    }
-    if (FileExists(aFs, KMemoryCardRootCanonical))
-    {
-        aArchivePath.Copy(KMemoryCardRootCanonical);
-        return KErrNone;
-    }
-    if (FileExists(aFs, KMemoryCardRootDisplayName))
-    {
-        aArchivePath.Copy(KMemoryCardRootDisplayName);
-        return KErrNone;
+        const TEntry& entry = (*directory)[index];
+        if (entry.IsDir())
+            continue;
+
+        TFileName archivePath;
+        if (aDirectory.Length() + entry.iName.Length() > archivePath.MaxLength())
+            continue;
+        archivePath.Copy(aDirectory);
+        archivePath.Append(entry.iName);
+
+        TFileName title;
+        title.Copy(entry.iName.Left(title.MaxLength()));
+        if (title.Length() >= KZipExtension().Length() &&
+            title.Right(KZipExtension().Length()).CompareF(KZipExtension) == 0)
+        {
+            title.SetLength(title.Length() - KZipExtension().Length());
+        }
+
+        // A drive suffix disambiguates archives with the same filename on C:
+        // and E: without exposing the full filesystem path in the LCDUI list.
+        TBuf<KMaxFileName> displayName;
+        if (title.Length() > displayName.MaxLength() - 6)
+            title.SetLength(displayName.MaxLength() - 6);
+        displayName.Format(_L("%S [%c:]"), &title, aDirectory[0]);
+
+        aDisplayNames.AppendL(displayName);
+        aArchivePaths.AppendL(archivePath);
     }
 
-    return KErrNotFound;
+    CleanupStack::PopAndDestroy(directory);
 }

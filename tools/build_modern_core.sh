@@ -27,6 +27,10 @@ SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
     "$PROJECT_DIR/src/core/CoreLcf.cpp"
     "$PROJECT_DIR/src/core/CoreZipCrypto.cpp"
+    "$PROJECT_DIR/third_party/liblcf-0.5.0/src/reader_lcf.cpp"
+    "$PROJECT_DIR/third_party/libcxx-4.0.1/src/string.cpp"
+    "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp"
+    "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp"
     "$GENERATED_CP932"
 )
 
@@ -102,6 +106,7 @@ for source in "${SOURCES[@]}"; do
         -fno-exceptions \
         -fno-rtti \
         -fno-threadsafe-statics \
+        -fno-c++-static-destructors \
         -fno-stack-protector \
         -fno-unwind-tables \
         -fno-asynchronous-unwind-tables \
@@ -109,6 +114,11 @@ for source in "${SOURCES[@]}"; do
         -fvisibility=hidden \
         -fdata-sections \
         -ffunction-sections \
+        -D_LIBCPP_HAS_NO_THREADS \
+        -nostdinc++ \
+        -I "$PROJECT_DIR/third_party/libcxx-4.0.1/include" \
+        -I "$PROJECT_DIR/inc/easyrpgsymbian/libc_compat" \
+        -I "$PROJECT_DIR/third_party/liblcf-0.5.0/src" \
         -I "$PROJECT_DIR/inc" \
         -S "$source" \
         -o "$assembly_raw"
@@ -141,7 +151,7 @@ WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreInspectLcf EasyRpgCoreFindChipsetName EasyRpgCoreExtractMapLayers EasyRpgCoreExtractChipset EasyRpgCoreCp932ToUtf16 EasyRpgCoreWinZipAesDecrypt; do
+for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreInspectLcf EasyRpgCoreFindChipsetName EasyRpgCoreExtractMapLayers EasyRpgCoreExtractChipset EasyRpgCoreCp932ToUtf16 EasyRpgCoreWinZipAesDecrypt _ZN10ReaderUtil6Recode _ZN9LcfReaderC1; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "Modern core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2
@@ -153,5 +163,5 @@ cp -f "$LIBRARY" "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"
 
 printf 'Modern C++11 -> CSL EABI4 core: %s (%s bytes, %s objects)\n' \
     "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
-printf 'Verified symbols: EasyRpgModernCoreProbe, EasyRpgCoreInspectLcf, EasyRpgCoreFindChipsetName, EasyRpgCoreExtractMapLayers, EasyRpgCoreExtractChipset, EasyRpgCoreCp932ToUtf16, EasyRpgCoreWinZipAesDecrypt\n'
+printf 'Verified symbols: legacy core API + upstream LcfReader + Symbian ReaderUtil::Recode adapter\n'
 printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"

@@ -47,9 +47,14 @@ LIBRARY           gdi.lib
 LIBRARY           fbscli.lib
 LIBRARY           bitgdi.lib
 LIBRARY           eikcore.lib
+LIBRARY           eikcoctl.lib
+LIBRARY           eikctl.lib
 LIBRARY           avkon.lib
+LIBRARY           bafl.lib
+LIBRARY           aknnotify.lib
 LIBRARY           efsrv.lib
 LIBRARY           ezlib.lib
+LIBRARY           libc.lib
 STATICLIBRARY     EasyRpgModernCore.lib
 
 LANG              SC

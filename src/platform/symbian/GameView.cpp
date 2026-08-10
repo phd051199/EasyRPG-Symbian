@@ -1,5 +1,9 @@
+#include <aknlists.h>
+#include <aknnotewrappers.h>
 #include <coemain.h>
 #include <e32keys.h>
+#include <eikclbd.h>
+#include <eikscrlb.h>
 #include <gdi.h>
 #include <w32std.h>
 
@@ -13,6 +17,22 @@ namespace
 {
 const TInt KGameWidth = 320;
 const TInt KGameHeight = 240;
+_LIT(KSingleListItemFormat, "\t%S");
+_LIT(KNoGamesFound, "No games found");
+_LIT8(KTargetArchivePassword, "nbhzvn");
+
+void CopyListText(const TDesC& aSource, TDes& aTarget)
+{
+    aTarget.Copy(aSource.Left(aTarget.MaxLength()));
+    for (TInt index = 0; index < aTarget.Length(); ++index)
+    {
+        if (aTarget[index] == '\t' || aTarget[index] == '\r' ||
+            aTarget[index] == '\n')
+        {
+            aTarget[index] = ' ';
+        }
+    }
+}
 }
 
 CGameView* CGameView::NewL(const TRect& aRect)
@@ -25,7 +45,10 @@ CGameView* CGameView::NewL(const TRect& aRect)
 }
 
 CGameView::CGameView()
-    : iFrameBuffer(NULL),
+    : iListBox(NULL),
+      iListItems(NULL),
+      iArchivePaths(NULL),
+      iFrameBuffer(NULL),
       iResources(NULL),
       iRuntime(NULL),
       iFrameTimer(NULL),
@@ -36,27 +59,28 @@ CGameView::CGameView()
 void CGameView::ConstructL(const TRect& aRect)
 {
     CreateWindowL();
+    User::LeaveIfError(iFs.Connect());
+
+    iListBox = new (ELeave) CAknSingleStyleListBox;
+    iListBox->SetContainerWindowL(*this);
+    iListBox->ConstructL(this, EAknListBoxSelectionList);
+    iListBox->SetListBoxObserver(this);
+    iListBox->CreateScrollBarFrameL(ETrue);
+    iListBox->ScrollBarFrame()->SetScrollBarVisibilityL(
+        CEikScrollBarFrame::EOff, CEikScrollBarFrame::EAuto);
+
+    iListItems = new (ELeave) CDesCArrayFlat(16);
+    iArchivePaths = new (ELeave) CDesCArrayFlat(16);
+    iListBox->Model()->SetItemTextArray(iListItems);
+    iListBox->Model()->SetOwnershipType(ELbmDoesNotOwnItemArray);
+
+    BuildGameListL();
+
     SetRect(aRect);
     SetFocus(ETrue);
-
-    User::LeaveIfError(iFs.Connect());
-    iFrameBuffer = CFrameBuffer::NewL(TSize(KGameWidth, KGameHeight));
-
-    if (TGameLocator::FindNobihazaArchive(iFs, iGameRoot) == KErrNone)
-    {
-        _LIT8(KNobihazaArchivePassword, "nbhzvn");
-        iResources = CZipVfs::OpenL(iFs, iGameRoot, KNobihazaArchivePassword);
-    }
-    else
-    {
-        iGameRoot.Zero();
-    }
-
-    iRuntime = CPlayerRuntime::NewL(iResources, iGameRoot, *iFrameBuffer);
-    iFrameTimer = CFrameTimer::NewL(*this);
-
     ActivateL();
-    iFrameTimer->Start();
+    iListBox->ActivateL();
+    iListBox->SetFocus(ETrue);
 }
 
 CGameView::~CGameView()
@@ -76,7 +100,107 @@ CGameView::~CGameView()
     delete iFrameBuffer;
     iFrameBuffer = NULL;
 
+    delete iListBox;
+    iListBox = NULL;
+
+    delete iListItems;
+    iListItems = NULL;
+
+    delete iArchivePaths;
+    iArchivePaths = NULL;
+
     iFs.Close();
+}
+
+void CGameView::BuildGameListL()
+{
+    iListItems->Reset();
+    iArchivePaths->Reset();
+
+    CDesCArrayFlat* displayNames = new (ELeave) CDesCArrayFlat(16);
+    CleanupStack::PushL(displayNames);
+    TGameLocator::ListGameArchivesL(iFs, *displayNames, *iArchivePaths);
+
+    for (TInt index = 0; index < displayNames->Count(); ++index)
+    {
+        TBuf<KMaxFileName> title;
+        CopyListText((*displayNames)[index], title);
+
+        TBuf<KMaxFileName + 8> item;
+        item.Format(KSingleListItemFormat, &title);
+        iListItems->AppendL(item);
+    }
+
+    if (iListItems->Count() == 0)
+    {
+        TBuf<64> item;
+        item.Format(KSingleListItemFormat, &KNoGamesFound);
+        iListItems->AppendL(item);
+    }
+
+    CleanupStack::PopAndDestroy(displayNames);
+
+    iListBox->HandleItemAdditionL();
+    iListBox->SetCurrentItemIndex(0);
+}
+
+void CGameView::StartSelectedGameL()
+{
+    if (iRuntime || !iListBox || !iArchivePaths)
+        return;
+
+    const TInt index = iListBox->CurrentItemIndex();
+    if (index < 0 || index >= iArchivePaths->Count())
+        return;
+
+    TFileName selectedArchive;
+    selectedArchive.Copy((*iArchivePaths)[index]);
+
+    // Nothing game-specific is allocated or mounted before this point. The
+    // list screen is deliberately filesystem-enumeration only.
+    CFrameBuffer* frameBuffer = CFrameBuffer::NewL(TSize(KGameWidth, KGameHeight));
+    CleanupStack::PushL(frameBuffer);
+
+    // The first compatibility target uses this AES password. Supplying it is
+    // harmless for ordinary unencrypted ZIP archives.
+    CZipVfs* resources = CZipVfs::OpenL(iFs,
+                                        selectedArchive,
+                                        KTargetArchivePassword);
+    CleanupStack::PushL(resources);
+
+    CPlayerRuntime* runtime = CPlayerRuntime::NewL(resources,
+                                                   selectedArchive,
+                                                   *frameBuffer);
+    CleanupStack::PushL(runtime);
+
+    CFrameTimer* frameTimer = CFrameTimer::NewL(*this);
+    CleanupStack::PushL(frameTimer);
+
+    CleanupStack::Pop(frameTimer);
+    CleanupStack::Pop(runtime);
+    CleanupStack::Pop(resources);
+    CleanupStack::Pop(frameBuffer);
+
+    iFrameBuffer = frameBuffer;
+    iResources = resources;
+    iRuntime = runtime;
+    iFrameTimer = frameTimer;
+    iGameRoot.Copy(selectedArchive);
+
+    iListBox->SetFocus(EFalse);
+    iListBox->MakeVisible(EFalse);
+
+    if (iForeground)
+        iFrameTimer->Start();
+    DrawNow();
+}
+
+void CGameView::ShowLoadErrorL(TInt aError)
+{
+    TBuf<64> message;
+    message.Format(_L("Cannot load game (%d)"), aError);
+    CAknErrorNote* note = new (ELeave) CAknErrorNote;
+    note->ExecuteLD(message);
 }
 
 void CGameView::SetForeground(TBool aForeground)
@@ -84,7 +208,15 @@ void CGameView::SetForeground(TBool aForeground)
     iForeground = aForeground;
 
     if (!iRuntime || !iFrameTimer)
+    {
+        if (aForeground && iListBox)
+        {
+            SetFocus(ETrue);
+            iListBox->SetFocus(ETrue);
+            iListBox->DrawNow();
+        }
         return;
+    }
 
     if (!aForeground)
     {
@@ -100,6 +232,10 @@ void CGameView::SetForeground(TBool aForeground)
 
 void CGameView::Draw(const TRect& /*aRect*/) const
 {
+    // In launcher mode the child Avkon list box owns the entire client area.
+    if (!iRuntime)
+        return;
+
     CWindowGc& gc = SystemGc();
     gc.SetPenStyle(CGraphicsContext::ENullPen);
     gc.SetBrushStyle(CGraphicsContext::ESolidBrush);
@@ -114,6 +250,9 @@ void CGameView::Draw(const TRect& /*aRect*/) const
 
 void CGameView::SizeChanged()
 {
+    if (iListBox)
+        iListBox->SetRect(Rect());
+
     // The internal RPG Maker surface intentionally remains 320x240. The E72
     // is a native 320x240 target; other emulator screen sizes are centered.
 }
@@ -121,14 +260,38 @@ void CGameView::SizeChanged()
 void CGameView::FocusChanged(TDrawNow aDrawNow)
 {
     CCoeControl::FocusChanged(aDrawNow);
-    if (!IsFocused() && iRuntime)
-        iRuntime->ReleaseAllKeys();
+
+    if (iRuntime)
+    {
+        if (!IsFocused())
+            iRuntime->ReleaseAllKeys();
+    }
+    else if (iListBox)
+    {
+        iListBox->SetFocus(IsFocused());
+    }
+}
+
+TInt CGameView::CountComponentControls() const
+{
+    return iListBox != NULL ? 1 : 0;
+}
+
+CCoeControl* CGameView::ComponentControl(TInt aIndex) const
+{
+    return aIndex == 0 ? iListBox : NULL;
 }
 
 TKeyResponse CGameView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType)
 {
     if (!iRuntime)
-        return EKeyWasNotConsumed;
+    {
+        if (aType != EEventKey)
+            return EKeyWasNotConsumed;
+        return iListBox != NULL
+            ? iListBox->OfferKeyEventL(aKeyEvent, aType)
+            : EKeyWasNotConsumed;
+    }
 
     const TUint32 playerKey = MapPlayerKey(aKeyEvent);
     if (playerKey == 0)
@@ -147,6 +310,23 @@ TKeyResponse CGameView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aT
     }
 
     return EKeyWasNotConsumed;
+}
+
+void CGameView::HandleListBoxEventL(CEikListBox*, TListBoxEvent aEventType)
+{
+    if (iRuntime)
+        return;
+
+    if (aEventType == EEventEnterKeyPressed ||
+        aEventType == EEventItemClicked)
+    {
+        TRAPD(error, StartSelectedGameL());
+        if (error != KErrNone)
+        {
+            iGameRoot.Zero();
+            ShowLoadErrorL(error);
+        }
+    }
 }
 
 void CGameView::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
@@ -242,20 +422,15 @@ void CGameView::DrawOverlay(CWindowGc& aGc) const
     const TInt baseline = origin.iY + font->HeightInPixels() + 12;
     aGc.DrawText(iRuntime->StatusText(), TPoint(origin.iX + 8, baseline));
 
-    if (iRuntime->GameRoot().Length() > 0)
-    {
-        aGc.SetPenColor(TRgb(190, 205, 220));
-        if (iRuntime->GameTitle().Length() > 0)
-            aGc.DrawText(iRuntime->GameTitle(), TPoint(origin.iX + 8, baseline + font->HeightInPixels() + 2));
-        else
-            aGc.DrawText(iRuntime->GameRoot(), TPoint(origin.iX + 8, baseline + font->HeightInPixels() + 2));
-    }
+    aGc.SetPenColor(TRgb(190, 205, 220));
+    if (iRuntime->GameTitle().Length() > 0)
+        aGc.DrawText(iRuntime->GameTitle(),
+                     TPoint(origin.iX + 8,
+                            baseline + font->HeightInPixels() + 2));
     else
-    {
-        _LIT(KCopyHint, "Copy Nobihaza VH.zip to C:\\Data\\EasyRPG\\Games\\");
-        aGc.SetPenColor(TRgb(220, 175, 105));
-        aGc.DrawText(KCopyHint, TPoint(origin.iX + 8, baseline + font->HeightInPixels() + 2));
-    }
+        aGc.DrawText(iRuntime->GameRoot(),
+                     TPoint(origin.iX + 8,
+                            baseline + font->HeightInPixels() + 2));
 
     aGc.DiscardFont();
 }

@@ -12,6 +12,14 @@ struct __sFILE;
 typedef struct __sFILE FILE;
 typedef long long fpos_t;
 
+FILE* __stdin(void);
+FILE* __stdout(void);
+FILE* __stderr(void);
+
+#define stdin (__stdin())
+#define stdout (__stdout())
+#define stderr (__stderr())
+
 #ifndef EOF
 #define EOF (-1)
 #endif

@@ -11,10 +11,19 @@ ASSEMBLER="$CSL_BIN/arm-none-symbianelf-as.exe"
 NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
 BUILD_DIR="$PROJECT_DIR/build/upstream-armv5-probe"
 WIN_BUILD_DIR="C:\\work\\EasyRPGSymbian\\build\\upstream-armv5-probe"
-SOURCE="$PROJECT_DIR/third_party/liblcf-0.5.0/src/reader_lcf.cpp"
-LIBLCF_INCLUDE="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
-LIBCXX_INCLUDE="$PROJECT_DIR/third_party/libcxx-4.0.1/include"
+LIBLCF_ROOT="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
+LIBCXX_ROOT="$PROJECT_DIR/third_party/libcxx-4.0.1"
+LIBLCF_INCLUDE="$LIBLCF_ROOT"
+LIBLCF_GENERATED_INCLUDE="$LIBLCF_ROOT/generated"
+LIBCXX_INCLUDE="$LIBCXX_ROOT/include"
 LIBC_COMPAT_INCLUDE="$PROJECT_DIR/inc/easyrpgsymbian/libc_compat"
+SOURCES=(
+    "$LIBLCF_ROOT/reader_lcf.cpp"
+    "$LIBLCF_ROOT/lmu_reader.cpp"
+    "$LIBCXX_ROOT/src/string.cpp"
+    "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp"
+    "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp"
+)
 
 find_wine() {
     if [[ -n $WINE_BIN && -x $WINE_BIN ]]; then
@@ -50,10 +59,12 @@ if [[ ! -d $SDK_ROOT/epoc32 ]]; then
     echo "UPSTREAM ARMv5 PROBE: invalid S60 SDK: $SDK_ROOT" >&2
     exit 20
 fi
-if [[ ! -f $SOURCE ]]; then
-    echo "UPSTREAM ARMv5 PROBE: upstream source missing: $SOURCE" >&2
-    exit 20
-fi
+for source in "${SOURCES[@]}"; do
+    if [[ ! -f $source ]]; then
+        echo "UPSTREAM ARMv5 PROBE: upstream source missing: $source" >&2
+        exit 20
+    fi
+done
 
 # reader_lcf.cpp itself only names string/vector directly, but libc++ 4.0.1
 # reaches the following public/internal headers while instantiating those types.
@@ -62,6 +73,7 @@ fi
 required_libcxx_headers=(
     __bit_reference
     algorithm
+    cerrno
     iterator
     limits
     memory
@@ -88,59 +100,78 @@ if (( ${#missing_headers[@]} != 0 )); then
 fi
 
 mkdir -p "$BUILD_DIR"
-assembly_raw="$BUILD_DIR/reader_lcf.clang.s"
-assembly="$BUILD_DIR/reader_lcf.gcce.s"
-object="$BUILD_DIR/reader_lcf.o"
-win_assembly="$WIN_BUILD_DIR\\reader_lcf.gcce.s"
-win_object="$WIN_BUILD_DIR\\reader_lcf.o"
 
 printf 'UPSTREAM ARMv5 PROBE frontend: %s\n' "$CLANGXX"
 "$CLANGXX" --version | head -1
 
-"$CLANGXX" \
-    --target=arm-none-eabi \
-    -march=armv5t \
-    -mfloat-abi=soft \
-    -fshort-wchar \
-    -std=c++11 \
-    -O2 \
-    -ffreestanding \
-    -fno-exceptions \
-    -fno-rtti \
-    -fno-threadsafe-statics \
-    -fno-stack-protector \
-    -fno-unwind-tables \
-    -fno-asynchronous-unwind-tables \
-    -fno-addrsig \
-    -fvisibility=hidden \
-    -fdata-sections \
-    -ffunction-sections \
-    -D_LIBCPP_HAS_NO_THREADS \
-    -nostdinc++ \
-    -I "$LIBCXX_INCLUDE" \
-    -I "$LIBC_COMPAT_INCLUDE" \
-    -I "$LIBLCF_INCLUDE" \
-    -S "$SOURCE" \
-    -o "$assembly_raw"
+compile_object() {
+    local source=$1
+    local stem=$2
+    local assembly_raw="$BUILD_DIR/$stem.clang.s"
+    local assembly="$BUILD_DIR/$stem.gcce.s"
+    local object="$BUILD_DIR/$stem.o"
+    local win_assembly="$WIN_BUILD_DIR\\$stem.gcce.s"
+    local win_object="$WIN_BUILD_DIR\\$stem.o"
 
-# Keep this syntax normalization identical to the modern-core lane. The CSL
-# assembler is the producer of the final EABI4 object; Clang is only the
-# C++11 frontend/optimizer/code generator.
-sed -E \
-    -e '/^[[:space:]]*\.(eabi_attribute|cpu)([[:space:]]|$)/d' \
-    -e 's/^([[:space:]]*)stm([[:space:]])/\1stmia\2/' \
-    -e 's/^([[:space:]]*)ldm([[:space:]])/\1ldmia\2/' \
-    -e 's/^([[:space:]]*)lsl([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsl \6/' \
-    -e 's/^([[:space:]]*)lsr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsr \6/' \
-    -e 's/^([[:space:]]*)asr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, asr \6/' \
-    -e 's/^([[:space:]]*)ror([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, ror \6/' \
-    "$assembly_raw" > "$assembly"
+    printf 'Compiling %s\n' "${source#$PROJECT_DIR/}"
+    "$CLANGXX" \
+        --target=arm-none-eabi \
+        -march=armv5t \
+        -mfloat-abi=soft \
+        -fshort-wchar \
+        -std=c++11 \
+        -O2 \
+        -ffreestanding \
+        -fno-exceptions \
+        -fno-rtti \
+        -fno-threadsafe-statics \
+        -fno-c++-static-destructors \
+        -fno-stack-protector \
+        -fno-unwind-tables \
+        -fno-asynchronous-unwind-tables \
+        -fno-addrsig \
+        -fvisibility=hidden \
+        -fdata-sections \
+        -ffunction-sections \
+        -D_LIBCPP_HAS_NO_THREADS \
+        -nostdinc++ \
+        -I "$LIBCXX_INCLUDE" \
+        -I "$LIBC_COMPAT_INCLUDE" \
+        -I "$LIBLCF_INCLUDE" \
+        -I "$LIBLCF_GENERATED_INCLUDE" \
+        -S "$source" \
+        -o "$assembly_raw"
 
-WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
-    "$WINE_BIN" "$ASSEMBLER" -march=armv5t -o "$win_object" "$win_assembly"
+    # Keep this syntax normalization identical to the modern-core lane. The CSL
+    # assembler is the producer of the final EABI4 object; Clang is only the
+    # C++11 frontend/optimizer/code generator.
+    sed -E \
+        -e '/^[[:space:]]*\.(eabi_attribute|cpu)([[:space:]]|$)/d' \
+        -e 's/^([[:space:]]*)stm([[:space:]])/\1stmia\2/' \
+        -e 's/^([[:space:]]*)ldm([[:space:]])/\1ldmia\2/' \
+        -e 's/^([[:space:]]*)lsl([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsl \6/' \
+        -e 's/^([[:space:]]*)lsr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsr \6/' \
+        -e 's/^([[:space:]]*)asr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, asr \6/' \
+        -e 's/^([[:space:]]*)ror([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, ror \6/' \
+        "$assembly_raw" > "$assembly"
 
-printf 'UPSTREAM ARMv5 PROBE OK: %s (%s bytes)\n' \
-    "$object" "$(stat -f %z "$object" 2>/dev/null || stat -c %s "$object")"
-printf '%s\n' 'Undefined symbols (expected until the libc++/Symbian C runtime link layer is added):'
-WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
-    "$WINE_BIN" "$NM" -u "$win_object" || true
+    WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
+        "$WINE_BIN" "$ASSEMBLER" -march=armv5t -o "$win_object" "$win_assembly"
+
+    printf 'ARMv5 EABI4 object OK: %s (%s bytes)\n' \
+        "$object" "$(stat -f %z "$object" 2>/dev/null || stat -c %s "$object")"
+}
+
+compile_object "$LIBLCF_ROOT/reader_lcf.cpp" reader_lcf
+compile_object "$LIBLCF_ROOT/lmu_reader.cpp" lmu_reader
+compile_object "$LIBCXX_ROOT/src/string.cpp" libcxx_string
+compile_object "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp" libcxx_vector_runtime
+compile_object "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp" liblcf_reader_util_symbian
+
+for stem in reader_lcf lmu_reader libcxx_string libcxx_vector_runtime liblcf_reader_util_symbian; do
+    printf '\nUndefined symbols: %s.o\n' "$stem"
+    WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
+        "$WINE_BIN" "$NM" -u "$WIN_BUILD_DIR\\$stem.o" || true
+done
+
+printf '\nUPSTREAM ARMv5 PROBE OK: upstream reader + required libc++ runtime objects compile and assemble as CSL EABI4.\n'
