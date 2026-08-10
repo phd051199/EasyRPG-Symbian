@@ -45,6 +45,17 @@ const RPG::Chipset* FindChipset(int chipset_id)
     return 0;
 }
 
+const RPG::Actor* FindActor(int actor_id)
+{
+    for (std::vector<RPG::Actor>::const_iterator it = Data::actors.begin();
+         it != Data::actors.end();
+         ++it) {
+        if (it->ID == actor_id)
+            return &*it;
+    }
+    return 0;
+}
+
 std::unique_ptr<RPG::Map> LoadMap(const char* filename, const char* encoding)
 {
     if (filename == 0)
@@ -100,6 +111,25 @@ extern "C" int EasyRpgUpstreamLoadLdbSummary(
     summary->actor_count = static_cast<unsigned int>(Data::actors.size());
     summary->chipset_count = static_cast<unsigned int>(Data::chipsets.size());
     summary->common_event_count = static_cast<unsigned int>(Data::commonevents.size());
+    summary->initial_actor_id = 0;
+    summary->initial_actor_character_index = 0;
+    summary->initial_actor_transparent = 0;
+    summary->initial_actor_character_name_length = 0;
+
+    if (!Data::system.party.empty()) {
+        summary->initial_actor_id = Data::system.party.front();
+        const RPG::Actor* actor = FindActor(summary->initial_actor_id);
+        if (actor) {
+            summary->initial_actor_character_index = actor->character_index;
+            summary->initial_actor_transparent = actor->transparent ? 1 : 0;
+            unsigned int actor_name_length = static_cast<unsigned int>(actor->character_name.size());
+            if (actor_name_length > sizeof(summary->initial_actor_character_name))
+                actor_name_length = sizeof(summary->initial_actor_character_name);
+            for (unsigned int i = 0; i < actor_name_length; ++i)
+                summary->initial_actor_character_name[i] = static_cast<unsigned char>(actor->character_name[i]);
+            summary->initial_actor_character_name_length = actor_name_length;
+        }
+    }
 
     const RPG::Chipset* chipset = FindChipset(selected_chipset_id);
     if (selected_chipset_id > 0 && chipset == 0)
@@ -157,6 +187,97 @@ extern "C" int EasyRpgUpstreamReadLmuSummary(
     summary->event_command_count = command_count;
     summary->save_count = static_cast<unsigned int>(map->save_count < 0 ? 0 : map->save_count);
     return 0;
+}
+
+extern "C" int EasyRpgUpstreamReadBootSequence(
+    const char* filename,
+    const char* encoding,
+    EasyRpgUpstreamBootSequence* sequence)
+{
+    if (filename == 0 || sequence == 0)
+        return -1;
+
+    std::unique_ptr<RPG::Map> map = LoadMap(filename, encoding);
+    if (!map)
+        return -2;
+
+    for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
+         event != map->events.end();
+         ++event) {
+        for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
+             page != event->pages.end();
+             ++page) {
+            if (page->trigger != RPG::EventPage::Trigger_auto_start || page->event_commands.size() != 7)
+                continue;
+
+            const RPG::EventCommand& wait0 = page->event_commands[0];
+            const RPG::EventCommand& show = page->event_commands[1];
+            const RPG::EventCommand& move0 = page->event_commands[2];
+            const RPG::EventCommand& wait1 = page->event_commands[3];
+            const RPG::EventCommand& move1 = page->event_commands[4];
+            const RPG::EventCommand& wait2 = page->event_commands[5];
+            const RPG::EventCommand& teleport = page->event_commands[6];
+
+            if (wait0.code != RPG::EventCommand::Code::Wait ||
+                show.code != RPG::EventCommand::Code::ShowPicture ||
+                move0.code != RPG::EventCommand::Code::MovePicture ||
+                wait1.code != RPG::EventCommand::Code::Wait ||
+                move1.code != RPG::EventCommand::Code::MovePicture ||
+                wait2.code != RPG::EventCommand::Code::Wait ||
+                teleport.code != RPG::EventCommand::Code::Teleport ||
+                wait0.parameters.size() < 1 ||
+                show.parameters.size() < 7 ||
+                move0.parameters.size() < 15 ||
+                wait1.parameters.size() < 1 ||
+                move1.parameters.size() < 15 ||
+                wait2.parameters.size() < 1 ||
+                teleport.parameters.size() < 3)
+                continue;
+
+            sequence->wait_before_picture = wait0.parameters[0];
+            sequence->picture_x = show.parameters[2];
+            sequence->picture_y = show.parameters[3];
+            sequence->picture_magnify = show.parameters[5];
+            sequence->picture_opacity = show.parameters[6];
+            sequence->first_move_x = move0.parameters[2];
+            sequence->first_move_y = move0.parameters[3];
+            sequence->first_move_magnify = move0.parameters[5];
+            sequence->first_move_opacity = move0.parameters[6];
+            sequence->first_move_duration = move0.parameters[14];
+            sequence->wait_after_first_move = wait1.parameters[0];
+            sequence->second_move_x = move1.parameters[2];
+            sequence->second_move_y = move1.parameters[3];
+            sequence->second_move_magnify = move1.parameters[5];
+            sequence->second_move_opacity = move1.parameters[6];
+            sequence->second_move_duration = move1.parameters[14];
+            sequence->wait_after_second_move = wait2.parameters[0];
+            sequence->target_map_id = teleport.parameters[0];
+            sequence->target_x = teleport.parameters[1];
+            sequence->target_y = teleport.parameters[2];
+            sequence->picture_name_length = static_cast<unsigned int>(show.string.size());
+            if (sequence->picture_name_length > sizeof(sequence->picture_name))
+                return -3;
+            for (unsigned int i = 0; i < sequence->picture_name_length; ++i)
+                sequence->picture_name[i] = static_cast<unsigned char>(show.string[i]);
+            return 0;
+        }
+    }
+
+    return -4;
+}
+
+extern "C" int EasyRpgUpstreamGetChipsetName(
+    int chipset_id,
+    unsigned char* name,
+    unsigned int capacity,
+    unsigned int* length)
+{
+    if (chipset_id <= 0 || length == 0)
+        return -1;
+    const RPG::Chipset* chipset = FindChipset(chipset_id);
+    if (!chipset)
+        return -2;
+    return CopyStringBytes(chipset->chipset_name, name, capacity, length) ? 0 : -3;
 }
 
 extern "C" int EasyRpgUpstreamReadLmuLayers(

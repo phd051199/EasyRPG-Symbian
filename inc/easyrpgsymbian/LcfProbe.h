@@ -28,7 +28,11 @@ struct TLcfProjectSummary
     TUint32 iMapEventPageCount;
     TUint32 iMapEventCommandCount;
     TUint32 iMapSaveCount;
+    TUint32 iInitialActorId;
+    TUint32 iInitialActorCharacterIndex;
+    TBool iInitialActorTransparent;
 
+    TBuf8<96> iInitialActorCharacterNameSjis;
     TBuf8<96> iTitleNameSjis;
     TBuf8<96> iSystemNameSjis;
     TBuf8<96> iChipsetNameSjis;

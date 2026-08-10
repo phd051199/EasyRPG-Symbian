@@ -75,6 +75,10 @@ TInt TLcfProbe::ProbeProject(CZipVfs& aResources,
     aSummary.iMapEventPageCount = 0;
     aSummary.iMapEventCommandCount = 0;
     aSummary.iMapSaveCount = 0;
+    aSummary.iInitialActorId = 0;
+    aSummary.iInitialActorCharacterIndex = 0;
+    aSummary.iInitialActorTransparent = EFalse;
+    aSummary.iInitialActorCharacterNameSjis.Zero();
     aSummary.iTitleNameSjis.Zero();
     aSummary.iSystemNameSjis.Zero();
     aSummary.iChipsetNameSjis.Zero();
@@ -220,6 +224,12 @@ TInt TLcfProbe::InspectFile(CZipVfs& aResources,
         aSummary.iDatabaseRecords = upstream.actor_count +
                                     upstream.chipset_count +
                                     upstream.common_event_count;
+        aSummary.iInitialActorId = static_cast<TUint32>(upstream.initial_actor_id > 0 ? upstream.initial_actor_id : 0);
+        aSummary.iInitialActorCharacterIndex = static_cast<TUint32>(upstream.initial_actor_character_index > 0 ? upstream.initial_actor_character_index : 0);
+        aSummary.iInitialActorTransparent = upstream.initial_actor_transparent != 0;
+        CopyCoreName(upstream.initial_actor_character_name,
+                     upstream.initial_actor_character_name_length,
+                     aSummary.iInitialActorCharacterNameSjis);
         CopyCoreName(titleName, titleNameLength, aSummary.iTitleNameSjis);
         CopyCoreName(systemName, systemNameLength, aSummary.iSystemNameSjis);
         CopyCoreName(chipsetName, chipsetNameLength, aSummary.iChipsetNameSjis);

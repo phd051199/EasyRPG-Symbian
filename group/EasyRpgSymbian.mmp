@@ -55,6 +55,8 @@ LIBRARY           aknnotify.lib
 LIBRARY           efsrv.lib
 LIBRARY           ezlib.lib
 LIBRARY           libc.lib
+LIBRARY           libm.lib
+LIBRARY           libz.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
 STATICLIBRARY     EasyRpgModernCore.lib

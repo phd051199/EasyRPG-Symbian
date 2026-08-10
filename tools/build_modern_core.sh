@@ -36,17 +36,46 @@ SOURCES=(
     "$LIBLCF_ROOT/data.cpp"
     "$LIBLCF_ROOT/rpg_setup.cpp"
     "$LIBLCF_ROOT/ldb_reader.cpp"
+    "$LIBLCF_ROOT/ldb_equipment.cpp"
+    "$LIBLCF_ROOT/ldb_eventcommand.cpp"
+    "$LIBLCF_ROOT/ldb_parameters.cpp"
     "$LIBLCF_ROOT/lmt_reader.cpp"
+    "$LIBLCF_ROOT/lmt_rect.cpp"
+    "$LIBLCF_ROOT/lmt_treemap.cpp"
     "$LIBLCF_ROOT/lmu_reader.cpp"
+    "$LIBLCF_ROOT/lmu_movecommand.cpp"
+    "$LIBLCF_ROOT/reader_flags.cpp"
     "$LIBLCF_ROOT/writer_lcf.cpp"
     "$LIBLCF_ROOT/writer_xml.cpp"
     "$GENERATED_READER_STRUCT"
     "$PROJECT_DIR/third_party/libcxx-4.0.1/src/string.cpp"
     "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp"
+    "$PROJECT_DIR/src/core/LibcxxSharedPtrRuntime.cpp"
     "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp"
     "$PROJECT_DIR/src/core/LiblcfXmlReaderSymbian.cpp"
     "$PROJECT_DIR/src/core/UpstreamLmuBridge.cpp"
     "$PROJECT_DIR/src/core/UpstreamLcfLinkAnchor.cpp"
+    "$PROJECT_DIR/src/core/SymbianUi.cpp"
+    "$PROJECT_DIR/src/core/SymbianOutput.cpp"
+    "$PROJECT_DIR/src/core/SymbianPlayerState.cpp"
+    "$PROJECT_DIR/src/core/SymbianFont.cpp"
+    "$PROJECT_DIR/src/core/SymbianAeabi.cpp"
+    "$PROJECT_DIR/src/core/SymbianCache.cpp"
+    "$PROJECT_DIR/src/core/SymbianImage.cpp"
+    "$PIXMAN_ROOT/pixman-implementation.c"
+    "$PIXMAN_ROOT/pixman-general.c"
+    "$PIXMAN_ROOT/pixman-utils.c"
+    "$PIXMAN_ROOT/pixman-noop.c"
+    "$PIXMAN_ROOT/pixman-solid-fill.c"
+    "$PIXMAN_ROOT/pixman-arm.c"
+    "$PIXMAN_ROOT/pixman-x86.c"
+    "$PIXMAN_ROOT/pixman-ppc.c"
+    "$PIXMAN_ROOT/pixman-mips.c"
+    "$PIXMAN_ROOT/pixman-matrix.c"
+    "$PIXMAN_ROOT/pixman-image.c"
+    "$PIXMAN_ROOT/pixman-bits-image.c"
+    "$PIXMAN_ROOT/pixman-combine32.c"
+    "$PROJECT_DIR/src/core/PixmanSymbianCompat.c"
     "$PLAYER_ROOT/color.cpp"
     "$PLAYER_ROOT/rect.cpp"
     "$PLAYER_ROOT/tone.cpp"
@@ -126,8 +155,18 @@ for source in "${SOURCES[@]}"; do
     # by the original S60 CSL assembler so its ELF/EABI format is linkable by
     # the SDK's arm-none-symbianelf-ld and elf2e32.
     source_define=
-    if [[ $source == "$PLAYER_ROOT/"* ]]; then
+    if [[ $source == "$PLAYER_ROOT/"* || $source == "$PROJECT_DIR/src/core/Symbian"*.cpp ]]; then
         source_define=-D_3DS
+    fi
+    language_flag=-xc++
+    standard_flag=-std=c++11
+    pixman_define=
+    if [[ $source == *.c ]]; then
+        language_flag=-xc
+        standard_flag=-std=c99
+    fi
+    if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/src/core/PixmanSymbianCompat.c" ]]; then
+        pixman_define='-DPACKAGE=1 -DPIXMAN_NO_TLS'
     fi
 
     "$CLANGXX" \
@@ -135,7 +174,8 @@ for source in "${SOURCES[@]}"; do
         -march=armv5t \
         -mfloat-abi=soft \
         -fshort-wchar \
-        -std=c++11 \
+        $language_flag \
+        $standard_flag \
         -O2 \
         -ffreestanding \
         -fno-exceptions \
@@ -151,6 +191,7 @@ for source in "${SOURCES[@]}"; do
         -ffunction-sections \
         -D_LIBCPP_HAS_NO_THREADS \
         $source_define \
+        $pixman_define \
         -nostdinc++ \
         -I "$LIBCXX_COMPAT_INCLUDE" \
         -I "$PROJECT_DIR/third_party/libcxx-4.0.1/include" \
@@ -176,6 +217,7 @@ for source in "${SOURCES[@]}"; do
         -e 's/^([[:space:]]*)lsr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsr \6/' \
         -e 's/^([[:space:]]*)asr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, asr \6/' \
         -e 's/^([[:space:]]*)ror([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, ror \6/' \
+        -e 's/^([[:space:]]*)\.inst([[:space:]]+)/\1.word\2/' \
         -e 's/"awGR"/"awG"/g' \
         "$assembly_raw" > "$assembly"
 

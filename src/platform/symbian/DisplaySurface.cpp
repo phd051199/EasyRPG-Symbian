@@ -1,5 +1,6 @@
 #include "easyrpgsymbian/DisplaySurface.h"
 #include "easyrpgsymbian/Framebuffer.h"
+#include "easyrpgsymbian/UpstreamGraphicsBridge.h"
 
 CSymbianDisplaySurface* CSymbianDisplaySurface::NewL(const TSize& aSize)
 {
@@ -87,11 +88,20 @@ void CSymbianDisplaySurface::PresentL()
     TInt nativeStridePixels = 0;
     TUint16* nativePixels = iNativeBuffer->LockPixelsL(nativeStridePixels);
     const TUint32* sourcePixels = Pixels();
+    TInt sourceStridePixels = iStridePixels;
+    const unsigned int* upstreamPixels = EasyRpgUpstreamGraphicsPixels();
+    if (upstreamPixels &&
+        EasyRpgUpstreamGraphicsWidth() == iSize.iWidth &&
+        EasyRpgUpstreamGraphicsHeight() == iSize.iHeight)
+    {
+        sourcePixels = reinterpret_cast<const TUint32*>(upstreamPixels);
+        sourceStridePixels = EasyRpgUpstreamGraphicsPitchPixels();
+    }
 
     TInt y = 0;
     for (y = 0; y < iSize.iHeight; ++y)
     {
-        const TUint32* sourceRow = sourcePixels + y * iStridePixels;
+        const TUint32* sourceRow = sourcePixels + y * sourceStridePixels;
         TUint16* nativeRow = nativePixels + y * nativeStridePixels;
         TInt x = 0;
         for (x = 0; x < iSize.iWidth; ++x)
