@@ -1,3 +1,6 @@
+#include <hal.h>
+#include <hal_data.h>
+
 #include "easyrpgsymbian/FrameTimer.h"
 #include "easyrpgsymbian/SymbianLogBridge.h"
 
@@ -11,9 +14,18 @@ CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 }
 
 CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
-    : CActive(CActive::EPriorityHigh),
+    : CActive(CActive::EPriorityStandard),
       iObserver(aObserver),
+      iCounterFrequency(0),
+      iCounterCountsUp(ETrue),
+      iFramePeriodCounter(0),
+      iFramePeriodRemainder(0),
+      iFrameRemainderAccumulator(0),
+      iLastCounter(0),
+      iElapsedCounter(0),
+      iNextDeadlineCounter(0),
       iLogicFrame(0),
+      iLastRenderedLogicFrame(0),
       iRunning(EFalse)
 {
 }
@@ -21,6 +33,14 @@ CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
 void CFrameTimer::ConstructL()
 {
     User::LeaveIfError(iTimer.CreateLocal());
+    User::LeaveIfError(HAL::Get(HALData::EFastCounterFrequency, iCounterFrequency));
+    TInt counterCountsUp = 0;
+    User::LeaveIfError(HAL::Get(HALData::EFastCounterCountsUp, counterCountsUp));
+    iCounterCountsUp = counterCountsUp != 0;
+    if (iCounterFrequency < KLogicFps)
+        User::Leave(KErrNotSupported);
+    iFramePeriodCounter = iCounterFrequency / KLogicFps;
+    iFramePeriodRemainder = iCounterFrequency % KLogicFps;
     CActiveScheduler::Add(this);
 }
 
@@ -36,7 +56,12 @@ void CFrameTimer::Start()
         return;
 
     iRunning = ETrue;
-    Arm();
+    iFrameRemainderAccumulator = 0;
+    iElapsedCounter = 0;
+    iLastCounter = User::FastCounter();
+    iNextDeadlineCounter = 0;
+    AdvanceDeadline();
+    QueueToDeadline();
 }
 
 void CFrameTimer::Stop()
@@ -52,12 +77,51 @@ TBool CFrameTimer::Running() const
     return iRunning;
 }
 
-void CFrameTimer::Arm()
+void CFrameTimer::AdvanceDeadline()
 {
-    if (!iRunning || IsActive())
+    iNextDeadlineCounter += iFramePeriodCounter;
+    iFrameRemainderAccumulator += iFramePeriodRemainder;
+    if (iFrameRemainderAccumulator >= KLogicFps)
+    {
+        ++iNextDeadlineCounter;
+        iFrameRemainderAccumulator -= KLogicFps;
+    }
+}
+
+TUint32 CFrameTimer::CounterDelta(TUint32 aCurrent, TUint32 aPrevious) const
+{
+    return iCounterCountsUp
+        ? static_cast<TUint32>(aCurrent - aPrevious)
+        : static_cast<TUint32>(aPrevious - aCurrent);
+}
+
+void CFrameTimer::UpdateElapsedCounter(TUint32 aCounter)
+{
+    iElapsedCounter += CounterDelta(aCounter, iLastCounter);
+    iLastCounter = aCounter;
+}
+
+TInt CFrameTimer::CounterTicksToMicroseconds(TInt64 aTicks) const
+{
+    if (aTicks <= 0)
+        return 1;
+
+    TInt64 microseconds = (aTicks * 1000000 + iCounterFrequency - 1) / iCounterFrequency;
+    if (microseconds < 1)
+        microseconds = 1;
+    if (microseconds > KMaxTimerDelayMicroseconds)
+        microseconds = KMaxTimerDelayMicroseconds;
+    return static_cast<TInt>(microseconds);
+}
+
+void CFrameTimer::QueueToDeadline()
+{
+    if (!iRunning)
         return;
 
-    iTimer.After(iStatus, TTimeIntervalMicroSeconds32(KLogicTickMicroseconds));
+    iTimer.HighRes(iStatus,
+                   TTimeIntervalMicroSeconds32(
+                       CounterTicksToMicroseconds(iNextDeadlineCounter - iElapsedCounter)));
     SetActive();
 }
 
@@ -77,19 +141,53 @@ void CFrameTimer::RunL()
         return;
     }
 
-    ++iLogicFrame;
-    if (iLogicFrame == 1)
-        EasyRpgSymbianLogDebug("frame timer first tick");
+    UpdateElapsedCounter(User::FastCounter());
 
-    Arm();
-
-    const TBool renderFrame = ((iLogicFrame % KRenderDivisor) == 1);
-    TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
-    if (error != KErrNone)
+    TInt ticksToRun = 0;
+    while (iElapsedCounter >= iNextDeadlineCounter && ticksToRun < KMaxCatchUpTicks)
     {
-        Stop();
-        iObserver.FrameError(error);
+        ++ticksToRun;
+        AdvanceDeadline();
     }
+
+    if (ticksToRun <= 0)
+    {
+        QueueToDeadline();
+        return;
+    }
+
+    if (ticksToRun == KMaxCatchUpTicks && iElapsedCounter >= iNextDeadlineCounter)
+    {
+        iNextDeadlineCounter = iElapsedCounter;
+        iFrameRemainderAccumulator = 0;
+        AdvanceDeadline();
+    }
+
+    for (TInt tick = 0; tick < ticksToRun; ++tick)
+    {
+        ++iLogicFrame;
+        if (iLogicFrame == 1)
+            EasyRpgSymbianLogDebug("frame timer first tick");
+
+        const TBool finalTick = tick == ticksToRun - 1;
+        const TBool renderFrame = finalTick &&
+            (iLogicFrame == 1 || iLogicFrame - iLastRenderedLogicFrame >= KRenderDivisor);
+        if (renderFrame)
+            iLastRenderedLogicFrame = iLogicFrame;
+
+        TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
+        if (error != KErrNone)
+        {
+            Stop();
+            iObserver.FrameError(error);
+            return;
+        }
+        if (!iRunning)
+            return;
+    }
+
+    UpdateElapsedCounter(User::FastCounter());
+    QueueToDeadline();
 }
 
 TInt CFrameTimer::RunError(TInt)

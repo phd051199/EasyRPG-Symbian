@@ -6,6 +6,7 @@
 #include "inireader.h"
 #include "reader_util.h"
 #include "easyrpgsymbian/CoreEncoding.h"
+#include "easyrpgsymbian/GohuFont.h"
 
 namespace {
 char AsciiLower(char value) {
@@ -54,6 +55,55 @@ bool IsUtf8Encoding(const std::string& encoding) {
            EncodingEquals(encoding, "UTF8");
 }
 
+bool IsMixedVietnameseEncoding(const std::string& encoding) {
+    return EncodingEquals(encoding, "EASYRPG_VI_CP932") ||
+           EncodingEquals(encoding, "TCVN3_CP932");
+}
+
+unsigned int Tcvn3Codepoint(unsigned char value) {
+    const unsigned int codepoint = EasyRpgTcvn3DecodeByte(value);
+    return codepoint != value ? codepoint : 0;
+}
+
+bool IsAsciiLetter(unsigned char value) {
+    return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
+}
+
+bool LooksLikeTcvn3(const std::string& input) {
+    unsigned int ascii_letters = 0;
+    for (std::string::size_type index = 0; index < input.size(); ++index) {
+        if (IsAsciiLetter(static_cast<unsigned char>(input[index])))
+            ++ascii_letters;
+    }
+
+    unsigned int score = 0;
+    unsigned int mapped = 0;
+    for (std::string::size_type index = 0; index < input.size(); ++index) {
+        const unsigned char value = static_cast<unsigned char>(input[index]);
+        const unsigned int codepoint = Tcvn3Codepoint(value);
+        if (codepoint == 0 || codepoint == 0x00a0u || (codepoint >= 0x0300u && codepoint <= 0x0323u))
+            continue;
+        if (value < 0x20u) {
+            ++mapped;
+            score += 4;
+            continue;
+        }
+        if (value < 0xa1u)
+            continue;
+        if (value >= 0xe0u && ascii_letters * 2u <= input.size())
+            continue;
+        ++mapped;
+        const bool left_letter = index > 0 && IsAsciiLetter(static_cast<unsigned char>(input[index - 1]));
+        const bool right_letter = index + 1 < input.size() && IsAsciiLetter(static_cast<unsigned char>(input[index + 1]));
+        if (left_letter || right_letter)
+            score += 2;
+        else if ((index > 0 && input[index - 1] == ' ') ||
+                 (index + 1 < input.size() && input[index + 1] == ' '))
+            ++score;
+    }
+    return mapped != 0 && score >= 2;
+}
+
 void AppendUtf8(std::string& output, unsigned int codepoint) {
     if (codepoint <= 0x7fu) {
         output.push_back(static_cast<char>(codepoint));
@@ -70,6 +120,20 @@ void AppendUtf8(std::string& output, unsigned int codepoint) {
         output.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3fu)));
         output.push_back(static_cast<char>(0x80u | (codepoint & 0x3fu)));
     }
+}
+
+std::string Tcvn3ToUtf8(const std::string& input) {
+    std::string output;
+    output.reserve(input.size() * 3u);
+    for (std::string::size_type index = 0; index < input.size(); ++index) {
+        const unsigned char value = static_cast<unsigned char>(input[index]);
+        const unsigned int codepoint = EasyRpgTcvn3DecodeByte(value);
+        if (codepoint == value && value < 0x80u)
+            output.push_back(static_cast<char>(value));
+        else
+            AppendUtf8(output, codepoint);
+    }
+    return output;
 }
 
 std::string Cp932ToUtf8(const std::string& input) {
@@ -182,8 +246,10 @@ std::string ReaderUtil::DetectEncoding(const std::string& database_file) {
 
 std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database_file) {
     std::vector<std::string> encodings;
-    if (!database_file.empty())
+    if (!database_file.empty()) {
+        encodings.push_back("EASYRPG_VI_CP932");
         encodings.push_back("SHIFT_JIS");
+    }
     return encodings;
 }
 
@@ -200,7 +266,7 @@ std::string ReaderUtil::GetEncoding(const std::string& ini_file) {
 }
 
 std::string ReaderUtil::GetLocaleEncoding() {
-    return "SHIFT_JIS";
+    return "EASYRPG_VI_CP932";
 }
 
 std::string ReaderUtil::Recode(const std::string& str_to_encode,
@@ -216,6 +282,15 @@ std::string ReaderUtil::Recode(const std::string& str_to_encode,
 
     if (IsUtf8Encoding(src_enc) && IsUtf8Encoding(dst_enc))
         return str_to_encode;
+
+    if (IsMixedVietnameseEncoding(src_enc) && IsUtf8Encoding(dst_enc)) {
+        if (LooksLikeTcvn3(str_to_encode))
+            return Tcvn3ToUtf8(str_to_encode);
+        const std::string cp932 = Cp932ToUtf8(str_to_encode);
+        if (cp932.empty() && !str_to_encode.empty())
+            return Tcvn3ToUtf8(str_to_encode);
+        return cp932;
+    }
 
     if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc))
         return Cp932ToUtf8(str_to_encode);

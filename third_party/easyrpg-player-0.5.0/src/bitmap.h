@@ -729,6 +729,12 @@ public:
 	int height() const;
 	int bpp() const;
 	int pitch() const;
+#ifdef EASYRPG_SYMBIAN
+	uint32_t Revision() const;
+	void Touch();
+	void SetClipRects(const Rect* aRects, int aCount);
+	void ClearClipRects();
+#endif
 
 protected:
 	/** Bitmap data. */
@@ -764,6 +770,9 @@ protected:
 
 	pixman_op_t GetOperator(pixman_image_t* mask = nullptr) const;
 	bool read_only = false;
+#ifdef EASYRPG_SYMBIAN
+	uint32_t revision_counter = 1;
+#endif
 };
 
 #endif

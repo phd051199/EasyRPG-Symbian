@@ -10,6 +10,7 @@
 #include "player.h"
 #include "scene.h"
 #include "scene_logo.h"
+#include "easyrpgsymbian/RenderDamage.h"
 #include "easyrpgsymbian/SymbianAudio.h"
 #include "easyrpgsymbian/UpstreamPlayerBridge.h"
 
@@ -18,12 +19,11 @@ unsigned int gTicks = 0;
 bool gPlayerStarted = false;
 bool gRenderFrame = true;
 int gLastSceneType = -1;
-bool gLogSceneFrame = false;
 
 class SymbianUi : public BaseUi {
 public:
     SymbianUi(long width, long height) {
-        Bitmap::SetFormat(format_B8G8R8A8_a().format());
+        Bitmap::SetFormat(DynamicFormat(16, 5, 11, 6, 5, 5, 0, 0, 0, PF::NoAlpha));
         Resize(width, height);
         mouse_focus = false;
         mouse_x = 0;
@@ -41,7 +41,7 @@ public:
         current_display_mode.zoom = false;
         current_display_mode.width = static_cast<int>(width);
         current_display_mode.height = static_cast<int>(height);
-        current_display_mode.bpp = 32;
+        current_display_mode.bpp = 16;
         current_display_mode.flags = 0;
         main_surface = Bitmap::Create(static_cast<int>(width), static_cast<int>(height), false);
     }
@@ -76,12 +76,14 @@ void SetKeys(unsigned int keys_0,
     state.reset();
     const unsigned int words[4] = {keys_0, keys_1, keys_2, keys_3};
     for (unsigned int word = 0; word < 4; ++word) {
-        for (unsigned int bit = 0; bit < 32; ++bit) {
+        unsigned int value = words[word];
+        while (value != 0) {
+            const unsigned int bit = static_cast<unsigned int>(__builtin_ctz(value));
             const unsigned int index = word * 32 + bit;
             if (index >= Input::Keys::KEYS_COUNT)
                 return;
-            if ((words[word] & (1u << bit)) != 0)
-                state.set(index);
+            state.set(index);
+            value &= value - 1;
         }
     }
 }
@@ -196,7 +198,6 @@ extern "C" int EasyRpgUpstreamPlayerInit(const char* project_path,
     Player::reset_flag = false;
     Player::FrameReset();
     gLastSceneType = -1;
-    gLogSceneFrame = false;
     gPlayerStarted = true;
     return 0;
 }
@@ -243,29 +244,8 @@ extern "C" int EasyRpgUpstreamPlayerTick(unsigned int ticks,
         const int scene_type = static_cast<int>(Scene::instance->type);
         if (scene_type != gLastSceneType) {
             gLastSceneType = scene_type;
-            gLogSceneFrame = true;
             if (scene_type >= 0 && scene_type < Scene::SceneMax)
                 Output::Debug("Symbian scene %s", Scene::scene_names[scene_type]);
-        }
-        if (gRenderFrame && gLogSceneFrame && DisplayUi->GetDisplaySurface()) {
-            BitmapRef surface = DisplayUi->GetDisplaySurface();
-            const unsigned int* pixels = reinterpret_cast<const unsigned int*>(surface->pixels());
-            if (pixels) {
-                const int width = surface->width();
-                const int height = surface->height();
-                const int pitch = surface->pitch() / static_cast<int>(sizeof(unsigned int));
-                unsigned int hash = 2166136261u;
-                for (int y = 0; y < height; ++y) {
-                    const unsigned int* row = pixels + y * pitch;
-                    for (int x = 0; x < width; ++x) {
-                        hash ^= row[x];
-                        hash *= 16777619u;
-                    }
-                }
-                const unsigned int center = pixels[(height / 2) * pitch + width / 2];
-                Output::Debug("Symbian frame scene=%d hash=%08x center=%08x", scene_type, hash, center);
-                gLogSceneFrame = false;
-            }
         }
     }
     if (!DisplayUi) {
@@ -279,10 +259,11 @@ extern "C" int EasyRpgUpstreamPlayerShouldRender(void) {
     return gRenderFrame ? 1 : 0;
 }
 
-extern "C" const unsigned int* EasyRpgUpstreamPlayerPixels(void) {
-    if (!DisplayUi || !DisplayUi->GetDisplaySurface())
+extern "C" const unsigned short* EasyRpgUpstreamPlayerPixels(void) {
+    if (!DisplayUi)
         return 0;
-    return reinterpret_cast<const unsigned int*>(DisplayUi->GetDisplaySurface()->pixels());
+    BitmapRef const& surface = DisplayUi->GetDisplaySurface();
+    return surface ? reinterpret_cast<const unsigned short*>(surface->pixels()) : 0;
 }
 
 extern "C" int EasyRpgUpstreamPlayerWidth(void) {
@@ -294,7 +275,34 @@ extern "C" int EasyRpgUpstreamPlayerHeight(void) {
 }
 
 extern "C" int EasyRpgUpstreamPlayerPitchPixels(void) {
-    if (!DisplayUi || !DisplayUi->GetDisplaySurface())
+    if (!DisplayUi)
         return 0;
-    return DisplayUi->GetDisplaySurface()->pitch() / static_cast<int>(sizeof(unsigned int));
+    BitmapRef const& surface = DisplayUi->GetDisplaySurface();
+    return surface ? surface->pitch() / static_cast<int>(sizeof(unsigned short)) : 0;
+}
+
+extern "C" int EasyRpgUpstreamPlayerDirtyRegionCount(void) {
+    return SymbianRenderDamage::DamageValid()
+        ? SymbianRenderDamage::DirtyCount()
+        : -1;
+}
+
+extern "C" int EasyRpgUpstreamPlayerDirtyRegion(int index,
+                                                   int* x,
+                                                   int* y,
+                                                   int* width,
+                                                   int* height) {
+    if (!SymbianRenderDamage::DamageValid() || index < 0 ||
+        index >= SymbianRenderDamage::DirtyCount() || !x || !y || !width || !height)
+        return 0;
+    const Rect& rect = SymbianRenderDamage::DirtyRect(index);
+    *x = rect.x;
+    *y = rect.y;
+    *width = rect.width;
+    *height = rect.height;
+    return 1;
+}
+
+extern "C" void EasyRpgUpstreamPlayerConsumeDirtyRegions(void) {
+    SymbianRenderDamage::ConsumeDamage();
 }

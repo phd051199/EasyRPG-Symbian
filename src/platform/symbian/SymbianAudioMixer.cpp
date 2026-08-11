@@ -1,5 +1,7 @@
 #include "easyrpgsymbian/SymbianAudioMixer.h"
 
+static const TInt KMasterVolumePercent = 20;
+
 CSymbianAudioMixer* CSymbianAudioMixer::NewL()
 {
     CSymbianAudioMixer* self = new (ELeave) CSymbianAudioMixer;
@@ -413,7 +415,6 @@ TInt CSymbianAudioMixer::WriteStreamPcm16(TStreamBus aBus,
             stream.iWriteFrame = 0;
     }
     stream.iQueuedFrames += writable;
-    QueueOutputBuffers();
     return writable;
 }
 
@@ -446,6 +447,11 @@ TInt CSymbianAudioMixer::StreamQueuedFrames(TStreamBus aBus) const
     if (aBus < 0 || aBus >= EStreamBusCount)
         return 0;
     return iStreams[aBus].iQueuedFrames;
+}
+
+void CSymbianAudioMixer::CommitStreams()
+{
+    QueueOutputBuffers();
 }
 
 TBool CSymbianAudioMixer::MixStream(TStreamState& aStream,
@@ -521,7 +527,7 @@ void CSymbianAudioMixer::FillOutputBuffer(TInt aBufferIndex)
     TUint8* destination = const_cast<TUint8*>(output.Ptr());
     TInt sample;
     for (sample = 0; sample < KOutputBufferBytes / 2; ++sample)
-        WritePcm16(destination + sample * 2, mixed[sample]);
+        WritePcm16(destination + sample * 2, (mixed[sample] * 3) / 4);
 }
 
 TInt CSymbianAudioMixer::FreeOutputBufferIndex() const
@@ -546,19 +552,56 @@ TInt CSymbianAudioMixer::OutputBufferIndex(const TDesC8& aBuffer) const
     return -1;
 }
 
+TBool CSymbianAudioMixer::HasAudioToMix() const
+{
+    TInt bus;
+    for (bus = 0; bus < EStreamBusCount; ++bus)
+    {
+        if (iStreams[bus].iQueuedFrames > 0)
+            return ETrue;
+    }
+
+    TInt voice;
+    for (voice = 0; voice < KMaxVoices; ++voice)
+    {
+        if (VoiceIsActive(iVoices[voice]))
+            return ETrue;
+    }
+    return EFalse;
+}
+
 void CSymbianAudioMixer::QueueOutputBuffers()
 {
     if (!iStream || !iReady || iShuttingDown)
         return;
     while (iQueuedOutputBufferCount < KOutputQueueDepth)
     {
+        if (!HasAudioToMix())
+            return;
         const TInt bufferIndex = FreeOutputBufferIndex();
         if (bufferIndex < 0)
             return;
+        TInt streamReadFrames[EStreamBusCount];
+        TInt streamQueuedFrames[EStreamBusCount];
+        TInt bus;
+        for (bus = 0; bus < EStreamBusCount; ++bus)
+        {
+            streamReadFrames[bus] = iStreams[bus].iReadFrame;
+            streamQueuedFrames[bus] = iStreams[bus].iQueuedFrames;
+        }
+        TVoice voices[KMaxVoices];
+        Mem::Copy(voices, iVoices, sizeof(iVoices));
+
         FillOutputBuffer(bufferIndex);
         TRAPD(error, iStream->WriteL(iOutputBuffers[bufferIndex]));
         if (error != KErrNone)
         {
+            for (bus = 0; bus < EStreamBusCount; ++bus)
+            {
+                iStreams[bus].iReadFrame = streamReadFrames[bus];
+                iStreams[bus].iQueuedFrames = streamQueuedFrames[bus];
+            }
+            Mem::Copy(iVoices, voices, sizeof(iVoices));
             iReady = EFalse;
             iLastError = error;
             return;
@@ -629,11 +672,26 @@ TInt CSymbianAudioMixer::OutputChannels()
 
 void CSymbianAudioMixer::MaoscOpenComplete(TInt aError)
 {
-    iReady = (aError == KErrNone);
-    if (iReady)
+    if (aError == KErrNone)
+    {
+        TRAPD(propertyError,
+              iStream->SetAudioPropertiesL(TMdaAudioDataSettings::ESampleRate22050Hz,
+                                            TMdaAudioDataSettings::EChannelsStereo));
+        if (propertyError != KErrNone)
+        {
+            iReady = EFalse;
+            iLastError = propertyError;
+            return;
+        }
+        iStream->SetVolume(iStream->MaxVolume() * KMasterVolumePercent / 100);
+        iReady = ETrue;
         QueueOutputBuffers();
+    }
     else
+    {
+        iReady = EFalse;
         iLastError = aError;
+    }
 }
 
 void CSymbianAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)

@@ -25,6 +25,7 @@ TInt gFadeStartVolume = 100;
 TBool gBgmPlaying = EFalse;
 TBool gBgmPaused = EFalse;
 TInt gAudioAsyncError = KErrNone;
+const TInt KMasterVolumePercent = 20;
 
 TUint16 Read16(const TUint8* aData)
 {
@@ -186,7 +187,7 @@ public:
         if (iType == ESampled && iAudio)
         {
             const TInt maxVolume = iAudio->MaxVolume();
-            const TInt error = iAudio->SetVolume(maxVolume * iVolume / 100);
+            const TInt error = iAudio->SetVolume(maxVolume * iVolume * KMasterVolumePercent / 10000);
             if (error != KErrNone)
                 gAudioAsyncError = error;
         }
@@ -194,7 +195,7 @@ public:
         {
             TRAPD(error,
                 const TInt maxVolume = iMidi->MaxVolumeL();
-                iMidi->SetVolumeL(maxVolume * iVolume / 100);
+                iMidi->SetVolumeL(maxVolume * iVolume * KMasterVolumePercent / 10000);
             );
             if (error != KErrNone)
                 gAudioAsyncError = error;
@@ -804,6 +805,7 @@ void PumpBgm()
         if (written != batch)
             break;
     }
+    gMixer->CommitStreams();
 }
 
 void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
@@ -811,14 +813,14 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
     if (aPitch < 50 || aPitch > 200)
         User::Leave(KErrArgument);
 
-    TFileName path;
-    AsciiPathL(aPath, path);
     StopBgmNow();
     gBgmPitch = aPitch;
     gBgmVolume = aVolume;
     gBgmStartMs = NowMilliseconds();
     gFadeDurationMs = 0;
 
+    TFileName path;
+    AsciiPathL(aPath, path);
     _LIT(KMid, ".mid");
     _LIT(KMidi, ".midi");
     _LIT(KWav, ".wav");
@@ -867,6 +869,8 @@ void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
     AsciiPathL(aPath, path);
     TBuf<160> cacheKey;
     BuildCacheKeyL(path, aPitch, cacheKey);
+    if (gMixer->PlaySe(cacheKey, aVolume))
+        return;
 
     HBufC8* file = ReadFileLC(path);
     HBufC8* pcm = NULL;

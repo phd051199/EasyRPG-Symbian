@@ -30,6 +30,12 @@ LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/easyrpgsymbian/libcxx_compat"
 PLAYER_ROOT="$PROJECT_DIR/third_party/easyrpg-player-0.5.0/src"
 PLAYER_VENDOR_ROOT="$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src"
 PIXMAN_ROOT="$PROJECT_DIR/third_party/pixman-0.34.0/pixman"
+for header in "$PLAYER_ROOT"/*.h; do
+    name=$(basename "$header")
+    if [[ -f "$PLAYER_VENDOR_ROOT/$name" ]]; then
+        cp "$header" "$PLAYER_VENDOR_ROOT/$name"
+    fi
+done
 SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
     "$PROJECT_DIR/src/core/CoreZipCrypto.cpp"
@@ -53,20 +59,22 @@ SOURCES=(
     "$LIBLCF_ROOT/writer_lcf.cpp"
     "$LIBLCF_ROOT/writer_xml.cpp"
     "$GENERATED_READER_STRUCT"
-    "$PROJECT_DIR/third_party/libcxx-4.0.1/src/string.cpp"
-    "$PROJECT_DIR/src/core/LibcxxVectorRuntime.cpp"
     "$PROJECT_DIR/src/core/LibcxxSharedPtrRuntime.cpp"
     "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp"
     "$PROJECT_DIR/src/core/LiblcfXmlReaderSymbian.cpp"
     "$PROJECT_DIR/src/core/UpstreamLmuBridge.cpp"
     "$PROJECT_DIR/src/core/UpstreamLcfLinkAnchor.cpp"
     "$PROJECT_DIR/src/core/SymbianUi.cpp"
+    "$PLAYER_ROOT/scene.cpp"
+    "$PROJECT_DIR/src/core/SymbianRenderDamage.cpp"
     "$PROJECT_DIR/src/core/SymbianAsyncHandler.cpp"
     "$PROJECT_DIR/src/core/SymbianAudio.cpp"
     "$PROJECT_DIR/src/core/SymbianOutput.cpp"
     "$PROJECT_DIR/src/core/SymbianAeabi.cpp"
     "$PROJECT_DIR/src/core/SymbianImage.cpp"
-    "$PROJECT_DIR/src/core/SymbianRegistry.cpp"
+    "$PROJECT_DIR/src/core/SymbianText.cpp"
+    "$PROJECT_DIR/src/core/SymbianFont.cpp"
+    "$PROJECT_DIR/src/core/GohuFontData.cpp"
     "$PIXMAN_ROOT/pixman-implementation.c"
     "$PIXMAN_ROOT/pixman-general.c"
     "$PIXMAN_ROOT/pixman-utils.c"
@@ -80,6 +88,8 @@ SOURCES=(
     "$PIXMAN_ROOT/pixman-image.c"
     "$PIXMAN_ROOT/pixman-bits-image.c"
     "$PIXMAN_ROOT/pixman-combine32.c"
+    "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/pixman-fast-path.c"
+    "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/pixman.c"
     "$PROJECT_DIR/src/core/PixmanSymbianCompat.c"
     "$PLAYER_ROOT/color.cpp"
     "$PLAYER_ROOT/rect.cpp"
@@ -123,7 +133,6 @@ SOURCES=(
     "$PLAYER_VENDOR_ROOT/game_battle.cpp"
     "$PLAYER_VENDOR_ROOT/game_interpreter_battle.cpp"
     "$PLAYER_VENDOR_ROOT/battle_animation.cpp"
-    "$PLAYER_VENDOR_ROOT/scene.cpp"
     "$PLAYER_VENDOR_ROOT/scene_logo.cpp"
     "$PLAYER_VENDOR_ROOT/scene_title.cpp"
     "$PLAYER_VENDOR_ROOT/scene_map.cpp"
@@ -150,16 +159,12 @@ SOURCES=(
     "$PLAYER_VENDOR_ROOT/background.cpp"
     "$PLAYER_VENDOR_ROOT/game_battlealgorithm.cpp"
     "$PLAYER_VENDOR_ROOT/audio_secache.cpp"
-    "$PLAYER_VENDOR_ROOT/font.cpp"
-    "$PLAYER_VENDOR_ROOT/text.cpp"
     "$PLAYER_VENDOR_ROOT/window_about.cpp"
     "$PLAYER_VENDOR_ROOT/window_actorinfo.cpp"
     "$PLAYER_VENDOR_ROOT/window_actorstatus.cpp"
     "$PLAYER_VENDOR_ROOT/window_actortarget.cpp"
     "$PLAYER_VENDOR_ROOT/window_base.cpp"
-    "$PLAYER_VENDOR_ROOT/window_battlecommand.cpp"
     "$PLAYER_VENDOR_ROOT/window_battlemessage.cpp"
-    "$PLAYER_VENDOR_ROOT/window_battleoption.cpp"
     "$PLAYER_VENDOR_ROOT/window_battlestatus.cpp"
     "$PLAYER_VENDOR_ROOT/window_command.cpp"
     "$PLAYER_VENDOR_ROOT/window_equip.cpp"
@@ -209,7 +214,7 @@ done < <(find "$LIBLCF_GENERATED_ROOT" -maxdepth 1 -type f -name '*.cpp' | sort)
 while IFS= read -r upstream_source; do
     upstream_name=$(basename -- "$upstream_source")
     case "$upstream_name" in
-        async_handler.cpp|audio_al.cpp|audio_resampler.cpp|audio_sdl.cpp|baseui.cpp|decoder_*.cpp|font.cpp|image_bmp.cpp|image_png.cpp|image_xyz.cpp|input_buttons_gekko.cpp|input_buttons_opendingux.cpp|input_buttons_psp.cpp|main.cpp|output.cpp|registry.cpp|registry_wine.cpp|sdl_ui.cpp|text.cpp|util_win.cpp)
+        async_handler.cpp|audio_al.cpp|audio_resampler.cpp|audio_sdl.cpp|baseui.cpp|decoder_*.cpp|font.cpp|hslrgb.cpp|image_bmp.cpp|image_png.cpp|image_xyz.cpp|input_buttons_gekko.cpp|input_buttons_opendingux.cpp|input_buttons_psp.cpp|main.cpp|message_overlay.cpp|midisequencer.cpp|midisynth.cpp|output.cpp|registry.cpp|registry_wine.cpp|sdl_ui.cpp|text.cpp|util_win.cpp|window_battlecommand.cpp|window_battleoption.cpp)
             continue
             ;;
     esac
@@ -306,7 +311,7 @@ for source in "${SOURCES[@]}"; do
         standard_flag=-std=c99
         preinclude_flag=
     fi
-    if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/src/core/PixmanSymbianCompat.c" ]]; then
+    if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/"* || $source == "$PROJECT_DIR/src/core/PixmanSymbianCompat.c" ]]; then
         pixman_define='-DPACKAGE=1 -DPIXMAN_NO_TLS'
     fi
 

@@ -29,10 +29,14 @@
 #include "util_macro.h"
 #include "output.h"
 #include "player.h"
+#ifdef EASYRPG_SYMBIAN
+#include "easyrpgsymbian/RenderDamage.h"
+#endif
 
 namespace Graphics {
 	void UpdateTitle();
 	void DrawFrame();
+	void DrawFrameContents();
 	void DrawOverlay();
 
 	int fps;
@@ -156,6 +160,10 @@ void Graphics::UpdateTitle() {
 
 void Graphics::DrawFrame() {
 	if (transition_frames_left > 0) {
+#ifdef EASYRPG_SYMBIAN
+		SymbianRenderDamage::Reset();
+		SymbianRenderDamage::ForceFullFrame(DisplayUi->GetWidth(), DisplayUi->GetHeight());
+#endif
 		UpdateTransition();
 
 		for (Drawable* drawable : global_state->drawable_list) {
@@ -169,10 +177,43 @@ void Graphics::DrawFrame() {
 	}
 
 	if (screen_erased) {
+#ifdef EASYRPG_SYMBIAN
+		SymbianRenderDamage::Reset();
+		SymbianRenderDamage::ForceFullFrame(DisplayUi->GetWidth(), DisplayUi->GetHeight());
+#endif
 		DisplayUi->CleanDisplay();
 		return;
 	}
 
+#ifdef EASYRPG_SYMBIAN
+	BitmapRef surface = DisplayUi->GetDisplaySurface();
+	if (!surface) {
+		return;
+	}
+
+	SymbianRenderDamage::BeginRecord(surface->GetWidth(), surface->GetHeight());
+	DrawFrameContents();
+	SymbianRenderDamage::EndRecord();
+
+	if (SymbianRenderDamage::NeedsPaint()) {
+		Rect dirty[4];
+		const int dirtyCount = SymbianRenderDamage::DirtyCount();
+		for (int index = 0; index < dirtyCount; ++index)
+			dirty[index] = SymbianRenderDamage::DirtyRect(index);
+		surface->SetClipRects(dirty, dirtyCount);
+		SymbianRenderDamage::BeginPaint();
+		DrawFrameContents();
+		SymbianRenderDamage::EndPaint();
+		surface->ClearClipRects();
+	}
+#else
+	DrawFrameContents();
+#endif
+
+	DisplayUi->UpdateDisplay();
+}
+
+void Graphics::DrawFrameContents() {
 	if (state->zlist_dirty) {
 		state->drawable_list.sort(SortDrawableList);
 		state->zlist_dirty = false;
@@ -196,8 +237,6 @@ void Graphics::DrawFrame() {
 	}
 
 	DrawOverlay();
-
-	DisplayUi->UpdateDisplay();
 }
 
 void Graphics::DrawOverlay() {

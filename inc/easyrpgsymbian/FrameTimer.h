@@ -23,13 +23,19 @@ public:
 private:
     enum
     {
-        KLogicTickMicroseconds = 16667,
-        KRenderDivisor = 2
+        KLogicFps = 60,
+        KRenderDivisor = 2,
+        KMaxCatchUpTicks = 4,
+        KMaxTimerDelayMicroseconds = 16667
     };
 
     explicit CFrameTimer(MFrameTimerObserver& aObserver);
     void ConstructL();
-    void Arm();
+    void AdvanceDeadline();
+    void UpdateElapsedCounter(TUint32 aCounter);
+    TUint32 CounterDelta(TUint32 aCurrent, TUint32 aPrevious) const;
+    TInt CounterTicksToMicroseconds(TInt64 aTicks) const;
+    void QueueToDeadline();
     void RunL();
     TInt RunError(TInt aError);
     void DoCancel();
@@ -37,7 +43,16 @@ private:
 private:
     MFrameTimerObserver& iObserver;
     RTimer iTimer;
+    TInt iCounterFrequency;
+    TBool iCounterCountsUp;
+    TInt iFramePeriodCounter;
+    TInt iFramePeriodRemainder;
+    TInt iFrameRemainderAccumulator;
+    TUint32 iLastCounter;
+    TInt64 iElapsedCounter;
+    TInt64 iNextDeadlineCounter;
     TUint32 iLogicFrame;
+    TUint32 iLastRenderedLogicFrame;
     TBool iRunning;
 };
 

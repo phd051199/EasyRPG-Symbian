@@ -19,10 +19,17 @@ int EasyRpgUpstreamPlayerTick(unsigned int ticks,
                               unsigned int keys_3,
                               int render_frame);
 int EasyRpgUpstreamPlayerShouldRender(void);
-const unsigned int* EasyRpgUpstreamPlayerPixels(void);
+const unsigned short* EasyRpgUpstreamPlayerPixels(void);
 int EasyRpgUpstreamPlayerWidth(void);
 int EasyRpgUpstreamPlayerHeight(void);
 int EasyRpgUpstreamPlayerPitchPixels(void);
+int EasyRpgUpstreamPlayerDirtyRegionCount(void);
+int EasyRpgUpstreamPlayerDirtyRegion(int index,
+                                     int* x,
+                                     int* y,
+                                     int* width,
+                                     int* height);
+void EasyRpgUpstreamPlayerConsumeDirtyRegions(void);
 
 #ifdef __cplusplus
 }

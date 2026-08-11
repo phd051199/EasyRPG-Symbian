@@ -17,6 +17,7 @@ public:
     }
 
     void BGM_Play(std::string const& file, int volume, int pitch, int fadein) override {
+        Output::Debug("Symbian BGM play: %s volume=%d pitch=%d fade=%d", file.c_str(), volume, pitch, fadein);
         const int result = EasyRpgSymbianAudioPlayBgm(file.c_str(), volume, pitch, fadein);
         bgm_playing = result == 0;
         if (result != 0)

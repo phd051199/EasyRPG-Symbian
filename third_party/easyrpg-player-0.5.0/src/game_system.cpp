@@ -49,6 +49,7 @@ int Game_System::GetSaveCount() {
 }
 
 void Game_System::BgmPlay(RPG::Music const& bgm) {
+	Output::Debug("BGM request: %s volume=%d tempo=%d fade=%d", bgm.name.c_str(), bgm.volume, bgm.tempo, bgm.fadein);
 	RPG::Music previous_music = data.current_music;
 	data.current_music = bgm;
 

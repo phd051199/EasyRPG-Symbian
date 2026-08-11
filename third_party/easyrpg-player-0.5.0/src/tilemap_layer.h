@@ -21,7 +21,6 @@
 // Headers
 #include <vector>
 #include <map>
-#include <set>
 #include "system.h"
 #include "drawable.h"
 #include "tone.h"
@@ -55,7 +54,7 @@ class TilemapLayer {
 public:
 	TilemapLayer(int ilayer);
 
-	void DrawTile(Bitmap& screen, int x, int y, int row, int col);
+	void DrawTile(Bitmap& destination, Bitmap& screen, int x, int y, int row, int col);
 	void Draw(int z_order);
 
 	void Update();
@@ -95,7 +94,7 @@ public:
 private:
 	BitmapRef chipset;
 	BitmapRef chipset_effect;
-	std::set<short> chipset_tone_tiles;
+	std::vector<uint8_t> chipset_tone_tiles;
 
 	std::vector<short> map_data;
 	std::vector<uint8_t> passable;
@@ -133,10 +132,10 @@ private:
 	TileXY GetCachedAutotileD(short ID);
 	BitmapRef autotiles_ab_screen;
 	BitmapRef autotiles_ab_screen_effect;
-	std::set<short> autotiles_ab_screen_tone_tiles;
+	std::vector<uint8_t> autotiles_ab_screen_tone_tiles;
 	BitmapRef autotiles_d_screen;
 	BitmapRef autotiles_d_screen_effect;
-	std::set<short> autotiles_d_screen_tone_tiles;
+	std::vector<uint8_t> autotiles_d_screen_tone_tiles;
 
 	int autotiles_ab_next = -1;
 	int autotiles_d_next = -1;
@@ -155,6 +154,13 @@ private:
 	std::vector<std::shared_ptr<TilemapSubLayer> > sublayers;
 
 	Tone tone;
+#ifdef EASYRPG_SYMBIAN
+	uint32_t symbian_revision = 1;
+	bool symbian_has_animated_ab = false;
+	bool symbian_has_animated_c = false;
+	void SymbianTouch();
+	unsigned long long SymbianSignature(int z_order) const;
+#endif
 };
 
 #endif

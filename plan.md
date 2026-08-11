@@ -199,15 +199,6 @@ The staging validator currently selects 865 game files / 18,893,078 bytes after 
 
 257 selected paths require NFC normalization. A large number of Japanese filenames are currently decomposed (NFD), while CP932 database strings resolve to precomposed names (NFC). This is a real compatibility problem for asset lookup.
 
-`tools/prepare_nobihaza.py` therefore:
-
-- validates the RPG2k project markers;
-- normalizes every staged path component to NFC;
-- case-folds destination keys and rejects collisions before copying;
-- skips `RPG_RT.exe` and old logs;
-- skips existing `Save*.lsd` by default for clean-device testing;
-- leaves `.games/NobihazaVH` untouched.
-
 The device runtime now mounts the original ZIP directly. Central-directory scanning happens once at startup; resource loads use hash lookup + positional `RFile::Read`, WinZip AES authentication/decryption when needed, and raw DEFLATE inflation. No external extraction or Japanese filename rename step is required, and ZIP scanning is not part of the per-frame render path.
 
 ## 6. EasyRPG core integration plan
@@ -364,19 +355,6 @@ Initial clean test deliberately excludes the bundled `Save15.lsd`.
 - profile on physical E72 before speculative micro-optimization
 
 ## 10. Build pipeline
-
-### Game validation
-
-```sh
-python3 tools/prepare_nobihaza.py --check
-```
-
-### Stage to a mounted memory card
-
-```sh
-python3 tools/prepare_nobihaza.py \
-  --dest /Volumes/<E72_CARD>/EasyRPG/Games/NobihazaVH
-```
 
 ### Device build
 

@@ -13,6 +13,7 @@
 #include "easyrpgsymbian/DisplaySurface.h"
 #include "easyrpgsymbian/GameLocator.h"
 #include "easyrpgsymbian/GameView.h"
+#include "easyrpgsymbian/PerfOverlay.h"
 #include "easyrpgsymbian/PlayerRuntime.h"
 #include "easyrpgsymbian/SymbianAppUi.h"
 #include "easyrpgsymbian/SymbianLogBridge.h"
@@ -54,11 +55,13 @@ CGameView::CGameView()
       iListItems(NULL),
       iArchivePaths(NULL),
       iDisplaySurface(NULL),
+      iPerfOverlay(NULL),
       iResources(NULL),
       iRuntime(NULL),
       iFrameTimer(NULL),
       iStartGameCallback(NULL),
-      iForeground(ETrue)
+      iForeground(ETrue),
+      iFrameDrawPending(EFalse)
 {
 }
 
@@ -67,6 +70,7 @@ void CGameView::ConstructL(const TRect& aRect)
     CreateWindowL();
     User::LeaveIfError(iFs.Connect());
     iFrameTimer = CFrameTimer::NewL(*this);
+    iPerfOverlay = CPerfOverlay::NewL();
     iStartGameCallback = new (ELeave) CAsyncCallBack(
         TCallBack(&CGameView::StartGameCallback, this),
         CActive::EPriorityHigh);
@@ -114,6 +118,9 @@ CGameView::~CGameView()
 
     delete iDisplaySurface;
     iDisplaySurface = NULL;
+
+    delete iPerfOverlay;
+    iPerfOverlay = NULL;
 
     delete iListBox;
     iListBox = NULL;
@@ -209,6 +216,9 @@ void CGameView::StartSelectedGameL()
     iResources = resources;
     iRuntime = runtime;
     iGameRoot.Copy(selectedArchive);
+    iFrameDrawPending = EFalse;
+    if (iPerfOverlay)
+        iPerfOverlay->Reset();
     DrawNow();
 
     if (iForeground) {
@@ -220,6 +230,7 @@ void CGameView::StartSelectedGameL()
 
 void CGameView::StopGame()
 {
+    iFrameDrawPending = EFalse;
     if (iFrameTimer)
         iFrameTimer->Stop();
 
@@ -276,12 +287,16 @@ void CGameView::SetForeground(TBool aForeground)
 
     if (!aForeground)
     {
+        iFrameDrawPending = EFalse;
         iRuntime->Suspend();
         iFrameTimer->Stop();
     }
     else
     {
+        iFrameDrawPending = EFalse;
         iRuntime->Resume();
+        if (iPerfOverlay)
+            iPerfOverlay->Reset();
         iFrameTimer->Start();
         DrawNow();
     }
@@ -300,28 +315,76 @@ void CGameView::UpdateLayout()
     SetRect(TRect(TPoint(0, 0), screenSize));
 }
 
-void CGameView::Draw(const TRect&) const
+void CGameView::Draw(const TRect& aRect) const
 {
     if (!iRuntime || !iDisplaySurface)
         return;
 
-    CWindowGc& gc = SystemGc();
-    gc.SetPenStyle(CGraphicsContext::ENullPen);
-    gc.SetBrushStyle(CGraphicsContext::ESolidBrush);
-    gc.SetBrushColor(TRgb(0, 0, 0));
-    gc.DrawRect(Rect());
+    const TBool frameDraw = iFrameDrawPending;
+    iFrameDrawPending = EFalse;
+    const TSize bitmapSize = iDisplaySurface->Size();
+    const TSize viewSize = Rect().Size();
+    if (!iDisplaySurface->HasFrame() || (!frameDraw && viewSize != bitmapSize))
+    {
+        CWindowGc& gc = SystemGc();
+        gc.SetPenStyle(CGraphicsContext::ENullPen);
+        gc.SetBrushStyle(CGraphicsContext::ESolidBrush);
+        gc.SetBrushColor(TRgb(0, 0, 0));
+        gc.DrawRect(Rect());
+    }
 
     if (!iDisplaySurface->HasFrame())
         return;
 
-    const TSize bitmapSize = iDisplaySurface->Size();
-    const TSize viewSize = Rect().Size();
     TPoint destination(0, 0);
     if (viewSize.iWidth > bitmapSize.iWidth)
         destination.iX = (viewSize.iWidth - bitmapSize.iWidth) / 2;
     if (viewSize.iHeight > bitmapSize.iHeight)
         destination.iY = (viewSize.iHeight - bitmapSize.iHeight) / 2;
-    gc.BitBlt(destination, &iDisplaySurface->Bitmap());
+
+    CWindowGc& gc = SystemGc();
+    if (frameDraw)
+    {
+        const TInt dirtyCount = iDisplaySurface->DirtyRegionCount();
+        for (TInt index = 0; index < dirtyCount; ++index)
+        {
+            const TRect& dirty = iDisplaySurface->DirtyRegion(index);
+            gc.BitBlt(destination + dirty.iTl,
+                      &iDisplaySurface->Bitmap(),
+                      dirty);
+        }
+        iDisplaySurface->ClearDirtyRegions();
+    }
+    else
+    {
+        const TInt left = Max(0, aRect.iTl.iX - destination.iX);
+        const TInt top = Max(0, aRect.iTl.iY - destination.iY);
+        const TInt right = Min(bitmapSize.iWidth, aRect.iBr.iX - destination.iX);
+        const TInt bottom = Min(bitmapSize.iHeight, aRect.iBr.iY - destination.iY);
+        if (right > left && bottom > top)
+        {
+            const TRect source(left, top, right, bottom);
+            gc.BitBlt(destination + source.iTl,
+                      &iDisplaySurface->Bitmap(),
+                      source);
+        }
+        iDisplaySurface->ClearDirtyRegions();
+    }
+
+    if (iPerfOverlay)
+    {
+        const TPoint overlayPosition(2, 2);
+        if (iPerfOverlay->IsDirty())
+        {
+            const TSize overlaySize = iPerfOverlay->Bitmap().SizeInPixels();
+            const TRect overlayRect(overlayPosition, overlaySize);
+            gc.BitBlt(destination + overlayPosition,
+                      &iDisplaySurface->Bitmap(),
+                      overlayRect);
+        }
+        gc.BitBlt(destination + overlayPosition, &iPerfOverlay->Bitmap());
+        iPerfOverlay->ClearDirty();
+    }
 }
 
 void CGameView::SizeChanged()
@@ -337,7 +400,10 @@ void CGameView::HandleResourceChange(TInt aType)
     {
         UpdateLayout();
         if (iRuntime)
+        {
+            iFrameDrawPending = EFalse;
             DrawNow();
+        }
     }
 }
 
@@ -434,7 +500,16 @@ void CGameView::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
 
     iRuntime->TickL(aLogicFrame, aRenderFrame);
     if (aRenderFrame && iDisplaySurface && iDisplaySurface->HasFrame())
-        DrawDeferred();
+    {
+        if (iPerfOverlay)
+            iPerfOverlay->FrameRendered();
+        const TBool overlayDirty = iPerfOverlay && iPerfOverlay->IsDirty();
+        if (iDisplaySurface->HasDirtyRegions() || overlayDirty)
+        {
+            iFrameDrawPending = ETrue;
+            DrawDeferred();
+        }
+    }
     if (!iRuntime->IsRunning())
     {
         StopGame();

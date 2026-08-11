@@ -10,6 +10,7 @@
 
 class CAknSingleStyleListBox;
 class CAsyncCallBack;
+class CPerfOverlay;
 class CPlayerRuntime;
 class CSymbianDisplaySurface;
 class CZipVfs;
@@ -54,11 +55,13 @@ private:
     CDesCArrayFlat* iListItems;
     CDesCArrayFlat* iArchivePaths;
     CSymbianDisplaySurface* iDisplaySurface;
+    CPerfOverlay* iPerfOverlay;
     CZipVfs* iResources;
     CPlayerRuntime* iRuntime;
     CFrameTimer* iFrameTimer;
     CAsyncCallBack* iStartGameCallback;
     TBool iForeground;
+    mutable TBool iFrameDrawPending;
     TFileName iGameRoot;
 };
 

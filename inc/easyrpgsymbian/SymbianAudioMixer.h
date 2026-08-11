@@ -33,6 +33,7 @@ public:
     void SetStreamVolume(TStreamBus aBus, TInt aVolume);
     TInt StreamFreeFrames(TStreamBus aBus) const;
     TInt StreamQueuedFrames(TStreamBus aBus) const;
+    void CommitStreams();
 
     void ClearAll();
     TInt CachedBytes() const;
@@ -48,10 +49,10 @@ private:
     {
         KOutputSampleRate = 22050,
         KOutputChannels = 2,
-        KOutputBufferBytes = 1024,
-        KOutputBufferCount = 3,
-        KOutputQueueDepth = 2,
-        KStreamBufferFrames = 8192,
+        KOutputBufferBytes = 4096,
+        KOutputBufferCount = 9,
+        KOutputQueueDepth = 8,
+        KStreamBufferFrames = 16384,
         KMaxCachedClips = 128,
         KMaxCachedKeyLength = 160,
         KMaxCachedClipBytes = 1536 * 1024,
@@ -107,6 +108,7 @@ private:
     void FillOutputBuffer(TInt aBufferIndex);
     TInt FreeOutputBufferIndex() const;
     TInt OutputBufferIndex(const TDesC8& aBuffer) const;
+    TBool HasAudioToMix() const;
     void QueueOutputBuffers();
     void ResetOutputQueue();
 

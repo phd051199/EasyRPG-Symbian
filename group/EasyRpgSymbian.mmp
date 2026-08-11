@@ -13,6 +13,7 @@ SOURCE            SymbianDocument.cpp
 SOURCE            SymbianAppUi.cpp
 SOURCE            FrameTimer.cpp
 SOURCE            DisplaySurface.cpp
+SOURCE            PerfOverlay.cpp
 SOURCE            SymbianAudioMixer.cpp
 SOURCE            SymbianAudioBridge.cpp
 SOURCE            GameLocator.cpp
@@ -45,26 +46,20 @@ SYSTEMINCLUDE     \epoc32\include\libc
 LIBRARY           euser.lib
 LIBRARY           apparc.lib
 LIBRARY           cone.lib
-LIBRARY           ws32.lib
-LIBRARY           gdi.lib
 LIBRARY           fbscli.lib
-LIBRARY           bitgdi.lib
+LIBRARY           hal.lib
 LIBRARY           eikcore.lib
 LIBRARY           eikcoctl.lib
 LIBRARY           eikctl.lib
 LIBRARY           avkon.lib
 LIBRARY           bafl.lib
-LIBRARY           aknnotify.lib
 LIBRARY           efsrv.lib
-LIBRARY           ezlib.lib
 LIBRARY           libc.lib
 LIBRARY           libm.lib
 LIBRARY           libz.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
 LIBRARY           midiclient.lib
-LIBRARY           scdv.lib
-LIBRARY           flogger.lib
 STATICLIBRARY     EasyRpgModernCore.lib
 
 LANG              SC
