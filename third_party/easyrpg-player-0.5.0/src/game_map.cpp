@@ -441,6 +441,7 @@ static int DirToMask(int d) {
 		default:
 			assert(false);
 	}
+	return 0;
 }
 
 enum CollisionResult {

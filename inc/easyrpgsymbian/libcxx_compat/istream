@@ -1,0 +1,31 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_ISTREAM
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_ISTREAM
+
+#include <__config>
+#include <ios>
+#include <streambuf>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template<class CharT, class Traits>
+class basic_istream : public basic_ios<CharT, Traits> {
+public:
+    class sentry {
+    public:
+        sentry(basic_istream&, bool) {}
+    };
+
+    basic_istream() : state_(ios_base::goodbit) {}
+    explicit basic_istream(FILE* file) : buffer_(file), state_(ios_base::goodbit) {}
+    basic_streambuf<CharT, Traits>* rdbuf() { return &buffer_; }
+    const basic_streambuf<CharT, Traits>* rdbuf() const { return &buffer_; }
+    void setstate(ios_base::iostate state) { state_ |= state; }
+    void attach(FILE* file) { buffer_.attach(file); state_ = ios_base::goodbit; }
+private:
+    basic_streambuf<CharT, Traits> buffer_;
+    ios_base::iostate state_;
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

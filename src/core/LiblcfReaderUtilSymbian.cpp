@@ -1,13 +1,11 @@
+#include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
+#include "inireader.h"
 #include "reader_util.h"
-
-extern "C" int EasyRpgCoreCp932ToUtf16(const unsigned char* aSource,
-                                         unsigned int aSourceLength,
-                                         unsigned short* aDestination,
-                                         unsigned int aDestinationCapacity,
-                                         unsigned int* aDestinationLength);
+#include "easyrpgsymbian/CoreEncoding.h"
 
 namespace {
 char AsciiLower(char value) {
@@ -106,6 +104,108 @@ std::string Cp932ToUtf8(const std::string& input) {
     delete[] utf16;
     return output;
 }
+
+bool Utf8ToUtf16(const std::string& input, std::vector<unsigned short>& output) {
+    output.clear();
+    for (std::string::size_type i = 0; i < input.size();) {
+        const unsigned int first = static_cast<unsigned char>(input[i]);
+        unsigned int codepoint = 0;
+        unsigned int length = 0;
+        if (first < 0x80u) {
+            codepoint = first;
+            length = 1;
+        } else if (first >= 0xc2u && first <= 0xdfu) {
+            codepoint = first & 0x1fu;
+            length = 2;
+        } else if (first >= 0xe0u && first <= 0xefu) {
+            codepoint = first & 0x0fu;
+            length = 3;
+        } else {
+            return false;
+        }
+        if (i + length > input.size())
+            return false;
+        for (unsigned int offset = 1; offset < length; ++offset) {
+            const unsigned int next = static_cast<unsigned char>(input[i + offset]);
+            if ((next & 0xc0u) != 0x80u)
+                return false;
+            codepoint = (codepoint << 6) | (next & 0x3fu);
+        }
+        if ((length == 3 && codepoint < 0x800u) ||
+            (codepoint >= 0xd800u && codepoint <= 0xdfffu) ||
+            codepoint > 0xffffu)
+            return false;
+        output.push_back(static_cast<unsigned short>(codepoint));
+        i += length;
+    }
+    return true;
+}
+
+std::string Utf8ToCp932(const std::string& input) {
+    std::vector<unsigned short> utf16;
+    if (!Utf8ToUtf16(input, utf16))
+        return std::string();
+    if (utf16.empty())
+        return std::string();
+
+    std::vector<unsigned char> encoded(utf16.size() * 2u);
+    unsigned int encoded_length = 0;
+    const int status = EasyRpgCoreUtf16ToCp932(&utf16[0],
+                                                static_cast<unsigned int>(utf16.size()),
+                                                &encoded[0],
+                                                static_cast<unsigned int>(encoded.size()),
+                                                &encoded_length);
+    if (status != 0)
+        return std::string();
+    return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+}
+}
+
+std::string ReaderUtil::CodepageToEncoding(int codepage) {
+    if (codepage == 0)
+        return std::string();
+    if (codepage == 932)
+        return "SHIFT_JIS";
+    if (codepage == 949)
+        return "cp949";
+    std::string result("CP");
+    char digits[16];
+    std::sprintf(digits, "%d", codepage);
+    result += digits;
+    return result;
+}
+
+std::string ReaderUtil::DetectEncoding(const std::string& database_file) {
+    std::vector<std::string> encodings = DetectEncodings(database_file);
+    return encodings.empty() ? std::string() : encodings.front();
+}
+
+std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database_file) {
+    std::vector<std::string> encodings;
+    if (!database_file.empty())
+        encodings.push_back("SHIFT_JIS");
+    return encodings;
+}
+
+std::string ReaderUtil::GetEncoding(const std::string& ini_file) {
+    if (ini_file.empty())
+        return std::string();
+    INIReader ini(ini_file);
+    if (ini.ParseError() == -1)
+        return std::string();
+    const std::string value = ini.Get("EasyRPG", "Encoding", std::string());
+    if (value.empty())
+        return std::string();
+    return CodepageToEncoding(std::atoi(value.c_str()));
+}
+
+std::string ReaderUtil::GetLocaleEncoding() {
+    return "SHIFT_JIS";
+}
+
+std::string ReaderUtil::Recode(const std::string& str_to_encode,
+                               const std::string& source_encoding) {
+    return Recode(str_to_encode, source_encoding, "UTF-8");
 }
 
 std::string ReaderUtil::Recode(const std::string& str_to_encode,
@@ -119,6 +219,8 @@ std::string ReaderUtil::Recode(const std::string& str_to_encode,
 
     if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc))
         return Cp932ToUtf8(str_to_encode);
+    if (IsUtf8Encoding(src_enc) && IsCp932Encoding(dst_enc))
+        return Utf8ToCp932(str_to_encode);
 
     return str_to_encode;
 }

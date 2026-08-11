@@ -18,7 +18,8 @@ CSymbianAudioMixer::CSymbianAudioMixer()
       iNextSerial(0),
       iClipUseSerial(0),
       iReady(EFalse),
-      iShuttingDown(EFalse)
+      iShuttingDown(EFalse),
+      iLastError(KErrNone)
 {
     TInt i;
     for (i = 0; i < KMaxCachedClips; ++i)
@@ -559,6 +560,7 @@ void CSymbianAudioMixer::QueueOutputBuffers()
         if (error != KErrNone)
         {
             iReady = EFalse;
+            iLastError = error;
             return;
         }
         iOutputBufferQueued[bufferIndex] = ETrue;
@@ -608,6 +610,13 @@ TBool CSymbianAudioMixer::IsReady() const
     return iReady;
 }
 
+TInt CSymbianAudioMixer::ConsumeError()
+{
+    const TInt error = iLastError;
+    iLastError = KErrNone;
+    return error;
+}
+
 TInt CSymbianAudioMixer::OutputSampleRate()
 {
     return KOutputSampleRate;
@@ -623,6 +632,8 @@ void CSymbianAudioMixer::MaoscOpenComplete(TInt aError)
     iReady = (aError == KErrNone);
     if (iReady)
         QueueOutputBuffers();
+    else
+        iLastError = aError;
 }
 
 void CSymbianAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
@@ -637,7 +648,10 @@ void CSymbianAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
     if (aError == KErrNone)
         QueueOutputBuffers();
     else if (aError != KErrAbort && !iShuttingDown)
+    {
         iReady = EFalse;
+        iLastError = aError;
+    }
 }
 
 void CSymbianAudioMixer::MaoscPlayComplete(TInt aError)
@@ -652,5 +666,6 @@ void CSymbianAudioMixer::MaoscPlayComplete(TInt aError)
     else if (aError != KErrAbort)
     {
         iReady = EFalse;
+        iLastError = aError;
     }
 }

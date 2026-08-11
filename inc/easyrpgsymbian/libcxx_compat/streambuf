@@ -1,0 +1,31 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_STREAMBUF
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_STREAMBUF
+
+#include <__config>
+#include <iosfwd>
+#include <cstdio>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template<class CharT, class Traits>
+class basic_streambuf {
+public:
+    basic_streambuf() : file_(0) {}
+    explicit basic_streambuf(FILE* file) : file_(file) {}
+    void attach(FILE* file) { file_ = file; }
+    int sbumpc() { return file_ ? fgetc(file_) : EOF; }
+    int sgetc() {
+        if (!file_)
+            return EOF;
+        const int value = fgetc(file_);
+        if (value != EOF)
+            ungetc(value, file_);
+        return value;
+    }
+private:
+    FILE* file_;
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

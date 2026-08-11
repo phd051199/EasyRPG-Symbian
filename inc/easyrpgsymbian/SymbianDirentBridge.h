@@ -20,6 +20,12 @@ int EasyRpgClosedir(EasyRpgDir* dir);
 
 #ifdef __cplusplus
 }
+
+#ifdef __SYMBIAN32__
+class CZipVfs;
+void EasyRpgSetVirtualProject(CZipVfs* aVfs, const TDesC& aRoot);
+void EasyRpgClearVirtualProject();
+#endif
 #endif
 
 #endif

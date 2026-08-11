@@ -1,140 +1,24 @@
-#include <cstdlib>
-#include <cstring>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "baseui.h"
 #include "bitmap.h"
 #include "color.h"
-#include "data.h"
 #include "graphics.h"
-#include "lmu_reader.h"
-#include "sprite.h"
-#include "tilemap.h"
-#include "easyrpgsymbian/UpstreamGraphicsBridge.h"
-
-namespace ImagePNG {
-bool ReadPNGBytes(const uint8_t* data,
-                  unsigned len,
-                  bool transparent,
-                  int& width,
-                  int& height,
-                  void*& pixels);
-}
+#include "input.h"
+#include "output.h"
+#include "player.h"
+#include "scene.h"
+#include "scene_logo.h"
+#include "easyrpgsymbian/SymbianAudio.h"
+#include "easyrpgsymbian/UpstreamPlayerBridge.h"
 
 namespace {
 unsigned int gTicks = 0;
-std::unique_ptr<Tilemap> gTilemap;
-std::unique_ptr<Sprite> gPlayerSprite;
-std::unique_ptr<Sprite> gPictureSprite;
-
-struct PictureTransition {
-    int remaining;
-    int total;
-    int start_x;
-    int start_y;
-    int start_zoom;
-    int start_opacity;
-    int target_x;
-    int target_y;
-    int target_zoom;
-    int target_opacity;
-};
-
-PictureTransition gPictureTransition = {0, 0, 0, 0, 1000, 255, 0, 0, 1000, 255};
-
-const RPG::Chipset* FindChipset(int chipset_id) {
-    for (std::vector<RPG::Chipset>::const_iterator it = Data::chipsets.begin();
-         it != Data::chipsets.end();
-         ++it) {
-        if (it->ID == chipset_id)
-            return &*it;
-    }
-    return 0;
-}
-
-int ClampScroll(int value, int map_pixels, int screen_pixels) {
-    if (value < 0)
-        return 0;
-    const int maximum = map_pixels > screen_pixels ? map_pixels - screen_pixels : 0;
-    return value > maximum ? maximum : value;
-}
-
-int ClampPercent(int value) {
-    if (value < 0)
-        return 0;
-    return value > 100 ? 100 : value;
-}
-
-int PercentToOpacity(int value) {
-    return (ClampPercent(value) * 255 + 50) / 100;
-}
-
-void ResetPictureTransition() {
-    gPictureTransition.remaining = 0;
-    gPictureTransition.total = 0;
-}
-
-void UpdatePictureTransition() {
-    if (!gPictureSprite || gPictureTransition.remaining <= 0 || gPictureTransition.total <= 0)
-        return;
-
-    const int elapsed = gPictureTransition.total - gPictureTransition.remaining + 1;
-    const int total = gPictureTransition.total;
-    const int x = gPictureTransition.start_x +
-                  (gPictureTransition.target_x - gPictureTransition.start_x) * elapsed / total;
-    const int y = gPictureTransition.start_y +
-                  (gPictureTransition.target_y - gPictureTransition.start_y) * elapsed / total;
-    const int zoom = gPictureTransition.start_zoom +
-                     (gPictureTransition.target_zoom - gPictureTransition.start_zoom) * elapsed / total;
-    const int opacity = gPictureTransition.start_opacity +
-                        (gPictureTransition.target_opacity - gPictureTransition.start_opacity) * elapsed / total;
-    gPictureSprite->SetX(x);
-    gPictureSprite->SetY(y);
-    gPictureSprite->SetZoomX(zoom / 1000.0);
-    gPictureSprite->SetZoomY(zoom / 1000.0);
-    gPictureSprite->SetOpacity(opacity, opacity);
-    --gPictureTransition.remaining;
-}
-
-BitmapRef CreateResourceBitmap(const unsigned char* data, unsigned int size, uint32_t flags) {
-    if (!data || size == 0)
-        return BitmapRef();
-
-    static const unsigned char png_signature[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
-    if (size >= 8 && memcmp(data, png_signature, 8) == 0) {
-        int width = 0;
-        int height = 0;
-        void* pixels = 0;
-        if (!ImagePNG::ReadPNGBytes(data, size, true, width, height, pixels) ||
-            !pixels || width <= 0 || height <= 0)
-            return BitmapRef();
-
-        BitmapRef source = Bitmap::Create(pixels,
-                                           width,
-                                           height,
-                                           width * 4,
-                                           format_R8G8B8A8_a().format());
-        BitmapRef result;
-        if (source) {
-            result = Bitmap::Create(width, height, true);
-            if (result) {
-                result->Clear();
-                result->Blit(0, 0, *source, source->GetRect(), Opacity::opaque);
-                result->CheckPixels(flags);
-            }
-        }
-        source.reset();
-        free(pixels);
-        return result;
-    }
-
-    return Bitmap::Create(data,
-                          size,
-                          true,
-                          flags);
-}
+bool gPlayerStarted = false;
+bool gRenderFrame = true;
+int gLastSceneType = -1;
+bool gLogSceneFrame = false;
 
 class SymbianUi : public BaseUi {
 public:
@@ -177,7 +61,30 @@ public:
     bool IsFullscreen() override { return true; }
     uint32_t GetTicks() const override { return gTicks; }
     void Sleep(uint32_t) override {}
+#ifdef SUPPORT_AUDIO
+    AudioInterface& GetAudio() override { return EasyRpgSymbianAudio(); }
+#endif
 };
+
+void SetKeys(unsigned int keys_0,
+             unsigned int keys_1,
+             unsigned int keys_2,
+             unsigned int keys_3) {
+    if (!DisplayUi)
+        return;
+    BaseUi::KeyStatus& state = DisplayUi->GetKeyStates();
+    state.reset();
+    const unsigned int words[4] = {keys_0, keys_1, keys_2, keys_3};
+    for (unsigned int word = 0; word < 4; ++word) {
+        for (unsigned int bit = 0; bit < 32; ++bit) {
+            const unsigned int index = word * 32 + bit;
+            if (index >= Input::Keys::KEYS_COUNT)
+                return;
+            if ((words[word] & (1u << bit)) != 0)
+                state.set(index);
+        }
+    }
+}
 }
 
 std::shared_ptr<BaseUi> DisplayUi;
@@ -196,11 +103,13 @@ std::shared_ptr<BaseUi> BaseUi::CreateUi(long width, long height, bool, bool) {
 }
 
 void BaseUi::CleanDisplay() {
-    if (main_surface) main_surface->Clear();
+    if (main_surface)
+        main_surface->Clear();
 }
 
 BitmapRef BaseUi::CaptureScreen() {
-    if (!main_surface) return BitmapRef();
+    if (!main_surface)
+        return BitmapRef();
     return Bitmap::Create(*main_surface, main_surface->GetRect());
 }
 
@@ -233,7 +142,8 @@ void BaseUi::SetBackcolor(const Color& color) {
 }
 
 void BaseUi::AddBackground() {
-    if (main_surface) main_surface->Fill(back_color);
+    if (main_surface)
+        main_surface->Fill(back_color);
 }
 
 BitmapRef const& BaseUi::GetDisplaySurface() const {
@@ -248,226 +158,143 @@ BaseUi::KeyStatus& BaseUi::GetKeyStates() {
     return keys;
 }
 
-extern "C" int EasyRpgUpstreamGraphicsInit(int width, int height) {
-    if (width <= 0 || height <= 0) return -1;
-    DisplayUi = BaseUi::CreateUi(width, height, true, false);
-    if (!DisplayUi || !DisplayUi->GetDisplaySurface()) return -2;
+extern "C" int EasyRpgUpstreamPlayerInit(const char* project_path,
+                                           const char* save_path,
+                                           int width,
+                                           int height) {
+    if (!project_path || !save_path || width <= 0 || height <= 0)
+        return -1;
+    if (gPlayerStarted)
+        return -2;
+
+    char arg0[] = "EasyRPG";
+    char project_option[] = "--project-path";
+    char save_option[] = "--save-path";
+    char* argv[] = {
+        arg0,
+        project_option,
+        const_cast<char*>(project_path),
+        save_option,
+        const_cast<char*>(save_path),
+        0
+    };
+
+    Player::Init(5, argv);
+    Output::Debug("Symbian bridge player init returned");
+    if (!DisplayUi)
+        return -3;
+    if (DisplayUi->GetWidth() != width || DisplayUi->GetHeight() != height)
+        DisplayUi->Resize(width, height);
+
     Graphics::Init();
+    Output::Debug("Symbian bridge graphics init done");
+    Input::Init();
+    Output::Debug("Symbian bridge input init done");
+    Scene::Push(std::make_shared<Scene>());
+    Scene::Push(std::shared_ptr<Scene>(new Scene_Logo()));
+    Output::Debug("Symbian bridge scene stack ready");
+    Player::reset_flag = false;
+    Player::FrameReset();
+    gLastSceneType = -1;
+    gLogSceneFrame = false;
+    gPlayerStarted = true;
     return 0;
 }
 
-extern "C" void EasyRpgUpstreamGraphicsShutdown(void) {
-    gPictureSprite.reset();
-    ResetPictureTransition();
-    gPlayerSprite.reset();
-    gTilemap.reset();
-    if (DisplayUi) Graphics::Quit();
-    DisplayUi.reset();
+extern "C" void EasyRpgUpstreamPlayerShutdown(void) {
+    if (!gPlayerStarted)
+        return;
+    gPlayerStarted = false;
+    if (DisplayUi)
+        Player::Exit();
 }
 
-extern "C" int EasyRpgUpstreamGraphicsRenderFrame(void) {
-    if (!DisplayUi || !DisplayUi->GetDisplaySurface()) return -1;
-    if (gTilemap) gTilemap->Update();
-    if (gPlayerSprite) gPlayerSprite->Update();
-    UpdatePictureTransition();
-    if (gPictureSprite) gPictureSprite->Update();
-    Graphics::Update(true);
-    return 0;
+extern "C" void EasyRpgUpstreamPlayerPause(void) {
+    if (gPlayerStarted && DisplayUi)
+        Player::Pause();
 }
 
-extern "C" int EasyRpgUpstreamGraphicsLoadMap(const char* lmu_path,
-                                                const unsigned char* chipset_data,
-                                                unsigned int chipset_size,
-                                                int chipset_id,
-                                                int start_x,
-                                                int start_y) {
-    if (!DisplayUi || !lmu_path || !chipset_data || chipset_size == 0)
+extern "C" void EasyRpgUpstreamPlayerResume(void) {
+    if (gPlayerStarted && DisplayUi)
+        Player::Resume();
+}
+
+extern "C" int EasyRpgUpstreamPlayerTick(unsigned int ticks,
+                                           unsigned int keys_0,
+                                           unsigned int keys_1,
+                                           unsigned int keys_2,
+                                           unsigned int keys_3,
+                                           int render_frame) {
+    if (!gPlayerStarted || !DisplayUi || !Scene::instance)
         return -1;
 
-    std::unique_ptr<RPG::Map> map = LMU_Reader::Load(lmu_path, std::string());
-    if (!map || map->width <= 0 || map->height <= 0)
-        return -2;
-
-    const int selected_chipset_id = chipset_id > 0 ? chipset_id : map->chipset_id;
-    const RPG::Chipset* chipset = FindChipset(selected_chipset_id);
-    if (!chipset)
-        return -3;
-
-    BitmapRef chipset_bitmap = CreateResourceBitmap(chipset_data,
-                                                     chipset_size,
-                                                     Bitmap::Flag_Chipset | Bitmap::Flag_ReadOnly);
-    if (!chipset_bitmap || chipset_bitmap->width() <= 0 || chipset_bitmap->height() <= 0)
-        return -4;
-
-    std::unique_ptr<Tilemap> tilemap(new Tilemap());
-    tilemap->SetWidth(map->width);
-    tilemap->SetHeight(map->height);
-    tilemap->SetChipset(chipset_bitmap);
-    tilemap->SetMapDataDown(map->lower_layer);
-    tilemap->SetMapDataUp(map->upper_layer);
-
-    std::vector<unsigned char> passages_down = chipset->passable_data_lower;
-    std::vector<unsigned char> passages_up = chipset->passable_data_upper;
-    if (passages_down.size() < 162)
-        passages_down.resize(162, 0x0f);
-    if (passages_up.size() < 144)
-        passages_up.resize(144, 0x0f);
-    tilemap->SetPassableDown(passages_down);
-    tilemap->SetPassableUp(passages_up);
-    tilemap->SetAnimationType(chipset->animation_type);
-    tilemap->SetAnimationSpeed(chipset->animation_speed != 0 ? 12 : 24);
-
-    const int ox = ClampScroll(start_x * 16 - 152,
-                               map->width * 16,
-                               static_cast<int>(DisplayUi->GetWidth()));
-    const int oy = ClampScroll(start_y * 16 - 112,
-                               map->height * 16,
-                               static_cast<int>(DisplayUi->GetHeight()));
-    tilemap->SetOx(ox);
-    tilemap->SetOy(oy);
-    gTilemap.swap(tilemap);
-    return 0;
-}
-
-extern "C" int EasyRpgUpstreamGraphicsLoadPlayer(const unsigned char* character_data,
-                                                   unsigned int character_size,
-                                                   int character_index,
-                                                   int transparent,
-                                                   int start_x,
-                                                   int start_y) {
-    if (!DisplayUi || !gTilemap)
-        return -1;
-
-    gPlayerSprite.reset();
-    if (transparent != 0)
-        return 0;
-    if (!character_data || character_size == 0 || character_index < 0 || character_index >= 8)
-        return -2;
-
-    BitmapRef character_bitmap = CreateResourceBitmap(character_data,
-                                                       character_size,
-                                                       Bitmap::Flag_ReadOnly);
-    if (!character_bitmap || character_bitmap->width() <= 0 || character_bitmap->height() <= 0)
-        return -3;
-    if (character_bitmap->width() % 12 != 0 || character_bitmap->height() % 8 != 0)
-        return -4;
-
-    const int frame_width = character_bitmap->width() / 12;
-    const int frame_height = character_bitmap->height() / 8;
-    const int group_x = character_index % 4;
-    const int group_y = character_index / 4;
-    const int source_x = (group_x * 3 + 1) * frame_width;
-    const int source_y = group_y * 4 * frame_height;
-
-    std::unique_ptr<Sprite> sprite(new Sprite());
-    sprite->SetBitmap(character_bitmap);
-    sprite->SetSrcRect(Rect(source_x, source_y, frame_width, frame_height));
-    sprite->SetOx(frame_width / 2);
-    sprite->SetOy(frame_height);
-    sprite->SetX(start_x * 16 - gTilemap->GetOx() + 8);
-    sprite->SetY(start_y * 16 - gTilemap->GetOy() + 16);
-    sprite->SetZ(100);
-    gPlayerSprite.swap(sprite);
-    return 0;
-}
-
-extern "C" int EasyRpgUpstreamGraphicsShowPicture(const unsigned char* picture_data,
-                                                    unsigned int picture_size,
-                                                    int x,
-                                                    int y,
-                                                    int magnify_percent,
-                                                    int opacity_percent) {
-    if (!DisplayUi || !picture_data || picture_size == 0)
-        return -1;
-
-    BitmapRef picture_bitmap = CreateResourceBitmap(picture_data,
-                                                     picture_size,
-                                                     Bitmap::Flag_ReadOnly);
-    if (!picture_bitmap || picture_bitmap->width() <= 0 || picture_bitmap->height() <= 0)
-        return -2;
-
-    std::unique_ptr<Sprite> sprite(new Sprite());
-    sprite->SetBitmap(picture_bitmap);
-    sprite->SetOx(picture_bitmap->width() / 2);
-    sprite->SetOy(picture_bitmap->height() / 2);
-    sprite->SetX(x);
-    sprite->SetY(y);
-    sprite->SetZoomX(ClampPercent(magnify_percent) / 100.0);
-    sprite->SetZoomY(ClampPercent(magnify_percent) / 100.0);
-    const int opacity = PercentToOpacity(opacity_percent);
-    sprite->SetOpacity(opacity, opacity);
-    sprite->SetZ(1000);
-    gPictureSprite.swap(sprite);
-    ResetPictureTransition();
-    return 0;
-}
-
-extern "C" int EasyRpgUpstreamGraphicsMovePicture(int x,
-                                                    int y,
-                                                    int magnify_percent,
-                                                    int opacity_percent,
-                                                    int duration_frames) {
-    if (!gPictureSprite)
-        return -1;
-
-    const int target_zoom = ClampPercent(magnify_percent) * 10;
-    const int target_opacity = PercentToOpacity(opacity_percent);
-    if (duration_frames <= 0) {
-        gPictureSprite->SetX(x);
-        gPictureSprite->SetY(y);
-        gPictureSprite->SetZoomX(target_zoom / 1000.0);
-        gPictureSprite->SetZoomY(target_zoom / 1000.0);
-        gPictureSprite->SetOpacity(target_opacity, target_opacity);
-        ResetPictureTransition();
-        return 0;
-    }
-
-    gPictureTransition.remaining = duration_frames;
-    gPictureTransition.total = duration_frames;
-    gPictureTransition.start_x = gPictureSprite->GetX();
-    gPictureTransition.start_y = gPictureSprite->GetY();
-    gPictureTransition.start_zoom = static_cast<int>(gPictureSprite->GetZoomX() * 1000.0 + 0.5);
-    gPictureTransition.start_opacity = gPictureSprite->GetOpacity();
-    gPictureTransition.target_x = x;
-    gPictureTransition.target_y = y;
-    gPictureTransition.target_zoom = target_zoom;
-    gPictureTransition.target_opacity = target_opacity;
-    return 0;
-}
-
-extern "C" void EasyRpgUpstreamGraphicsErasePicture(void) {
-    gPictureSprite.reset();
-    ResetPictureTransition();
-}
-
-extern "C" void EasyRpgUpstreamGraphicsSetTicks(unsigned int ticks) {
     gTicks = ticks;
-}
-
-extern "C" void EasyRpgUpstreamGraphicsSetKeys(unsigned int keys_lo, unsigned int keys_hi) {
-    if (!DisplayUi) return;
-    BaseUi::KeyStatus& state = DisplayUi->GetKeyStates();
-    state.reset();
-    for (unsigned int i = 0; i < 32; ++i) {
-        if ((keys_lo & (1u << i)) != 0) state.set(i);
-        if ((keys_hi & (1u << i)) != 0) state.set(i + 32);
+    gRenderFrame = render_frame != 0;
+    SetKeys(keys_0, keys_1, keys_2, keys_3);
+    static bool first_tick = true;
+    if (first_tick)
+        Output::Debug("Symbian first tick enter render=%d", gRenderFrame ? 1 : 0);
+    Player::MainLoop();
+    if (first_tick) {
+        Output::Debug("Symbian first tick leave");
+        first_tick = false;
     }
+    if (DisplayUi && Scene::instance) {
+        const int scene_type = static_cast<int>(Scene::instance->type);
+        if (scene_type != gLastSceneType) {
+            gLastSceneType = scene_type;
+            gLogSceneFrame = true;
+            if (scene_type >= 0 && scene_type < Scene::SceneMax)
+                Output::Debug("Symbian scene %s", Scene::scene_names[scene_type]);
+        }
+        if (gRenderFrame && gLogSceneFrame && DisplayUi->GetDisplaySurface()) {
+            BitmapRef surface = DisplayUi->GetDisplaySurface();
+            const unsigned int* pixels = reinterpret_cast<const unsigned int*>(surface->pixels());
+            if (pixels) {
+                const int width = surface->width();
+                const int height = surface->height();
+                const int pitch = surface->pitch() / static_cast<int>(sizeof(unsigned int));
+                unsigned int hash = 2166136261u;
+                for (int y = 0; y < height; ++y) {
+                    const unsigned int* row = pixels + y * pitch;
+                    for (int x = 0; x < width; ++x) {
+                        hash ^= row[x];
+                        hash *= 16777619u;
+                    }
+                }
+                const unsigned int center = pixels[(height / 2) * pitch + width / 2];
+                Output::Debug("Symbian frame scene=%d hash=%08x center=%08x", scene_type, hash, center);
+                gLogSceneFrame = false;
+            }
+        }
+    }
+    if (!DisplayUi) {
+        gPlayerStarted = false;
+        return 1;
+    }
+    return 0;
 }
 
-extern "C" const unsigned int* EasyRpgUpstreamGraphicsPixels(void) {
-    if (!DisplayUi || !DisplayUi->GetDisplaySurface()) return 0;
+extern "C" int EasyRpgUpstreamPlayerShouldRender(void) {
+    return gRenderFrame ? 1 : 0;
+}
+
+extern "C" const unsigned int* EasyRpgUpstreamPlayerPixels(void) {
+    if (!DisplayUi || !DisplayUi->GetDisplaySurface())
+        return 0;
     return reinterpret_cast<const unsigned int*>(DisplayUi->GetDisplaySurface()->pixels());
 }
 
-extern "C" int EasyRpgUpstreamGraphicsWidth(void) {
+extern "C" int EasyRpgUpstreamPlayerWidth(void) {
     return DisplayUi ? static_cast<int>(DisplayUi->GetWidth()) : 0;
 }
 
-extern "C" int EasyRpgUpstreamGraphicsHeight(void) {
+extern "C" int EasyRpgUpstreamPlayerHeight(void) {
     return DisplayUi ? static_cast<int>(DisplayUi->GetHeight()) : 0;
 }
 
-extern "C" int EasyRpgUpstreamGraphicsPitchPixels(void) {
-    if (!DisplayUi || !DisplayUi->GetDisplaySurface()) return 0;
+extern "C" int EasyRpgUpstreamPlayerPitchPixels(void) {
+    if (!DisplayUi || !DisplayUi->GetDisplaySurface())
+        return 0;
     return DisplayUi->GetDisplaySurface()->pitch() / static_cast<int>(sizeof(unsigned int));
 }

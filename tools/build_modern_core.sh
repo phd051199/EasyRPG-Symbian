@@ -28,6 +28,7 @@ LIBLCF_ROOT="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
 LIBLCF_GENERATED_ROOT="$LIBLCF_ROOT/generated"
 LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/easyrpgsymbian/libcxx_compat"
 PLAYER_ROOT="$PROJECT_DIR/third_party/easyrpg-player-0.5.0/src"
+PLAYER_VENDOR_ROOT="$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src"
 PIXMAN_ROOT="$PROJECT_DIR/third_party/pixman-0.34.0/pixman"
 SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
@@ -35,6 +36,7 @@ SOURCES=(
     "$LIBLCF_ROOT/reader_lcf.cpp"
     "$LIBLCF_ROOT/data.cpp"
     "$LIBLCF_ROOT/rpg_setup.cpp"
+    "$LIBLCF_ROOT/rpg_fixup.cpp"
     "$LIBLCF_ROOT/ldb_reader.cpp"
     "$LIBLCF_ROOT/ldb_equipment.cpp"
     "$LIBLCF_ROOT/ldb_eventcommand.cpp"
@@ -44,6 +46,9 @@ SOURCES=(
     "$LIBLCF_ROOT/lmt_treemap.cpp"
     "$LIBLCF_ROOT/lmu_reader.cpp"
     "$LIBLCF_ROOT/lmu_movecommand.cpp"
+    "$LIBLCF_ROOT/lsd_reader.cpp"
+    "$LIBLCF_ROOT/ini.cpp"
+    "$LIBLCF_ROOT/inireader.cpp"
     "$LIBLCF_ROOT/reader_flags.cpp"
     "$LIBLCF_ROOT/writer_lcf.cpp"
     "$LIBLCF_ROOT/writer_xml.cpp"
@@ -56,12 +61,12 @@ SOURCES=(
     "$PROJECT_DIR/src/core/UpstreamLmuBridge.cpp"
     "$PROJECT_DIR/src/core/UpstreamLcfLinkAnchor.cpp"
     "$PROJECT_DIR/src/core/SymbianUi.cpp"
+    "$PROJECT_DIR/src/core/SymbianAsyncHandler.cpp"
+    "$PROJECT_DIR/src/core/SymbianAudio.cpp"
     "$PROJECT_DIR/src/core/SymbianOutput.cpp"
-    "$PROJECT_DIR/src/core/SymbianPlayerState.cpp"
-    "$PROJECT_DIR/src/core/SymbianFont.cpp"
     "$PROJECT_DIR/src/core/SymbianAeabi.cpp"
-    "$PROJECT_DIR/src/core/SymbianCache.cpp"
     "$PROJECT_DIR/src/core/SymbianImage.cpp"
+    "$PROJECT_DIR/src/core/SymbianRegistry.cpp"
     "$PIXMAN_ROOT/pixman-implementation.c"
     "$PIXMAN_ROOT/pixman-general.c"
     "$PIXMAN_ROOT/pixman-utils.c"
@@ -102,14 +107,123 @@ SOURCES=(
     "$PLAYER_ROOT/audio.cpp"
     "$PLAYER_ROOT/game_actors.cpp"
     "$PLAYER_ROOT/game_party_base.cpp"
+    "$PLAYER_ROOT/game_system.cpp"
+    "$PLAYER_ROOT/game_screen.cpp"
+    "$PLAYER_ROOT/game_picture.cpp"
+    "$PLAYER_ROOT/game_enemyparty.cpp"
+    "$PLAYER_ROOT/player.cpp"
     "$PLAYER_ROOT/input.cpp"
+    "$PLAYER_ROOT/input_buttons_desktop.cpp"
     "$PLAYER_ROOT/filefinder.cpp"
+    "$PLAYER_VENDOR_ROOT/cache.cpp"
+    "$PLAYER_VENDOR_ROOT/game_actor.cpp"
+    "$PLAYER_VENDOR_ROOT/game_battler.cpp"
+    "$PLAYER_VENDOR_ROOT/game_enemy.cpp"
+    "$PLAYER_VENDOR_ROOT/game_party.cpp"
+    "$PLAYER_VENDOR_ROOT/game_battle.cpp"
+    "$PLAYER_VENDOR_ROOT/game_interpreter_battle.cpp"
+    "$PLAYER_VENDOR_ROOT/battle_animation.cpp"
+    "$PLAYER_VENDOR_ROOT/scene.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_logo.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_title.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_map.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_gamebrowser.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_actortarget.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_battle.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_battle_rpg2k.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_battle_rpg2k3.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_debug.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_end.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_equip.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_file.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_gameover.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_item.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_load.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_menu.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_name.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_order.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_save.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_shop.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_skill.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_status.cpp"
+    "$PLAYER_VENDOR_ROOT/scene_teleport.cpp"
+    "$PLAYER_VENDOR_ROOT/background.cpp"
+    "$PLAYER_VENDOR_ROOT/game_battlealgorithm.cpp"
+    "$PLAYER_VENDOR_ROOT/audio_secache.cpp"
+    "$PLAYER_VENDOR_ROOT/font.cpp"
+    "$PLAYER_VENDOR_ROOT/text.cpp"
+    "$PLAYER_VENDOR_ROOT/window_about.cpp"
+    "$PLAYER_VENDOR_ROOT/window_actorinfo.cpp"
+    "$PLAYER_VENDOR_ROOT/window_actorstatus.cpp"
+    "$PLAYER_VENDOR_ROOT/window_actortarget.cpp"
+    "$PLAYER_VENDOR_ROOT/window_base.cpp"
+    "$PLAYER_VENDOR_ROOT/window_battlecommand.cpp"
+    "$PLAYER_VENDOR_ROOT/window_battlemessage.cpp"
+    "$PLAYER_VENDOR_ROOT/window_battleoption.cpp"
+    "$PLAYER_VENDOR_ROOT/window_battlestatus.cpp"
+    "$PLAYER_VENDOR_ROOT/window_command.cpp"
+    "$PLAYER_VENDOR_ROOT/window_equip.cpp"
+    "$PLAYER_VENDOR_ROOT/window_equipitem.cpp"
+    "$PLAYER_VENDOR_ROOT/window_equipstatus.cpp"
+    "$PLAYER_VENDOR_ROOT/window_face.cpp"
+    "$PLAYER_VENDOR_ROOT/window_gamelist.cpp"
+    "$PLAYER_VENDOR_ROOT/window_gold.cpp"
+    "$PLAYER_VENDOR_ROOT/window_help.cpp"
+    "$PLAYER_VENDOR_ROOT/window_item.cpp"
+    "$PLAYER_VENDOR_ROOT/window_keyboard.cpp"
+    "$PLAYER_VENDOR_ROOT/window_menustatus.cpp"
+    "$PLAYER_VENDOR_ROOT/window_message.cpp"
+    "$PLAYER_VENDOR_ROOT/window_name.cpp"
+    "$PLAYER_VENDOR_ROOT/window_numberinput.cpp"
+    "$PLAYER_VENDOR_ROOT/window_savefile.cpp"
+    "$PLAYER_VENDOR_ROOT/window_selectable.cpp"
+    "$PLAYER_VENDOR_ROOT/window_shop.cpp"
+    "$PLAYER_VENDOR_ROOT/window_shopbuy.cpp"
+    "$PLAYER_VENDOR_ROOT/window_shopnumber.cpp"
+    "$PLAYER_VENDOR_ROOT/window_shopparty.cpp"
+    "$PLAYER_VENDOR_ROOT/window_shopsell.cpp"
+    "$PLAYER_VENDOR_ROOT/window_shopstatus.cpp"
+    "$PLAYER_VENDOR_ROOT/window_skill.cpp"
+    "$PLAYER_VENDOR_ROOT/window_skillstatus.cpp"
+    "$PLAYER_VENDOR_ROOT/window_targetstatus.cpp"
+    "$PLAYER_VENDOR_ROOT/window_teleport.cpp"
+    "$PLAYER_VENDOR_ROOT/window_varlist.cpp"
+    "$PLAYER_VENDOR_ROOT/spriteset_map.cpp"
+    "$PLAYER_VENDOR_ROOT/spriteset_battle.cpp"
+    "$PLAYER_VENDOR_ROOT/sprite_battler.cpp"
+    "$PLAYER_VENDOR_ROOT/sprite_character.cpp"
+    "$PLAYER_VENDOR_ROOT/sprite_airshipshadow.cpp"
+    "$PLAYER_VENDOR_ROOT/sprite_timer.cpp"
+    "$PLAYER_VENDOR_ROOT/plane.cpp"
+    "$PLAYER_VENDOR_ROOT/screen.cpp"
+    "$PLAYER_VENDOR_ROOT/weather.cpp"
+    "$PLAYER_VENDOR_ROOT/frame.cpp"
+    "$PLAYER_VENDOR_ROOT/rtp_table.cpp"
     "$GENERATED_CP932"
 )
 
 while IFS= read -r generated_source; do
     SOURCES+=("$generated_source")
 done < <(find "$LIBLCF_GENERATED_ROOT" -maxdepth 1 -type f -name '*.cpp' | sort)
+
+while IFS= read -r upstream_source; do
+    upstream_name=$(basename -- "$upstream_source")
+    case "$upstream_name" in
+        async_handler.cpp|audio_al.cpp|audio_resampler.cpp|audio_sdl.cpp|baseui.cpp|decoder_*.cpp|font.cpp|image_bmp.cpp|image_png.cpp|image_xyz.cpp|input_buttons_gekko.cpp|input_buttons_opendingux.cpp|input_buttons_psp.cpp|main.cpp|output.cpp|registry.cpp|registry_wine.cpp|sdl_ui.cpp|text.cpp|util_win.cpp)
+            continue
+            ;;
+    esac
+    already_added=false
+    for existing_source in "${SOURCES[@]}"; do
+        if [[ $(basename -- "$existing_source") == "$upstream_name" ]]; then
+            already_added=true
+            break
+        fi
+    done
+    if [[ $already_added == false ]]; then
+        SOURCES+=("$upstream_source")
+    fi
+done < <(find "$PLAYER_VENDOR_ROOT" -maxdepth 1 -type f -name '*.cpp' | sort)
 
 find_wine() {
     if [[ -n $WINE_BIN && -x $WINE_BIN ]]; then
@@ -174,19 +288,23 @@ for source in "${SOURCES[@]}"; do
     # by the original S60 CSL assembler so its ELF/EABI format is linkable by
     # the SDK's arm-none-symbianelf-ld and elf2e32.
     source_define=
-    if [[ $source == "$PLAYER_ROOT/main_data.cpp" ]]; then
-        source_define='-DUSE_SDL -DNO_SDL_MIXER'
-    elif [[ $source == "$PLAYER_ROOT/filefinder.cpp" ]]; then
-        source_define='-D_3DS -Dfopen=EasyRpgFopen'
-    elif [[ $source == "$PLAYER_ROOT/"* || $source == "$PROJECT_DIR/src/core/Symbian"*.cpp ]]; then
-        source_define=-D_3DS
+    if [[ $source == "$PLAYER_ROOT/filefinder.cpp" || $source == "$PLAYER_VENDOR_ROOT/filefinder.cpp" ]]; then
+        source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
+    elif [[ $source == "$PLAYER_ROOT/"* || $source == "$PLAYER_VENDOR_ROOT/"* ]]; then
+        source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
+    elif [[ $source == "$PROJECT_DIR/src/core/Symbian"*.cpp ]]; then
+        source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
+    elif [[ $source == "$LIBLCF_ROOT/"* || $source == "$GENERATED_READER_STRUCT" ]]; then
+        source_define='-Dfopen=EasyRpgFopen'
     fi
     language_flag=-xc++
     standard_flag=-std=c++11
+    preinclude_flag="-include $PROJECT_DIR/inc/easyrpgsymbian/SymbianUpstreamCompat.h"
     pixman_define=
     if [[ $source == *.c ]]; then
         language_flag=-xc
         standard_flag=-std=c99
+        preinclude_flag=
     fi
     if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/src/core/PixmanSymbianCompat.c" ]]; then
         pixman_define='-DPACKAGE=1 -DPIXMAN_NO_TLS'
@@ -215,11 +333,13 @@ for source in "${SOURCES[@]}"; do
         -D_LIBCPP_HAS_NO_THREADS \
         $source_define \
         $pixman_define \
+        $preinclude_flag \
         -nostdinc++ \
         -I "$LIBCXX_COMPAT_INCLUDE" \
         -I "$PROJECT_DIR/third_party/libcxx-4.0.1/include" \
         -I "$PROJECT_DIR/inc/easyrpgsymbian/libc_compat" \
         -I "$PLAYER_ROOT" \
+        -I "$PLAYER_VENDOR_ROOT" \
         -I "$PIXMAN_ROOT" \
         -I "$LIBLCF_ROOT" \
         -I "$LIBLCF_GENERATED_ROOT" \
@@ -240,6 +360,7 @@ for source in "${SOURCES[@]}"; do
         -e 's/^([[:space:]]*)lsr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, lsr \6/' \
         -e 's/^([[:space:]]*)asr([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, asr \6/' \
         -e 's/^([[:space:]]*)ror([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,]+),[[:space:]]*((r(1[0-5]|[0-9]))|ip|lr|sp)[[:space:]]*$/\1mov\2\3\4, \5, ror \6/' \
+        -e 's/^([[:space:]]*)rrx([a-z]{0,2})([[:space:]]+)([^,]+),[[:space:]]*([^,[:space:]]+)[[:space:]]*$/\1mov\2\3\4, \5, rrx/' \
         -e 's/^([[:space:]]*)\.inst([[:space:]]+)/\1.word\2/' \
         -e 's/"awGR"/"awG"/g' \
         "$assembly_raw" > "$assembly"
@@ -252,12 +373,21 @@ for source in "${SOURCES[@]}"; do
 done
 
 WIN_LIBRARY="$WIN_BUILD_DIR\\EasyRpgModernCore.lib"
-WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
-    "$WINE_BIN" "$ARCHIVER" crs "$WIN_LIBRARY" "${win_objects[@]}"
+chunk_size=32
+for ((chunk_start=0; chunk_start<${#win_objects[@]}; chunk_start+=chunk_size)); do
+    chunk=("${win_objects[@]:chunk_start:chunk_size}")
+    if ((chunk_start == 0)); then
+        archive_flags=crs
+    else
+        archive_flags=rs
+    fi
+    WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
+        "$WINE_BIN" "$ARCHIVER" "$archive_flags" "$WIN_LIBRARY" "${chunk[@]}"
+done
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreWinZipAesDecrypt EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
+for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgCoreWinZipAesDecrypt EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "Modern core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2

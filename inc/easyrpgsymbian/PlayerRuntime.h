@@ -2,7 +2,6 @@
 #define EASYRPG_SYMBIAN_PLAYER_RUNTIME_H
 
 #include <e32base.h>
-#include "easyrpgsymbian/UpstreamLmuBridge.h"
 
 class CSymbianDisplaySurface;
 class CZipVfs;
@@ -29,23 +28,21 @@ public:
 
     void SetKeyState(TUint32 aKey, TBool aPressed);
     void ReleaseAllKeys();
+    void Suspend();
+    void Resume();
     void TickL(TUint32 aLogicFrame, TBool aRenderFrame);
+    TBool IsRunning() const;
 
 private:
     CPlayerRuntime(CZipVfs* aResources, CSymbianDisplaySurface& aDisplaySurface);
     void ConstructL(const TDesC& aGameSource);
-    void LoadMapL(TInt aMapId, TInt aX, TInt aY);
-    void PrepareBootSequenceL(const TDesC& aMaterializedMapPath);
-    void UpdateBootSequenceL();
+    void PrepareProjectRootL(const TDesC& aGameSource, TDes8& aProjectPath, TDes8& aSavePath);
 
 private:
     CZipVfs* iResources;
     CSymbianDisplaySurface& iDisplaySurface;
     TUint32 iPressedKeys;
-    EasyRpgUpstreamBootSequence iBootSequence;
-    TBuf8<96> iBootPictureNameSjis;
-    TUint32 iBootFrame;
-    TInt iBootPhase;
+    TBool iPlayerRunning;
 };
 
 #endif

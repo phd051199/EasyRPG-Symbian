@@ -6,11 +6,35 @@
 #include "output.h"
 
 namespace {
-void PrintLine(const char* prefix, const char* fmt, va_list ap) {
-    if (prefix) std::fprintf(stderr, "%s", prefix);
-    std::vfprintf(stderr, fmt, ap);
-    std::fprintf(stderr, "\n");
+bool gLogStarted = false;
+
+void WriteLine(const char* prefix, const char* message) {
+    if (prefix)
+        std::fprintf(stderr, "%s", prefix);
+    std::fprintf(stderr, "%s\n", message);
+
+    FILE* log = std::fopen("C:\\Data\\EasyRPG\\easyrpg.log", gLogStarted ? "a" : "w");
+    if (!log)
+        return;
+    if (prefix)
+        std::fprintf(log, "%s", prefix);
+    std::fprintf(log, "%s\n", message);
+    std::fclose(log);
+    gLogStarted = true;
 }
+
+void PrintLine(const char* prefix, const char* fmt, va_list ap) {
+    char message[1024];
+    message[0] = 0;
+    vsnprintf(message, sizeof(message), fmt, ap);
+    message[sizeof(message) - 1] = 0;
+    WriteLine(prefix, message);
+}
+}
+
+extern "C" void EasyRpgSymbianLogDebug(const char* message) {
+    if (message)
+        WriteLine("symbian: ", message);
 }
 
 namespace Output {
@@ -36,7 +60,7 @@ void Post(const char* fmt, ...) {
 }
 
 void PostStr(std::string const& msg) {
-    std::fprintf(stderr, "%s\n", msg.c_str());
+    WriteLine(0, msg.c_str());
 }
 
 void Warning(const char* fmt, ...) {
@@ -47,7 +71,7 @@ void Warning(const char* fmt, ...) {
 }
 
 void WarningStr(std::string const& warn) {
-    std::fprintf(stderr, "warning: %s\n", warn.c_str());
+    WriteLine("warning: ", warn.c_str());
 }
 
 void Error(const char* fmt, ...) {
@@ -56,11 +80,13 @@ void Error(const char* fmt, ...) {
     PrintLine("error: ", fmt, ap);
     va_end(ap);
     std::abort();
+    for (;;) {}
 }
 
 void ErrorStr(std::string const& err) {
-    std::fprintf(stderr, "error: %s\n", err.c_str());
+    WriteLine("error: ", err.c_str());
     std::abort();
+    for (;;) {}
 }
 
 void Debug(const char* fmt, ...) {
@@ -71,6 +97,6 @@ void Debug(const char* fmt, ...) {
 }
 
 void DebugStr(std::string const& msg) {
-    std::fprintf(stderr, "debug: %s\n", msg.c_str());
+    WriteLine("debug: ", msg.c_str());
 }
 }

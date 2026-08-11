@@ -26,6 +26,9 @@
 
 namespace ImagePNG {
 	bool ReadPNG(FILE* stream, const void* buffer, bool transparent, int& width, int& height, void*& pixels);
+#ifdef EASYRPG_SYMBIAN
+	bool ReadPNGBytes(const uint8_t* data, unsigned len, bool transparent, int& width, int& height, void*& pixels);
+#endif
 	bool WritePNG(std::ostream& os, uint32_t width, uint32_t height, uint32_t* data);
 }
 

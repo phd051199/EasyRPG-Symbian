@@ -610,7 +610,11 @@ Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t f
 #endif
 #ifdef SUPPORT_PNG
 	if (bytes > 4 && strncmp((char*)(data + 1), "PNG", 3) == 0)
+#ifdef EASYRPG_SYMBIAN
+		img_okay = ImagePNG::ReadPNGBytes(data, bytes, transparent, w, h, pixels);
+#else
 		img_okay = ImagePNG::ReadPNG((FILE*) NULL, (const void*) data, transparent, w, h, pixels);
+#endif
 	else
 #endif
 		Output::Warning("Unsupported image");

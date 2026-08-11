@@ -1,4 +1,5 @@
 #include "easyrpgsymbian/FrameTimer.h"
+#include "easyrpgsymbian/SymbianLogBridge.h"
 
 CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 {
@@ -34,13 +35,14 @@ void CFrameTimer::Start()
     if (iRunning)
         return;
 
-    iLogicFrame = 0;
     iRunning = ETrue;
     Arm();
 }
 
 void CFrameTimer::Stop()
 {
+    if (iRunning && iLogicFrame == 0)
+        EasyRpgSymbianLogDebug("frame timer stopped before first tick");
     iRunning = EFalse;
     Cancel();
 }
@@ -55,7 +57,7 @@ void CFrameTimer::Arm()
     if (!iRunning || IsActive())
         return;
 
-    iTimer.HighRes(iStatus, TTimeIntervalMicroSeconds32(KLogicTickMicroseconds));
+    iTimer.After(iStatus, TTimeIntervalMicroSeconds32(KLogicTickMicroseconds));
     SetActive();
 }
 
@@ -64,20 +66,30 @@ void CFrameTimer::RunL()
     if (!iRunning)
         return;
 
+    if (iLogicFrame == 0)
+        EasyRpgSymbianLogDebug("frame timer dispatched");
+
     if (iStatus.Int() != KErrNone)
     {
+        const TInt error = iStatus.Int();
         Stop();
+        iObserver.FrameError(error);
         return;
     }
 
     ++iLogicFrame;
+    if (iLogicFrame == 1)
+        EasyRpgSymbianLogDebug("frame timer first tick");
 
     Arm();
 
-    const TBool renderFrame = ((iLogicFrame % KRenderDivisor) == 0);
+    const TBool renderFrame = ((iLogicFrame % KRenderDivisor) == 1);
     TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
     if (error != KErrNone)
+    {
         Stop();
+        iObserver.FrameError(error);
+    }
 }
 
 TInt CFrameTimer::RunError(TInt)

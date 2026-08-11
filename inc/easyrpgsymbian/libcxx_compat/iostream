@@ -3,4 +3,20 @@
 
 #include <iosfwd>
 
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+struct EasyRpgCompatEndl {};
+
+class EasyRpgCompatOut {
+public:
+    template<class T>
+    EasyRpgCompatOut& operator<<(const T&) { return *this; }
+};
+
+static EasyRpgCompatOut cout;
+static EasyRpgCompatOut cerr;
+static EasyRpgCompatEndl endl;
+
+_LIBCPP_END_NAMESPACE_STD
+
 #endif

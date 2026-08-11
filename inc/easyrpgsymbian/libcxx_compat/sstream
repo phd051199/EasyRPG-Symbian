@@ -5,6 +5,7 @@
 #include <iosfwd>
 #include <string>
 #include <stdio.h>
+#include <stdlib.h>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
@@ -71,9 +72,23 @@ public:
 template <>
 class basic_stringstream<char, char_traits<char>, allocator<char> > : public __easyrpg_string_stream_base {
 public:
-    basic_stringstream() {}
+    basic_stringstream() : read_pos_(0) {}
+    explicit basic_stringstream(const string& value) : read_pos_(0) { value_ = value; }
     string str() const { return str_value(); }
-    void str(const string& value) { value_ = value; width_ = 0; }
+    void str(const string& value) { value_ = value; width_ = 0; read_pos_ = 0; }
+    bool read_line(string& out) {
+        if (read_pos_ >= value_.size())
+            return false;
+        size_t end = value_.find('\n', read_pos_);
+        if (end == string::npos)
+            end = value_.size();
+        size_t length = end - read_pos_;
+        if (length > 0 && value_[read_pos_ + length - 1] == '\r')
+            --length;
+        out.assign(value_, read_pos_, length);
+        read_pos_ = end < value_.size() ? end + 1 : end;
+        return true;
+    }
     basic_stringstream& operator<<(const string& value) { append(value); return *this; }
     basic_stringstream& operator<<(const char* value) { append(value); return *this; }
     basic_stringstream& operator<<(char value) { append(value); return *this; }
@@ -88,7 +103,22 @@ public:
     basic_stringstream& operator<<(unsigned long long value) { append_unsigned(value); return *this; }
     basic_stringstream& operator<<(float value) { append_double(value); return *this; }
     basic_stringstream& operator<<(double value) { append_double(value); return *this; }
+    basic_stringstream& operator>>(int& value) {
+        const char* start = value_.c_str() + read_pos_;
+        char* end = 0;
+        value = static_cast<int>(strtol(start, &end, 10));
+        if (end && end >= start)
+            read_pos_ += static_cast<size_t>(end - start);
+        return *this;
+    }
+private:
+    size_t read_pos_;
 };
+
+inline bool getline(basic_stringstream<char, char_traits<char>, allocator<char> >& stream,
+                    string& out) {
+    return stream.read_line(out);
+}
 
 _LIBCPP_END_NAMESPACE_STD
 

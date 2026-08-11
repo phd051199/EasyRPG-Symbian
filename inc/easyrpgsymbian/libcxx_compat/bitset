@@ -46,6 +46,10 @@ public:
         return (words_[pos / kWordBits] & (static_cast<unsigned long>(1) << (pos % kWordBits))) != 0;
     }
 
+    bool test(size_t pos) const {
+        return (*this)[pos];
+    }
+
     bool any() const {
         for (size_t i = 0; i < kWordCount; ++i) {
             if (words_[i] != 0) return true;

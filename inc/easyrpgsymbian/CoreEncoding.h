@@ -10,6 +10,11 @@ int EasyRpgCoreCp932ToUtf16(const unsigned char* aSource,
                             unsigned short* aDestination,
                             unsigned int aDestinationCapacity,
                             unsigned int* aDestinationLength);
+int EasyRpgCoreUtf16ToCp932(const unsigned short* aSource,
+                            unsigned int aSourceLength,
+                            unsigned char* aDestination,
+                            unsigned int aDestinationCapacity,
+                            unsigned int* aDestinationLength);
 
 #ifdef __cplusplus
 }

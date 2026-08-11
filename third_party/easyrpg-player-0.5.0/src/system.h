@@ -98,7 +98,7 @@
 #  endif
 
 #  ifdef NO_SDL_MIXER
-#    if !defined(HAVE_OPENAL)
+#    if !defined(HAVE_OPENAL) && !defined(EASYRPG_SYMBIAN)
 #      undef SUPPORT_AUDIO
 #    endif
 #  endif

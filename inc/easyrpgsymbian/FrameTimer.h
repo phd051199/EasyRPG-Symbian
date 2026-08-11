@@ -7,6 +7,7 @@ class MFrameTimerObserver
 {
 public:
     virtual void FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame) = 0;
+    virtual void FrameError(TInt aError) = 0;
 };
 
 class CFrameTimer : public CActive

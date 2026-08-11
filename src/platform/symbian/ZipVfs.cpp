@@ -534,6 +534,13 @@ void CZipVfs::MaterializeFileL(const TDesC& aRelativePath,
     if (aCacheFileName.Length() == 0 || aMaxBytes < 0)
         User::Leave(KErrArgument);
 
+    const CZipVfsEntry* entry = FindEntry(aRelativePath);
+    if (!entry)
+        User::Leave(KErrNotFound);
+    if (entry->iUncompressedSize > static_cast<TUint32>(aMaxBytes) ||
+        entry->iUncompressedSize > static_cast<TUint32>(KMaxTInt))
+        User::Leave(KErrTooBig);
+
     TInt index = 0;
     for (index = 0; index < aCacheFileName.Length(); ++index)
     {
@@ -553,7 +560,16 @@ void CZipVfs::MaterializeFileL(const TDesC& aRelativePath,
     if (mkdirError != KErrNone && mkdirError != KErrAlreadyExists)
         User::Leave(mkdirError);
 
-    HBufC8* data = ReadFileLC(aRelativePath, aMaxBytes);
+    TEntry existing;
+    if (iFs.Entry(destination, existing) == KErrNone &&
+        !existing.IsDir() &&
+        existing.iSize == static_cast<TInt>(entry->iUncompressedSize))
+    {
+        aMaterializedPath.Copy(destination);
+        return;
+    }
+
+    HBufC8* data = DecodeEntryLC(*entry, aMaxBytes);
     RFile output;
     User::LeaveIfError(output.Replace(iFs,
                                       destination,
@@ -679,6 +695,23 @@ const TDesC& CZipVfs::ProjectPrefix() const
 TInt CZipVfs::EntryCount() const
 {
     return iEntries.Count();
+}
+
+void CZipVfs::EntryRelativePathL(TInt aIndex, TDes& aPath) const
+{
+    if (aIndex < 0 || aIndex >= iEntries.Count() || !iProjectPrefix)
+        User::Leave(KErrArgument);
+
+    const TDesC& fullPath = *iEntries[aIndex]->iPath;
+    const TInt prefixLength = iProjectPrefix->Length();
+    if (prefixLength > fullPath.Length() ||
+        !PathEquals(fullPath.Left(prefixLength), *iProjectPrefix))
+        User::Leave(KErrNotFound);
+
+    const TPtrC relative = fullPath.Mid(prefixLength);
+    if (relative.Length() == 0 || relative.Length() > aPath.MaxLength())
+        User::Leave(KErrOverflow);
+    aPath.Copy(relative);
 }
 
 TUint32 CZipVfs::HashPath(const TDesC& aPath)

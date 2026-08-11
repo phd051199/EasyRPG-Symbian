@@ -1,16 +1,44 @@
+#include <f32file.h>
+
 #include "easyrpgsymbian/PlayerRuntime.h"
 #include "easyrpgsymbian/DisplaySurface.h"
 #include "easyrpgsymbian/Encoding.h"
 #include "easyrpgsymbian/LcfProbe.h"
 #include "easyrpgsymbian/ModernCoreProbe.h"
+#include "easyrpgsymbian/SymbianAudioBridge.h"
+#include "easyrpgsymbian/SymbianDirentBridge.h"
 #include "easyrpgsymbian/UpstreamLcfLinkAnchor.h"
-#include "easyrpgsymbian/UpstreamGraphicsBridge.h"
+#include "easyrpgsymbian/UpstreamPlayerBridge.h"
 #include "easyrpgsymbian/ZipVfs.h"
 
 namespace
 {
-const TInt KMaxMapFileBytes = 4 * 1024 * 1024;
-const TInt KMaxGraphicFileBytes = 2 * 1024 * 1024;
+const TInt KMaxAsyncFileBytes = 16 * 1024 * 1024;
+_LIT(KProjectBasePath, "C:\\Data\\EasyRPG\\Cache\\Project\\");
+_LIT(KSaveBasePath, "C:\\Data\\EasyRPG\\Saves\\");
+CZipVfs* gResourceResolver = NULL;
+
+TUint32 HashText(const TDesC& aText, TUint32 aSeed)
+{
+    TUint32 hash = aSeed;
+    for (TInt i = 0; i < aText.Length(); ++i)
+    {
+        const TUint16 value = aText[i];
+        hash ^= static_cast<TUint8>(value & 0xffu);
+        hash *= 16777619u;
+        hash ^= static_cast<TUint8>((value >> 8) & 0xffu);
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+TUint32 HashTextSecondary(const TDesC& aText, TUint32 aSeed)
+{
+    TUint32 hash = aSeed;
+    for (TInt i = 0; i < aText.Length(); ++i)
+        hash = ((hash << 5) + hash) ^ static_cast<TUint32>(aText[i]);
+    return hash;
+}
 
 void NarrowAsciiPathL(const TDesC& aSource, TDes8& aDestination)
 {
@@ -27,51 +55,124 @@ void NarrowAsciiPathL(const TDesC& aSource, TDes8& aDestination)
     aDestination.Append(static_cast<TUint8>(0));
 }
 
-void FindGraphicPathL(CZipVfs& aResources,
-                      const TDesC& aDirectory,
-                      const TDesC8& aGraphicNameSjis,
-                      TDes& aPath)
+void Utf8PathL(const char* aSource, TDes& aDestination)
 {
-    TBuf<128> graphicName;
-    TEncoding::ShiftJisToUnicodeL(aGraphicNameSjis, graphicName);
-    if (graphicName.Length() == 0)
-        User::Leave(KErrCorrupt);
+    if (!aSource)
+        User::Leave(KErrArgument);
+    TInt length = 0;
+    while (aSource[length] != 0)
+        ++length;
+    TPtrC8 source(reinterpret_cast<const TUint8*>(aSource), length);
+    TEncoding::Utf8ToUnicodeL(source, aDestination);
+}
 
-    TFileName candidate;
-    candidate.Copy(aDirectory);
-    candidate.Append(graphicName);
-    const TInt baseLength = candidate.Length();
+void ResolveResourcePathL(CZipVfs& aResources,
+                          const char* aDirectory,
+                          const char* aFile,
+                          TDes& aArchivePath)
+{
+    TFileName directory;
+    TFileName file;
+    Utf8PathL(aDirectory, directory);
+    Utf8PathL(aFile, file);
 
-    candidate.Append(_L(".xyz"));
-    if (aResources.Exists(candidate))
+    TFileName base;
+    if (directory.Length() > 0 && directory.Compare(_L(".")) != 0)
     {
-        aPath.Copy(candidate);
+        base.Copy(directory);
+        if (base[base.Length() - 1] != '\\' && base[base.Length() - 1] != '/')
+            base.Append('\\');
+    }
+    base.Append(file);
+
+    if (aResources.Exists(base))
+    {
+        aArchivePath.Copy(base);
         return;
     }
 
-    candidate.SetLength(baseLength);
-    candidate.Append(_L(".bmp"));
-    if (aResources.Exists(candidate))
+    const TPtrC extensions[] =
     {
-        aPath.Copy(candidate);
-        return;
-    }
-
-    candidate.SetLength(baseLength);
-    candidate.Append(_L(".png"));
-    if (aResources.Exists(candidate))
+        _L(".xyz"), _L(".png"), _L(".bmp"),
+        _L(".lmu"), _L(".lmt"), _L(".ldb"), _L(".lsd"),
+        _L(".wav"), _L(".mid"), _L(".midi"), _L(".ogg"), _L(".mp3")
+    };
+    for (TUint index = 0; index < sizeof(extensions) / sizeof(extensions[0]); ++index)
     {
-        aPath.Copy(candidate);
-        return;
+        TFileName candidate(base);
+        candidate.Append(extensions[index]);
+        if (aResources.Exists(candidate))
+        {
+            aArchivePath.Copy(candidate);
+            return;
+        }
     }
 
     User::Leave(KErrNotFound);
 }
+
+void CreateVirtualProjectTreeL(RFs& aFs, const TDesC& aRoot)
+{
+    CFileMan* fileMan = CFileMan::NewL(aFs);
+    CleanupStack::PushL(fileMan);
+    const TInt removeError = fileMan->RmDir(aRoot);
+    if (removeError != KErrNone &&
+        removeError != KErrNotFound &&
+        removeError != KErrPathNotFound)
+        User::Leave(removeError);
+    CleanupStack::PopAndDestroy(fileMan);
+
+    const TInt error = aFs.MkDirAll(aRoot);
+    if (error != KErrNone && error != KErrAlreadyExists)
+        User::Leave(error);
+}
+}
+
+extern "C" int EasyRpgSymbianResolveResource(const char* aDirectory,
+                                               const char* aFile,
+                                               char* aPath,
+                                               unsigned int aPathCapacity)
+{
+    if (!gResourceResolver || !aFile || !aPath || aPathCapacity == 0)
+        return KErrNotReady;
+
+    TInt result = KErrNone;
+    TRAP(result,
+    {
+        TFileName archivePath;
+        ResolveResourcePathL(*gResourceResolver, aDirectory, aFile, archivePath);
+
+        TUint32 primary = HashText(gResourceResolver->ArchivePath(), 2166136261u);
+        primary = HashText(archivePath, primary);
+        TUint32 secondary = HashTextSecondary(gResourceResolver->ArchivePath(), 5381u);
+        secondary = HashTextSecondary(archivePath, secondary);
+
+        TFileName cacheName;
+        cacheName.Format(_L("res_%08x_%08x"), primary, secondary);
+        const TInt dot = archivePath.LocateReverse('.');
+        if (dot != KErrNotFound && archivePath.Length() - dot <= 8)
+            cacheName.Append(archivePath.Mid(dot));
+
+        TFileName materialized;
+        gResourceResolver->MaterializeFileL(archivePath,
+                                            cacheName,
+                                            materialized,
+                                            KMaxAsyncFileBytes);
+        TBuf8<KMaxFileName + 1> narrow;
+        NarrowAsciiPathL(materialized, narrow);
+        const TInt length = narrow.Length() - 1;
+        if (length < 0 || static_cast<unsigned int>(length + 1) > aPathCapacity)
+            User::Leave(KErrOverflow);
+        for (TInt i = 0; i < length; ++i)
+            aPath[i] = static_cast<char>(narrow[i]);
+        aPath[length] = 0;
+    });
+    return result;
 }
 
 CPlayerRuntime* CPlayerRuntime::NewL(CZipVfs* aResources,
-                                    const TDesC& aGameSource,
-                                    CSymbianDisplaySurface& aDisplaySurface)
+                                     const TDesC& aGameSource,
+                                     CSymbianDisplaySurface& aDisplaySurface)
 {
     CPlayerRuntime* self = new (ELeave) CPlayerRuntime(aResources, aDisplaySurface);
     CleanupStack::PushL(self);
@@ -85,225 +186,80 @@ CPlayerRuntime::CPlayerRuntime(CZipVfs* aResources,
     : iResources(aResources),
       iDisplaySurface(aDisplaySurface),
       iPressedKeys(0),
-      iBootFrame(0),
-      iBootPhase(-1)
+      iPlayerRunning(EFalse)
 {
-    Mem::FillZ(&iBootSequence, sizeof(iBootSequence));
 }
 
-void CPlayerRuntime::ConstructL(const TDesC&)
+void CPlayerRuntime::PrepareProjectRootL(const TDesC& aGameSource,
+                                         TDes8& aProjectPath,
+                                         TDes8& aSavePath)
+{
+    RFs fs;
+    User::LeaveIfError(fs.Connect());
+    CleanupClosePushL(fs);
+
+    const TUint32 gameHash = HashText(aGameSource, 2166136261u);
+    TBuf<16> gameDirectory;
+    gameDirectory.Format(_L("%08x\\"), gameHash);
+
+    TFileName projectRoot;
+    projectRoot.Copy(KProjectBasePath);
+    projectRoot.Append(gameDirectory);
+    CreateVirtualProjectTreeL(fs, projectRoot);
+    EasyRpgSetVirtualProject(iResources, projectRoot);
+
+    TFileName saveRoot;
+    saveRoot.Copy(KSaveBasePath);
+    saveRoot.Append(gameDirectory);
+    const TInt saveError = fs.MkDirAll(saveRoot);
+    if (saveError != KErrNone && saveError != KErrAlreadyExists)
+        User::Leave(saveError);
+
+    NarrowAsciiPathL(projectRoot, aProjectPath);
+    NarrowAsciiPathL(saveRoot, aSavePath);
+    CleanupStack::PopAndDestroy(&fs);
+}
+
+void CPlayerRuntime::ConstructL(const TDesC& aGameSource)
 {
     if (!iResources)
         User::Leave(KErrNotFound);
 
+    gResourceResolver = iResources;
+
     TLcfProjectSummary projectSummary;
     TBuf<96> gameTitle;
     User::LeaveIfError(TLcfProbe::ProbeProject(*iResources, gameTitle, projectSummary));
-
     if (EasyRpgModernCoreProbe(5) != 33 || EasyRpgUpstreamLmuLinkAnchor() != 0)
         User::Leave(KErrNotSupported);
 
-    const TInt graphicsError = EasyRpgUpstreamGraphicsInit(iDisplaySurface.Size().iWidth,
-                                                          iDisplaySurface.Size().iHeight);
-    if (graphicsError != 0)
+    TBuf8<KMaxFileName + 1> projectPath;
+    TBuf8<KMaxFileName + 1> savePath;
+    PrepareProjectRootL(aGameSource, projectPath, savePath);
+
+    const TInt initError = EasyRpgUpstreamPlayerInit(
+        reinterpret_cast<const char*>(projectPath.Ptr()),
+        reinterpret_cast<const char*>(savePath.Ptr()),
+        iDisplaySurface.Size().iWidth,
+        iDisplaySurface.Size().iHeight);
+    if (initError != 0)
+    {
+        EasyRpgClearVirtualProject();
         User::Leave(KErrNotSupported);
-
-    LoadMapL(static_cast<TInt>(projectSummary.iStartMapId),
-             static_cast<TInt>(projectSummary.iStartX),
-             static_cast<TInt>(projectSummary.iStartY));
-
-    TFileName startMapName;
-    startMapName.Format(_L("Map%04u.lmu"), projectSummary.iStartMapId);
-    TFileName materializedMapPath;
-    iResources->MaterializeFileL(startMapName,
-                                 _L("active.lmu"),
-                                 materializedMapPath,
-                                 KMaxMapFileBytes);
-    PrepareBootSequenceL(materializedMapPath);
-
-    if (!projectSummary.iInitialActorTransparent &&
-        projectSummary.iInitialActorCharacterNameSjis.Length() > 0)
-    {
-        TFileName characterPath;
-        FindGraphicPathL(*iResources,
-                         _L("CharSet\\"),
-                         projectSummary.iInitialActorCharacterNameSjis,
-                         characterPath);
-        HBufC8* characterData = iResources->ReadFileLC(characterPath, KMaxGraphicFileBytes);
-        const TInt playerError = EasyRpgUpstreamGraphicsLoadPlayer(
-            reinterpret_cast<const unsigned char*>(characterData->Ptr()),
-            static_cast<unsigned int>(characterData->Length()),
-            static_cast<int>(projectSummary.iInitialActorCharacterIndex),
-            projectSummary.iInitialActorTransparent ? 1 : 0,
-            static_cast<int>(projectSummary.iStartX),
-            static_cast<int>(projectSummary.iStartY));
-        CleanupStack::PopAndDestroy(characterData);
-        if (playerError != 0)
-            User::Leave(KErrCorrupt);
     }
 
-    if (EasyRpgUpstreamGraphicsRenderFrame() != 0)
-        User::Leave(KErrGeneral);
-    iDisplaySurface.PresentL();
-}
-
-void CPlayerRuntime::LoadMapL(TInt aMapId, TInt aX, TInt aY)
-{
-    if (aMapId <= 0)
-        User::Leave(KErrArgument);
-
-    TFileName mapName;
-    mapName.Format(_L("Map%04d.lmu"), aMapId);
-    TFileName materializedMapPath;
-    iResources->MaterializeFileL(mapName,
-                                 _L("active.lmu"),
-                                 materializedMapPath,
-                                 KMaxMapFileBytes);
-
-    TBuf8<KMaxFileName + 1> narrowMapPath;
-    NarrowAsciiPathL(materializedMapPath, narrowMapPath);
-
-    EasyRpgUpstreamLmuSummary mapSummary;
-    const TInt summaryError = EasyRpgUpstreamReadLmuSummary(
-        reinterpret_cast<const char*>(narrowMapPath.Ptr()),
-        "",
-        &mapSummary);
-    if (summaryError != 0 || mapSummary.chipset_id <= 0)
-        User::Leave(KErrCorrupt);
-
-    unsigned char chipsetNameBytes[96];
-    unsigned int chipsetNameLength = 0;
-    const TInt chipsetNameError = EasyRpgUpstreamGetChipsetName(
-        mapSummary.chipset_id,
-        chipsetNameBytes,
-        sizeof(chipsetNameBytes),
-        &chipsetNameLength);
-    if (chipsetNameError != 0 || chipsetNameLength == 0 || chipsetNameLength > 96)
-        User::Leave(KErrNotFound);
-
-    TBuf8<96> chipsetNameSjis;
-    chipsetNameSjis.Append(chipsetNameBytes, static_cast<TInt>(chipsetNameLength));
-    TFileName chipsetPath;
-    FindGraphicPathL(*iResources,
-                     _L("ChipSet\\"),
-                     chipsetNameSjis,
-                     chipsetPath);
-    HBufC8* chipsetData = iResources->ReadFileLC(chipsetPath, KMaxGraphicFileBytes);
-    const TInt mapError = EasyRpgUpstreamGraphicsLoadMap(
-        reinterpret_cast<const char*>(narrowMapPath.Ptr()),
-        reinterpret_cast<const unsigned char*>(chipsetData->Ptr()),
-        static_cast<unsigned int>(chipsetData->Length()),
-        mapSummary.chipset_id,
-        aX,
-        aY);
-    CleanupStack::PopAndDestroy(chipsetData);
-    if (mapError != 0)
-        User::Leave(KErrCorrupt);
-}
-
-void CPlayerRuntime::PrepareBootSequenceL(const TDesC& aMaterializedMapPath)
-{
-    TBuf8<KMaxFileName + 1> narrowMapPath;
-    NarrowAsciiPathL(aMaterializedMapPath, narrowMapPath);
-    Mem::FillZ(&iBootSequence, sizeof(iBootSequence));
-    iBootPictureNameSjis.Zero();
-    iBootFrame = 0;
-    iBootPhase = -1;
-
-    const TInt bootError = EasyRpgUpstreamReadBootSequence(
-        reinterpret_cast<const char*>(narrowMapPath.Ptr()),
-        "",
-        &iBootSequence);
-    if (bootError != 0 ||
-        iBootSequence.picture_name_length == 0 ||
-        iBootSequence.picture_name_length > static_cast<unsigned int>(iBootPictureNameSjis.MaxLength()))
-        return;
-
-    iBootPictureNameSjis.Append(iBootSequence.picture_name,
-                                static_cast<TInt>(iBootSequence.picture_name_length));
-    iBootPhase = 0;
-}
-
-void CPlayerRuntime::UpdateBootSequenceL()
-{
-    if (iBootPhase < 0)
-        return;
-
-    ++iBootFrame;
-    if (iBootPhase == 0)
-    {
-        const TUint32 waitFrames = static_cast<TUint32>(iBootSequence.wait_before_picture * 6);
-        if (iBootFrame < waitFrames)
-            return;
-
-        TFileName picturePath;
-        FindGraphicPathL(*iResources,
-                         _L("Picture\\"),
-                         iBootPictureNameSjis,
-                         picturePath);
-        HBufC8* pictureData = iResources->ReadFileLC(picturePath, KMaxGraphicFileBytes);
-        const TInt showError = EasyRpgUpstreamGraphicsShowPicture(
-            reinterpret_cast<const unsigned char*>(pictureData->Ptr()),
-            static_cast<unsigned int>(pictureData->Length()),
-            iBootSequence.picture_x,
-            iBootSequence.picture_y,
-            iBootSequence.picture_magnify,
-            iBootSequence.picture_opacity);
-        CleanupStack::PopAndDestroy(pictureData);
-        if (showError != 0)
-            User::Leave(KErrCorrupt);
-
-        const TInt moveError = EasyRpgUpstreamGraphicsMovePicture(
-            iBootSequence.first_move_x,
-            iBootSequence.first_move_y,
-            iBootSequence.first_move_magnify,
-            iBootSequence.first_move_opacity,
-            iBootSequence.first_move_duration * 3);
-        if (moveError != 0)
-            User::Leave(KErrCorrupt);
-
-        iBootFrame = 0;
-        iBootPhase = 1;
-        return;
-    }
-
-    if (iBootPhase == 1)
-    {
-        const TUint32 phaseFrames = static_cast<TUint32>(
-            (iBootSequence.first_move_duration + iBootSequence.wait_after_first_move) * 6);
-        if (iBootFrame < phaseFrames)
-            return;
-
-        const TInt moveError = EasyRpgUpstreamGraphicsMovePicture(
-            iBootSequence.second_move_x,
-            iBootSequence.second_move_y,
-            iBootSequence.second_move_magnify,
-            iBootSequence.second_move_opacity,
-            iBootSequence.second_move_duration * 3);
-        if (moveError != 0)
-            User::Leave(KErrCorrupt);
-
-        iBootFrame = 0;
-        iBootPhase = 2;
-        return;
-    }
-
-    const TUint32 phaseFrames = static_cast<TUint32>(
-        (iBootSequence.second_move_duration + iBootSequence.wait_after_second_move) * 6);
-    if (iBootFrame < phaseFrames)
-        return;
-
-    EasyRpgUpstreamGraphicsErasePicture();
-    LoadMapL(iBootSequence.target_map_id,
-             iBootSequence.target_x,
-             iBootSequence.target_y);
-    iBootFrame = 0;
-    iBootPhase = -1;
+    iPlayerRunning = ETrue;
 }
 
 CPlayerRuntime::~CPlayerRuntime()
 {
-    EasyRpgUpstreamGraphicsShutdown();
+    if (iPlayerRunning)
+        EasyRpgUpstreamPlayerShutdown();
+    iPlayerRunning = EFalse;
+    EasyRpgSymbianAudioShutdown();
+    EasyRpgClearVirtualProject();
+    if (gResourceResolver == iResources)
+        gResourceResolver = NULL;
 }
 
 void CPlayerRuntime::SetKeyState(TUint32 aKey, TBool aPressed)
@@ -319,23 +275,56 @@ void CPlayerRuntime::ReleaseAllKeys()
     iPressedKeys = 0;
 }
 
+void CPlayerRuntime::Suspend()
+{
+    ReleaseAllKeys();
+    if (iPlayerRunning)
+        EasyRpgUpstreamPlayerPause();
+}
+
+void CPlayerRuntime::Resume()
+{
+    if (iPlayerRunning)
+        EasyRpgUpstreamPlayerResume();
+}
+
 void CPlayerRuntime::TickL(TUint32 aLogicFrame, TBool aRenderFrame)
 {
-    TUint32 upstreamKeys = 0;
-    if ((iPressedKeys & EKeyUp) != 0) upstreamKeys |= 1u << 13;
-    if ((iPressedKeys & EKeyDown) != 0) upstreamKeys |= 1u << 15;
-    if ((iPressedKeys & EKeyLeft) != 0) upstreamKeys |= 1u << 12;
-    if ((iPressedKeys & EKeyRight) != 0) upstreamKeys |= 1u << 14;
-    if ((iPressedKeys & EKeyDecision) != 0) upstreamKeys |= 1u << 4;
-    if ((iPressedKeys & EKeyCancel) != 0) upstreamKeys |= 1u << 6;
-    if ((iPressedKeys & EKeyShift) != 0) upstreamKeys |= 1u << 19;
-    EasyRpgUpstreamGraphicsSetKeys(upstreamKeys, 0);
-    EasyRpgUpstreamGraphicsSetTicks(static_cast<unsigned int>((aLogicFrame * 1000u) / 60u));
-    UpdateBootSequenceL();
-    if (aRenderFrame)
+    if (!iPlayerRunning)
+        return;
+
+    TUint32 upstreamKeys0 = 0;
+    TUint32 upstreamKeys1 = 0;
+    TUint32 upstreamKeys2 = 0;
+    if ((iPressedKeys & EKeyUp) != 0) upstreamKeys0 |= 1u << 13;
+    if ((iPressedKeys & EKeyDown) != 0) upstreamKeys0 |= 1u << 15;
+    if ((iPressedKeys & EKeyLeft) != 0) upstreamKeys0 |= 1u << 12;
+    if ((iPressedKeys & EKeyRight) != 0) upstreamKeys0 |= 1u << 14;
+    if ((iPressedKeys & EKeyDecision) != 0) upstreamKeys0 |= 1u << 4;
+    if ((iPressedKeys & EKeyCancel) != 0) upstreamKeys0 |= 1u << 6;
+    if ((iPressedKeys & EKeyShift) != 0) upstreamKeys0 |= 1u << 20;
+    if ((iPressedKeys & EKeyDebug) != 0) upstreamKeys2 |= 1u << 26;
+
+    const TInt tickResult = EasyRpgUpstreamPlayerTick(
+        static_cast<unsigned int>((aLogicFrame * 1000u) / 60u),
+        upstreamKeys0,
+        upstreamKeys1,
+        upstreamKeys2,
+        0,
+        aRenderFrame ? 1 : 0);
+    if (tickResult < 0)
+        User::Leave(KErrGeneral);
+    if (tickResult > 0)
     {
-        if (EasyRpgUpstreamGraphicsRenderFrame() != 0)
-            User::Leave(KErrGeneral);
-        iDisplaySurface.PresentL();
+        iPlayerRunning = EFalse;
+        return;
     }
+
+    if (aRenderFrame)
+        iDisplaySurface.PresentL();
+}
+
+TBool CPlayerRuntime::IsRunning() const
+{
+    return iPlayerRunning;
 }

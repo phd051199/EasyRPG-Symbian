@@ -32,6 +32,7 @@ public:
     const TDesC& ArchivePath() const;
     const TDesC& ProjectPrefix() const;
     TInt EntryCount() const;
+    void EntryRelativePathL(TInt aIndex, TDes& aPath) const;
 
 private:
     enum

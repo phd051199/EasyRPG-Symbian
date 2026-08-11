@@ -43,6 +43,15 @@ void CEasyRpgAppUi::EnterGameFullscreen()
         Cba()->MakeVisible(EFalse);
 }
 
+void CEasyRpgAppUi::ExitGameFullscreen()
+{
+    SetFullScreenApp(EFalse);
+    if (StatusPane())
+        StatusPane()->MakeVisible(ETrue);
+    if (Cba())
+        Cba()->MakeVisible(ETrue);
+}
+
 void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 {
     switch (aCommand)
@@ -68,3 +77,4 @@ void CEasyRpgAppUi::HandleForegroundEventL(TBool aForeground)
     if (iGameView)
         iGameView->SetForeground(aForeground);
 }
+

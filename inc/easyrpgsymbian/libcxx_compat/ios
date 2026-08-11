@@ -9,12 +9,21 @@ _LIBCPP_BEGIN_NAMESPACE_STD
 class ios_base {
 public:
     typedef unsigned int openmode;
+    typedef unsigned int iostate;
     static const openmode in = 1u << 0;
     static const openmode out = 1u << 1;
     static const openmode ate = 1u << 2;
     static const openmode app = 1u << 3;
     static const openmode trunc = 1u << 4;
     static const openmode binary = 1u << 5;
+    static const iostate goodbit = 0u;
+    static const iostate eofbit = 1u << 0;
+    static const iostate failbit = 1u << 1;
+    static const iostate badbit = 1u << 2;
+};
+
+template<class CharT, class Traits>
+class basic_ios : public ios_base {
 };
 
 _LIBCPP_END_NAMESPACE_STD

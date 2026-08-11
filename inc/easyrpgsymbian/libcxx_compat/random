@@ -1,0 +1,37 @@
+#ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_RANDOM
+#define EASYRPG_SYMBIAN_LIBCXX_COMPAT_RANDOM
+
+#include <cstdint>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+class mt19937 {
+public:
+    typedef uint32_t result_type;
+
+    mt19937() : state_(5489u) {}
+    explicit mt19937(result_type seed_value) : state_(seed_value ? seed_value : 5489u) {}
+
+    void seed(result_type seed_value) {
+        state_ = seed_value ? seed_value : 5489u;
+    }
+
+    result_type operator()() {
+        uint32_t x = state_;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        state_ = x;
+        return x;
+    }
+
+    static constexpr result_type min() { return 0u; }
+    static constexpr result_type max() { return 0xffffffffu; }
+
+private:
+    uint32_t state_;
+};
+
+_LIBCPP_END_NAMESPACE_STD
+
+#endif

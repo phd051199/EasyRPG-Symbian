@@ -9,6 +9,7 @@
 #include "easyrpgsymbian/FrameTimer.h"
 
 class CAknSingleStyleListBox;
+class CAsyncCallBack;
 class CPlayerRuntime;
 class CSymbianDisplaySurface;
 class CZipVfs;
@@ -38,12 +39,14 @@ private:
     void HandleListBoxEventL(CEikListBox* aListBox,
                              TListBoxEvent aEventType);
     void FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame);
+    void FrameError(TInt aError);
+    static TInt StartGameCallback(TAny* aPtr);
 
     void BuildGameListL();
     void StartSelectedGameL();
+    void StopGame();
     void ShowLoadErrorL(TInt aError);
     TUint32 MapPlayerKey(const TKeyEvent& aKeyEvent) const;
-    TPoint FrameOrigin() const;
 
 private:
     RFs iFs;
@@ -54,6 +57,7 @@ private:
     CZipVfs* iResources;
     CPlayerRuntime* iRuntime;
     CFrameTimer* iFrameTimer;
+    CAsyncCallBack* iStartGameCallback;
     TBool iForeground;
     TFileName iGameRoot;
 };

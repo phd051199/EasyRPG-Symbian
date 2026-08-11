@@ -12,9 +12,9 @@ SOURCE            SymbianApplication.cpp
 SOURCE            SymbianDocument.cpp
 SOURCE            SymbianAppUi.cpp
 SOURCE            FrameTimer.cpp
-SOURCE            Framebuffer.cpp
 SOURCE            DisplaySurface.cpp
 SOURCE            SymbianAudioMixer.cpp
+SOURCE            SymbianAudioBridge.cpp
 SOURCE            GameLocator.cpp
 SOURCE            ZipVfs.cpp
 SOURCE            LcfProbe.cpp
@@ -39,6 +39,8 @@ END
 USERINCLUDE       ..\inc
 USERINCLUDE       ..\platform\symbian\resources
 SYSTEMINCLUDE     \epoc32\include
+SYSTEMINCLUDE     \epoc32\include\stdapis
+SYSTEMINCLUDE     \epoc32\include\libc
 
 LIBRARY           euser.lib
 LIBRARY           apparc.lib
@@ -60,6 +62,9 @@ LIBRARY           libm.lib
 LIBRARY           libz.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
+LIBRARY           midiclient.lib
+LIBRARY           scdv.lib
+LIBRARY           flogger.lib
 STATICLIBRARY     EasyRpgModernCore.lib
 
 LANG              SC

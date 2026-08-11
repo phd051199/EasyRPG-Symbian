@@ -38,6 +38,7 @@ public:
     TInt CachedBytes() const;
     void TrimCache(TInt aByteLimit);
     TBool IsReady() const;
+    TInt ConsumeError();
 
     static TInt OutputSampleRate();
     static TInt OutputChannels();
@@ -132,6 +133,7 @@ private:
     TUint32 iClipUseSerial;
     TBool iReady;
     TBool iShuttingDown;
+    TInt iLastError;
 
 private:
     void MaoscOpenComplete(TInt aError);

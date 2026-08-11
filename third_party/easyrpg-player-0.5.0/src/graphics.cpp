@@ -127,6 +127,12 @@ void Graphics::Update(bool time_left) {
 
 		DrawFrame();
 	}
+#ifdef EASYRPG_SYMBIAN
+	else if (transition_frames_left > 0) {
+		transition_frame++;
+		transition_frames_left--;
+	}
+#endif
 }
 
 void Graphics::UpdateTitle() {

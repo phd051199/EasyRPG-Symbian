@@ -15,6 +15,7 @@
 #include "easyrpgsymbian/GameView.h"
 #include "easyrpgsymbian/PlayerRuntime.h"
 #include "easyrpgsymbian/SymbianAppUi.h"
+#include "easyrpgsymbian/SymbianLogBridge.h"
 #include "easyrpgsymbian/ZipVfs.h"
 
 namespace
@@ -56,6 +57,7 @@ CGameView::CGameView()
       iResources(NULL),
       iRuntime(NULL),
       iFrameTimer(NULL),
+      iStartGameCallback(NULL),
       iForeground(ETrue)
 {
 }
@@ -64,6 +66,10 @@ void CGameView::ConstructL(const TRect& aRect)
 {
     CreateWindowL();
     User::LeaveIfError(iFs.Connect());
+    iFrameTimer = CFrameTimer::NewL(*this);
+    iStartGameCallback = new (ELeave) CAsyncCallBack(
+        TCallBack(&CGameView::StartGameCallback, this),
+        CActive::EPriorityHigh);
 
     iListBox = new (ELeave) CAknSingleStyleListBox;
     iListBox->SetContainerWindowL(*this);
@@ -89,6 +95,11 @@ void CGameView::ConstructL(const TRect& aRect)
 
 CGameView::~CGameView()
 {
+    if (iStartGameCallback)
+        iStartGameCallback->Cancel();
+    delete iStartGameCallback;
+    iStartGameCallback = NULL;
+
     if (iFrameTimer)
         iFrameTimer->Stop();
 
@@ -173,9 +184,7 @@ void CGameView::StartSelectedGameL()
                                                    selectedArchive,
                                                    *displaySurface);
     CleanupStack::PushL(runtime);
-
-    CFrameTimer* frameTimer = CFrameTimer::NewL(*this);
-    CleanupStack::PushL(frameTimer);
+    EasyRpgSymbianLogDebug("game runtime ready");
 
     if (iListBox->ScrollBarFrame())
     {
@@ -183,7 +192,15 @@ void CGameView::StartSelectedGameL()
             CEikScrollBarFrame::EOff, CEikScrollBarFrame::EOff);
     }
 
-    CleanupStack::Pop(frameTimer);
+    iListBox->SetFocus(EFalse);
+    iListBox->MakeVisible(EFalse);
+    SetFocus(ETrue);
+
+    CEasyRpgAppUi* appUi = static_cast<CEasyRpgAppUi*>(CEikonEnv::Static()->EikAppUi());
+    appUi->EnterGameFullscreen();
+    const TSize screenSize = CCoeEnv::Static()->ScreenDevice()->SizeInPixels();
+    SetRect(TRect(TPoint(0, 0), screenSize));
+
     CleanupStack::Pop(runtime);
     CleanupStack::Pop(resources);
     CleanupStack::Pop(displaySurface);
@@ -191,19 +208,46 @@ void CGameView::StartSelectedGameL()
     iDisplaySurface = displaySurface;
     iResources = resources;
     iRuntime = runtime;
-    iFrameTimer = frameTimer;
     iGameRoot.Copy(selectedArchive);
+    DrawNow();
 
-    iListBox->SetFocus(EFalse);
-    iListBox->MakeVisible(EFalse);
+    if (iForeground) {
+        iFrameTimer->Start();
+        EasyRpgSymbianLogDebug("frame timer started");
+    }
+    EasyRpgSymbianLogDebug("game start returned");
+}
+
+void CGameView::StopGame()
+{
+    if (iFrameTimer)
+        iFrameTimer->Stop();
+
+    delete iRuntime;
+    iRuntime = NULL;
+    delete iResources;
+    iResources = NULL;
+    delete iDisplaySurface;
+    iDisplaySurface = NULL;
+    iGameRoot.Zero();
 
     CEasyRpgAppUi* appUi = static_cast<CEasyRpgAppUi*>(CEikonEnv::Static()->EikAppUi());
-    appUi->EnterGameFullscreen();
-    UpdateLayout();
+    appUi->ExitGameFullscreen();
+    SetRect(appUi->ClientRect());
 
-    if (iForeground)
-        iFrameTimer->Start();
-    DrawNow();
+    if (iListBox)
+    {
+        if (iListBox->ScrollBarFrame())
+        {
+            TRAP_IGNORE(iListBox->ScrollBarFrame()->SetScrollBarVisibilityL(
+                CEikScrollBarFrame::EOff, CEikScrollBarFrame::EAuto));
+        }
+        iListBox->SetRect(Rect());
+        iListBox->MakeVisible(ETrue);
+        iListBox->SetFocus(ETrue);
+        SetFocus(ETrue);
+        iListBox->DrawNow();
+    }
 }
 
 void CGameView::ShowLoadErrorL(TInt aError)
@@ -216,6 +260,7 @@ void CGameView::ShowLoadErrorL(TInt aError)
 
 void CGameView::SetForeground(TBool aForeground)
 {
+    EasyRpgSymbianLogDebug(aForeground ? "foreground on" : "foreground off");
     iForeground = aForeground;
 
     if (!iRuntime || !iFrameTimer)
@@ -231,11 +276,12 @@ void CGameView::SetForeground(TBool aForeground)
 
     if (!aForeground)
     {
-        iRuntime->ReleaseAllKeys();
+        iRuntime->Suspend();
         iFrameTimer->Stop();
     }
     else
     {
+        iRuntime->Resume();
         iFrameTimer->Start();
         DrawNow();
     }
@@ -256,8 +302,7 @@ void CGameView::UpdateLayout()
 
 void CGameView::Draw(const TRect&) const
 {
-
-    if (!iRuntime)
+    if (!iRuntime || !iDisplaySurface)
         return;
 
     CWindowGc& gc = SystemGc();
@@ -266,8 +311,17 @@ void CGameView::Draw(const TRect&) const
     gc.SetBrushColor(TRgb(0, 0, 0));
     gc.DrawRect(Rect());
 
-    if (iDisplaySurface)
-        gc.BitBlt(FrameOrigin(), &iDisplaySurface->Bitmap());
+    if (!iDisplaySurface->HasFrame())
+        return;
+
+    const TSize bitmapSize = iDisplaySurface->Size();
+    const TSize viewSize = Rect().Size();
+    TPoint destination(0, 0);
+    if (viewSize.iWidth > bitmapSize.iWidth)
+        destination.iX = (viewSize.iWidth - bitmapSize.iWidth) / 2;
+    if (viewSize.iHeight > bitmapSize.iHeight)
+        destination.iY = (viewSize.iHeight - bitmapSize.iHeight) / 2;
+    gc.BitBlt(destination, &iDisplaySurface->Bitmap());
 }
 
 void CGameView::SizeChanged()
@@ -282,6 +336,8 @@ void CGameView::HandleResourceChange(TInt aType)
     if (aType == KEikDynamicLayoutVariantSwitch)
     {
         UpdateLayout();
+        if (iRuntime)
+            DrawNow();
     }
 }
 
@@ -342,19 +398,33 @@ TKeyResponse CGameView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aT
 
 void CGameView::HandleListBoxEventL(CEikListBox*, TListBoxEvent aEventType)
 {
-    if (iRuntime)
+    if (iRuntime || !iStartGameCallback)
         return;
 
-    if (aEventType == EEventEnterKeyPressed ||
-        aEventType == EEventItemClicked)
+    if ((aEventType == EEventEnterKeyPressed ||
+         aEventType == EEventItemClicked) &&
+        !iStartGameCallback->IsActive())
     {
-        TRAPD(error, StartSelectedGameL());
-        if (error != KErrNone)
-        {
-            iGameRoot.Zero();
-            ShowLoadErrorL(error);
-        }
+        EasyRpgSymbianLogDebug("game start deferred");
+        iStartGameCallback->CallBack();
     }
+}
+
+TInt CGameView::StartGameCallback(TAny* aPtr)
+{
+    CGameView* self = static_cast<CGameView*>(aPtr);
+    if (!self || self->iRuntime)
+        return KErrNone;
+
+    EasyRpgSymbianLogDebug("game start callback");
+    TRAPD(error, self->StartSelectedGameL());
+    if (error != KErrNone)
+    {
+        self->iGameRoot.Zero();
+        TRAP_IGNORE(self->ShowLoadErrorL(error));
+    }
+    EasyRpgSymbianLogDebug("game start callback returned");
+    return KErrNone;
 }
 
 void CGameView::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
@@ -363,8 +433,19 @@ void CGameView::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
         return;
 
     iRuntime->TickL(aLogicFrame, aRenderFrame);
-    if (aRenderFrame)
-        DrawNow();
+    if (aRenderFrame && iDisplaySurface && iDisplaySurface->HasFrame())
+        DrawDeferred();
+    if (!iRuntime->IsRunning())
+    {
+        StopGame();
+        return;
+    }
+}
+
+void CGameView::FrameError(TInt aError)
+{
+    StopGame();
+    TRAP_IGNORE(ShowLoadErrorL(aError));
 }
 
 TUint32 CGameView::MapPlayerKey(const TKeyEvent& aKeyEvent) const
@@ -425,9 +506,3 @@ TUint32 CGameView::MapPlayerKey(const TKeyEvent& aKeyEvent) const
     return 0;
 }
 
-TPoint CGameView::FrameOrigin() const
-{
-    const TRect rect = Rect();
-    return TPoint(rect.iTl.iX + (rect.Width() - KGameWidth) / 2,
-                  rect.iTl.iY + (rect.Height() - KGameHeight) / 2);
-}

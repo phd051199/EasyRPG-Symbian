@@ -43,14 +43,12 @@ if errorlevel 1 goto makesis_error
 where arm-none-symbianelf-g++.exe >nul 2>&1
 if errorlevel 1 goto gcce_error
 
-if not exist "%GROUP_DIR%\ABLD.BAT" (
-    pushd "%GROUP_DIR%" >nul 2>&1
-    if errorlevel 1 goto group_error
-    call bldmake bldfiles
-    set "RESULT=%ERRORLEVEL%"
-    popd
-    if not "%RESULT%"=="0" goto build_error
-)
+pushd "%GROUP_DIR%" >nul 2>&1
+if errorlevel 1 goto group_error
+call bldmake bldfiles
+set "RESULT=%ERRORLEVEL%"
+popd
+if not "%RESULT%"=="0" goto build_error
 
 if /I "%BUILD_PROFILE%"=="clean" goto clean
 

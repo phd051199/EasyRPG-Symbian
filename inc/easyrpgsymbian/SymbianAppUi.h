@@ -13,6 +13,7 @@ public:
 
     void ConstructL();
     void EnterGameFullscreen();
+    void ExitGameFullscreen();
     void HandleCommandL(TInt aCommand);
     void HandleStatusPaneSizeChange();
     void HandleForegroundEventL(TBool aForeground);
