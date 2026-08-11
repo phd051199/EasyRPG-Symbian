@@ -28,8 +28,8 @@ PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 WINE_PREFIX=${EASYRPG_WINE_PREFIX:-"$HOME/.wine-symbian"}
 SDK_HOST_ROOT=${EASYRPG_SYMBIAN_SDK_ROOT:-"$WINE_PREFIX/drive_c/S60/devices/S60_3rd_FP2_SDK_v1.1"}
 SDK_WINDOWS_ROOT=${EASYRPG_SYMBIAN_SDK_WINDOWS_ROOT:-'C:\S60\devices\S60_3rd_FP2_SDK_v1.1'}
-PROJECT_LINK="$WINE_PREFIX/drive_c/work/EasyRPGSymbian"
-PROJECT_WINDOWS_ROOT='C:\work\EasyRPGSymbian'
+PROJECT_LINK="$WINE_PREFIX/drive_c/work/EasyRPG"
+PROJECT_WINDOWS_ROOT='C:\work\EasyRPG'
 
 find_wine() {
     if [[ -n ${EASYRPG_WINE_BIN:-} ]]; then
@@ -86,7 +86,7 @@ export WINEDEBUG=-all
 export MVK_CONFIG_LOG_LEVEL=0
 export DXVK_LOG_LEVEL=none
 
-printf 'EasyRPG Symbian: %s\n' "$PROJECT_DIR"
+printf 'EasyRPG: %s\n' "$PROJECT_DIR"
 printf 'S60 SDK: %s\n' "$SDK_HOST_ROOT"
 printf 'Profile: %s\n' "$PROFILE"
 
@@ -98,4 +98,4 @@ if [[ $PROFILE != clean ]]; then
 fi
 
 exec "$WINE_BIN" cmd.exe /d /s /c \
-    "set EASYRPG_SYMBIAN_SDK_ROOT=${SDK_WINDOWS_ROOT}&& ${PROJECT_WINDOWS_ROOT}\\tools\\build_symbian.cmd ${PROFILE}"
+    "set EASYRPG_SYMBIAN_SDK_ROOT=${SDK_WINDOWS_ROOT}&& ${PROJECT_WINDOWS_ROOT}\\tools\\build.cmd ${PROFILE}"

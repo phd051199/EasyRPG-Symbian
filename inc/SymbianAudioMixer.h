@@ -50,9 +50,9 @@ private:
         KOutputSampleRate = 22050,
         KOutputChannels = 2,
         KOutputBufferBytes = 4096,
-        KOutputBufferCount = 9,
-        KOutputQueueDepth = 8,
-        KStreamBufferFrames = 16384,
+        KOutputBufferCount = 7,
+        KOutputQueueDepth = 6,
+        KStreamBufferFrames = 4096,
         KMaxCachedClips = 128,
         KMaxCachedKeyLength = 160,
         KMaxCachedClipBytes = 1536 * 1024,
@@ -126,6 +126,7 @@ private:
     TVoice iVoices[KMaxVoices];
     TStreamState iStreams[EStreamBusCount];
     TBuf8<KOutputBufferBytes> iOutputBuffers[KOutputBufferCount];
+    TInt iMixBuffer[KOutputBufferBytes / 2];
     TBool iOutputBufferQueued[KOutputBufferCount];
     TInt iQueuedOutputBufferCount;
     TInt iClipCount;

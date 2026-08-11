@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_PERF_OVERLAY_H
-#define EASYRPG_SYMBIAN_PERF_OVERLAY_H
+#ifndef EASYRPG_PERF_OVERLAY_H
+#define EASYRPG_PERF_OVERLAY_H
 
 #include <e32base.h>
 #include <fbs.h>

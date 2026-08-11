@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_CORE_ENCODING_H
-#define EASYRPG_SYMBIAN_CORE_ENCODING_H
+#ifndef EASYRPG_CORE_ENCODING_H
+#define EASYRPG_CORE_ENCODING_H
 
 #ifdef __cplusplus
 extern "C" {

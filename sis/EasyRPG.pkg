@@ -1,0 +1,12 @@
+&EN
+
+#{"EasyRPG"},(0xE31EA5A1),0,1,0
+
+%{"EasyRPG"}
+:"EasyRPG"
+
+[0x101F7961], 0, 0, 0, {"Series60ProductID"}
+
+"stage\EasyRPG.exe" - "!:\sys\bin\EasyRPG.exe"
+"stage\EasyRPG.rsc" - "!:\resource\apps\EasyRPG.rsc"
+"stage\EasyRPG_reg.rsc" - "!:\private\10003a3f\import\apps\EasyRPG_reg.rsc"

@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_ZIP_VFS_H
-#define EASYRPG_SYMBIAN_ZIP_VFS_H
+#ifndef EASYRPG_ZIP_VFS_H
+#define EASYRPG_ZIP_VFS_H
 
 #include <e32base.h>
 #include <f32file.h>

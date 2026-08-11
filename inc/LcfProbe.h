@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_LCF_PROBE_H
-#define EASYRPG_SYMBIAN_LCF_PROBE_H
+#ifndef EASYRPG_LCF_PROBE_H
+#define EASYRPG_LCF_PROBE_H
 
 #include <e32base.h>
 

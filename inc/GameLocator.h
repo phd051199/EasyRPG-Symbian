@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_GAME_LOCATOR_H
-#define EASYRPG_SYMBIAN_GAME_LOCATOR_H
+#ifndef EASYRPG_GAME_LOCATOR_H
+#define EASYRPG_GAME_LOCATOR_H
 
 #include <badesca.h>
 #include <e32base.h>

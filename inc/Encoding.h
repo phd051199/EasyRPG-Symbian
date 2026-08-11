@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_ENCODING_H
-#define EASYRPG_SYMBIAN_ENCODING_H
+#ifndef EASYRPG_ENCODING_H
+#define EASYRPG_ENCODING_H
 
 #include <e32base.h>
 

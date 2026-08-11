@@ -1,0 +1,72 @@
+TARGET            EasyRPG.exe
+TARGETTYPE        exe
+UID               0x100039CE 0xE31EA5A1
+
+EPOCHEAPSIZE      0x100000 0x2800000
+EPOCSTACKSIZE     0x10000
+OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
+
+SOURCEPATH        ..\src\platform\symbian
+SOURCE            Main.cpp
+SOURCE            Application.cpp
+SOURCE            Document.cpp
+SOURCE            AppUi.cpp
+SOURCE            FrameTimer.cpp
+SOURCE            DisplaySurface.cpp
+SOURCE            PerfOverlay.cpp
+SOURCE            AudioMixer.cpp
+SOURCE            AudioBridge.cpp
+SOURCE            GameLocator.cpp
+SOURCE            ZipVfs.cpp
+SOURCE            LcfProbe.cpp
+SOURCE            Encoding.cpp
+SOURCE            Dirent.cpp
+SOURCE            PlayerRuntime.cpp
+SOURCE            GameView.cpp
+
+SOURCEPATH        ..\platform\symbian\resources
+
+START RESOURCE    Resources.rss
+HEADER
+TARGET            EasyRPG
+TARGETPATH        resource\apps
+END
+
+START RESOURCE    Registration.rss
+TARGET            EasyRPG_reg
+TARGETPATH        \private\10003a3f\apps
+END
+
+USERINCLUDE       ..\inc
+USERINCLUDE       ..\platform\symbian\resources
+SYSTEMINCLUDE     \epoc32\include
+SYSTEMINCLUDE     \epoc32\include\stdapis
+SYSTEMINCLUDE     \epoc32\include\libc
+
+LIBRARY           euser.lib
+LIBRARY           apparc.lib
+LIBRARY           cone.lib
+LIBRARY           fbscli.lib
+LIBRARY           hal.lib
+LIBRARY           eikcore.lib
+LIBRARY           eikcoctl.lib
+LIBRARY           eikctl.lib
+LIBRARY           avkon.lib
+LIBRARY           bafl.lib
+LIBRARY           efsrv.lib
+LIBRARY           libc.lib
+LIBRARY           libm.lib
+LIBRARY           libz.lib
+LIBRARY           mediaclientaudio.lib
+LIBRARY           mediaclientaudiostream.lib
+STATICLIBRARY     EasyRpgModernCore.lib
+
+LANG              SC
+
+VENDORID          0
+SECUREID          0xE31EA5A1
+CAPABILITY        None
+
+#ifdef ENABLE_ABIV2_MODE
+DEBUGGABLE_UDEBONLY
+#endif

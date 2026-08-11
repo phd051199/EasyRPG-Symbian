@@ -558,7 +558,7 @@ async function main() {
             await waitEval(`(() => {
                 try {
                     const log = EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/easyrpg.log', { encoding: 'utf8' });
-                    return log.includes('Symbian scene Title');
+                    return log.includes('scene Title');
                 } catch (e) {
                     return false;
                 }

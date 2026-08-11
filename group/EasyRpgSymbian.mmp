@@ -59,7 +59,6 @@ LIBRARY           libm.lib
 LIBRARY           libz.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
-LIBRARY           midiclient.lib
 STATICLIBRARY     EasyRpgModernCore.lib
 
 LANG              SC

@@ -1,5 +1,5 @@
-#ifndef EASYRPGSYMBIAN_GOHUFONT_H
-#define EASYRPGSYMBIAN_GOHUFONT_H
+#ifndef EASYRPG_GOHU_FONT_H
+#define EASYRPG_GOHU_FONT_H
 
 unsigned int EasyRpgTcvn3DecodeByte(unsigned int aByte);
 int EasyRpgTcvn3EncodeCodepoint(unsigned int aCodepoint);

@@ -1,4 +1,4 @@
-#include "easyrpgsymbian/SymbianApp.hrh"
+#include "App.hrh"
 #include "Strings.rls"
 #include <appinfo.rh>
 
@@ -7,7 +7,7 @@ UID3 _UID3
 
 RESOURCE APP_REGISTRATION_INFO
 {
-    app_file = "EasyRpgSymbian_0xE31EA5A1";
+    app_file = "EasyRPG";
     localisable_resource_file = qtn_loc_resource_file_1;
     localisable_resource_id = KEasyRpgLocalisableAppInfoResourceId;
     embeddability = KAppNotEmbeddable;

@@ -20,13 +20,13 @@ NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
 BUILD_DIR="$PROJECT_DIR/build/modern-core/$SDK_CFG"
 LIBRARY="$BUILD_DIR/EasyRpgModernCore.lib"
 SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
-WIN_BUILD_DIR="C:\\work\\EasyRPGSymbian\\build\\modern-core\\$SDK_CFG"
+WIN_BUILD_DIR="C:\\work\\EasyRPG\\build\\modern-core\\$SDK_CFG"
 GENERATED_DIR="$PROJECT_DIR/build/generated"
 GENERATED_CP932="$GENERATED_DIR/CoreCp932Table.cpp"
 GENERATED_READER_STRUCT="$GENERATED_DIR/reader_struct.cpp"
 LIBLCF_ROOT="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
 LIBLCF_GENERATED_ROOT="$LIBLCF_ROOT/generated"
-LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/easyrpgsymbian/libcxx_compat"
+LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/libcxx_compat"
 PLAYER_ROOT="$PROJECT_DIR/third_party/easyrpg-player-0.5.0/src"
 PLAYER_VENDOR_ROOT="$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src"
 PIXMAN_ROOT="$PROJECT_DIR/third_party/pixman-0.34.0/pixman"
@@ -60,20 +60,20 @@ SOURCES=(
     "$LIBLCF_ROOT/writer_xml.cpp"
     "$GENERATED_READER_STRUCT"
     "$PROJECT_DIR/src/core/LibcxxSharedPtrRuntime.cpp"
-    "$PROJECT_DIR/src/core/LiblcfReaderUtilSymbian.cpp"
-    "$PROJECT_DIR/src/core/LiblcfXmlReaderSymbian.cpp"
+    "$PROJECT_DIR/src/core/LiblcfReaderUtil.cpp"
+    "$PROJECT_DIR/src/core/LiblcfXmlReader.cpp"
     "$PROJECT_DIR/src/core/UpstreamLmuBridge.cpp"
     "$PROJECT_DIR/src/core/UpstreamLcfLinkAnchor.cpp"
-    "$PROJECT_DIR/src/core/SymbianUi.cpp"
+    "$PROJECT_DIR/src/core/Ui.cpp"
     "$PLAYER_ROOT/scene.cpp"
-    "$PROJECT_DIR/src/core/SymbianRenderDamage.cpp"
-    "$PROJECT_DIR/src/core/SymbianAsyncHandler.cpp"
-    "$PROJECT_DIR/src/core/SymbianAudio.cpp"
-    "$PROJECT_DIR/src/core/SymbianOutput.cpp"
-    "$PROJECT_DIR/src/core/SymbianAeabi.cpp"
-    "$PROJECT_DIR/src/core/SymbianImage.cpp"
-    "$PROJECT_DIR/src/core/SymbianText.cpp"
-    "$PROJECT_DIR/src/core/SymbianFont.cpp"
+    "$PROJECT_DIR/src/core/RenderDamage.cpp"
+    "$PROJECT_DIR/src/core/AsyncHandler.cpp"
+    "$PROJECT_DIR/src/core/Audio.cpp"
+    "$PROJECT_DIR/src/core/Output.cpp"
+    "$PROJECT_DIR/src/core/Aeabi.cpp"
+    "$PROJECT_DIR/src/core/Image.cpp"
+    "$PROJECT_DIR/src/core/Text.cpp"
+    "$PROJECT_DIR/src/core/Font.cpp"
     "$PROJECT_DIR/src/core/GohuFontData.cpp"
     "$PIXMAN_ROOT/pixman-implementation.c"
     "$PIXMAN_ROOT/pixman-general.c"
@@ -90,7 +90,7 @@ SOURCES=(
     "$PIXMAN_ROOT/pixman-combine32.c"
     "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/pixman-fast-path.c"
     "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/pixman.c"
-    "$PROJECT_DIR/src/core/PixmanSymbianCompat.c"
+    "$PROJECT_DIR/src/core/PixmanCompat.c"
     "$PLAYER_ROOT/color.cpp"
     "$PLAYER_ROOT/rect.cpp"
     "$PLAYER_ROOT/tone.cpp"
@@ -269,14 +269,17 @@ fi
 
 mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR" "$GENERATED_DIR"
 python3 "$PROJECT_DIR/tools/generate_cp932_table.py" --output "$GENERATED_CP932"
-python3 "$PROJECT_DIR/tools/generate_symbian_reader_struct.py" "$GENERATED_READER_STRUCT"
+python3 "$PROJECT_DIR/tools/generate_reader_struct.py" "$GENERATED_READER_STRUCT"
 rm -f "$LIBRARY"
 
 objects=()
 win_objects=()
+object_index=0
 for source in "${SOURCES[@]}"; do
     source_name=$(basename -- "$source")
     base=${source_name%.cpp}
+    base=$(printf '%03d_%s' "$object_index" "$base")
+    object_index=$((object_index + 1))
     assembly_raw="$BUILD_DIR/$base.clang.s"
     assembly="$BUILD_DIR/$base.gcce.s"
     object="$BUILD_DIR/$base.o"
@@ -297,21 +300,29 @@ for source in "${SOURCES[@]}"; do
         source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
     elif [[ $source == "$PLAYER_ROOT/"* || $source == "$PLAYER_VENDOR_ROOT/"* ]]; then
         source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
-    elif [[ $source == "$PROJECT_DIR/src/core/Symbian"*.cpp ]]; then
+    elif [[ $source == "$PROJECT_DIR/src/core/Ui.cpp" ||
+            $source == "$PROJECT_DIR/src/core/RenderDamage.cpp" ||
+            $source == "$PROJECT_DIR/src/core/AsyncHandler.cpp" ||
+            $source == "$PROJECT_DIR/src/core/Audio.cpp" ||
+            $source == "$PROJECT_DIR/src/core/Output.cpp" ||
+            $source == "$PROJECT_DIR/src/core/Aeabi.cpp" ||
+            $source == "$PROJECT_DIR/src/core/Image.cpp" ||
+            $source == "$PROJECT_DIR/src/core/Text.cpp" ||
+            $source == "$PROJECT_DIR/src/core/Font.cpp" ]]; then
         source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
     elif [[ $source == "$LIBLCF_ROOT/"* || $source == "$GENERATED_READER_STRUCT" ]]; then
         source_define='-Dfopen=EasyRpgFopen'
     fi
     language_flag=-xc++
     standard_flag=-std=c++11
-    preinclude_flag="-include $PROJECT_DIR/inc/easyrpgsymbian/SymbianUpstreamCompat.h"
+    preinclude_flag="-include $PROJECT_DIR/inc/UpstreamCompat.h"
     pixman_define=
     if [[ $source == *.c ]]; then
         language_flag=-xc
         standard_flag=-std=c99
         preinclude_flag=
     fi
-    if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/"* || $source == "$PROJECT_DIR/src/core/PixmanSymbianCompat.c" ]]; then
+    if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/"* || $source == "$PROJECT_DIR/src/core/PixmanCompat.c" ]]; then
         pixman_define='-DPACKAGE=1 -DPIXMAN_NO_TLS'
     fi
 
@@ -342,13 +353,13 @@ for source in "${SOURCES[@]}"; do
         -nostdinc++ \
         -I "$LIBCXX_COMPAT_INCLUDE" \
         -I "$PROJECT_DIR/third_party/libcxx-4.0.1/include" \
-        -I "$PROJECT_DIR/inc/easyrpgsymbian/libc_compat" \
+        -I "$PROJECT_DIR/inc/libc_compat" \
+        -I "$PROJECT_DIR/inc" \
         -I "$PLAYER_ROOT" \
         -I "$PLAYER_VENDOR_ROOT" \
         -I "$PIXMAN_ROOT" \
         -I "$LIBLCF_ROOT" \
         -I "$LIBLCF_GENERATED_ROOT" \
-        -I "$PROJECT_DIR/inc" \
         -S "$source" \
         -o "$assembly_raw"
 
@@ -378,6 +389,7 @@ for source in "${SOURCES[@]}"; do
 done
 
 WIN_LIBRARY="$WIN_BUILD_DIR\\EasyRpgModernCore.lib"
+rm -f "$LIBRARY"
 chunk_size=32
 for ((chunk_start=0; chunk_start<${#win_objects[@]}; chunk_start+=chunk_size)); do
     chunk=("${win_objects[@]:chunk_start:chunk_size}")

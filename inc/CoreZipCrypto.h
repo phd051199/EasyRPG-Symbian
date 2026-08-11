@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_CORE_ZIP_CRYPTO_H
-#define EASYRPG_SYMBIAN_CORE_ZIP_CRYPTO_H
+#ifndef EASYRPG_CORE_ZIP_CRYPTO_H
+#define EASYRPG_CORE_ZIP_CRYPTO_H
 
 #ifdef __cplusplus
 extern "C" {

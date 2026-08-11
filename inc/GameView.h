@@ -1,14 +1,14 @@
-#ifndef EASYRPG_SYMBIAN_GAME_VIEW_H
-#define EASYRPG_SYMBIAN_GAME_VIEW_H
+#ifndef EASYRPG_GAME_VIEW_H
+#define EASYRPG_GAME_VIEW_H
 
 #include <badesca.h>
 #include <coecntrl.h>
 #include <eiklbo.h>
 #include <f32file.h>
 
-#include "easyrpgsymbian/FrameTimer.h"
+#include "FrameTimer.h"
 
-class CAknSingleStyleListBox;
+class CAknDoubleStyleListBox;
 class CAsyncCallBack;
 class CPerfOverlay;
 class CPlayerRuntime;
@@ -51,7 +51,7 @@ private:
 
 private:
     RFs iFs;
-    CAknSingleStyleListBox* iListBox;
+    CAknDoubleStyleListBox* iListBox;
     CDesCArrayFlat* iListItems;
     CDesCArrayFlat* iArchivePaths;
     CSymbianDisplaySurface* iDisplaySurface;

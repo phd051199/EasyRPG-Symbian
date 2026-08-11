@@ -1,7 +1,7 @@
 #ifndef EASYRPG_SYMBIAN_LIBC_COMPAT_DIRENT_H
 #define EASYRPG_SYMBIAN_LIBC_COMPAT_DIRENT_H
 
-#include "easyrpgsymbian/SymbianDirentBridge.h"
+#include "DirentBridge.h"
 
 #define DIR EasyRpgDir
 #define dirent EasyRpgDirent

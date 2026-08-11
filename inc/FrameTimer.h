@@ -1,5 +1,5 @@
-#ifndef EASYRPG_SYMBIAN_FRAME_TIMER_H
-#define EASYRPG_SYMBIAN_FRAME_TIMER_H
+#ifndef EASYRPG_FRAME_TIMER_H
+#define EASYRPG_FRAME_TIMER_H
 
 #include <e32base.h>
 
@@ -25,7 +25,7 @@ private:
     {
         KLogicFps = 60,
         KRenderDivisor = 2,
-        KMaxCatchUpTicks = 4,
+        KMaxCatchUpTicks = 2,
         KMaxTimerDelayMicroseconds = 16667
     };
 

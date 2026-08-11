@@ -2,4 +2,4 @@ PRJ_PLATFORMS
 WINSCW ARMV5 GCCE
 
 PRJ_MMPFILES
-EasyRpgSymbian.mmp
+EasyRPG.mmp
