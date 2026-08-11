@@ -474,22 +474,35 @@ TBool CAudioMixer::MixStream(TStreamState& aStream,
                              TInt aFrameCount)
 {
     const TInt frames = Min(aFrameCount, aStream.iQueuedFrames);
-    const TInt gain = (aStream.iVolume * 32768 + 50) / 100;
+    const TInt volume = aStream.iVolume;
+    const TInt gain = volume >= 100 ? 32768 : (volume * 32768 + 50) / 100;
     TInt mixedFrame = 0;
     TInt remaining = frames;
     while (remaining > 0)
     {
         const TInt span = Min(remaining, KStreamBufferFrames - aStream.iReadFrame);
         const TInt16* source = &aStream.iSamples[aStream.iReadFrame * KOutputChannels];
-        TInt frame;
-        for (frame = 0; frame < span; ++frame)
+        if (volume >= 100)
         {
-            const TInt sourceOffset = frame * KOutputChannels;
-            const TInt outputOffset = (mixedFrame + frame) * KOutputChannels;
-            aMixedSamples[outputOffset] +=
-                (static_cast<TInt>(source[sourceOffset]) * gain) >> 15;
-            aMixedSamples[outputOffset + 1] +=
-                (static_cast<TInt>(source[sourceOffset + 1]) * gain) >> 15;
+            for (TInt frame = 0; frame < span; ++frame)
+            {
+                const TInt sourceOffset = frame * KOutputChannels;
+                const TInt outputOffset = (mixedFrame + frame) * KOutputChannels;
+                aMixedSamples[outputOffset] += source[sourceOffset];
+                aMixedSamples[outputOffset + 1] += source[sourceOffset + 1];
+            }
+        }
+        else if (volume > 0)
+        {
+            for (TInt frame = 0; frame < span; ++frame)
+            {
+                const TInt sourceOffset = frame * KOutputChannels;
+                const TInt outputOffset = (mixedFrame + frame) * KOutputChannels;
+                aMixedSamples[outputOffset] +=
+                    (static_cast<TInt>(source[sourceOffset]) * gain) >> 15;
+                aMixedSamples[outputOffset + 1] +=
+                    (static_cast<TInt>(source[sourceOffset + 1]) * gain) >> 15;
+            }
         }
         aStream.iReadFrame += span;
         if (aStream.iReadFrame >= KStreamBufferFrames)
@@ -513,18 +526,31 @@ TBool CAudioMixer::MixVoice(TVoice& aVoice,
 
     const TInt remaining = aVoice.iClip->iFrameCount - aVoice.iPosition;
     const TInt frames = Min(aFrameCount, remaining);
-    const TUint8* source = aVoice.iClip->iPcm16->Ptr() +
-                           aVoice.iPosition * KOutputChannels * 2;
-    const TInt gain = (aVoice.iVolume * 32768 + 50) / 100;
-    TInt frame;
-    for (frame = 0; frame < frames; ++frame)
+    const TInt16* source = reinterpret_cast<const TInt16*>(aVoice.iClip->iPcm16->Ptr()) +
+                           aVoice.iPosition * KOutputChannels;
+    const TInt volume = aVoice.iVolume;
+    if (volume >= 100)
     {
-        const TInt sourceOffset = frame * KOutputChannels * 2;
-        const TInt outputOffset = frame * KOutputChannels;
-        const TInt left = ReadPcm16(source + sourceOffset);
-        const TInt right = ReadPcm16(source + sourceOffset + 2);
-        aMixedSamples[outputOffset] += (left * gain) >> 15;
-        aMixedSamples[outputOffset + 1] += (right * gain) >> 15;
+        for (TInt frame = 0; frame < frames; ++frame)
+        {
+            const TInt sourceOffset = frame * KOutputChannels;
+            const TInt outputOffset = frame * KOutputChannels;
+            aMixedSamples[outputOffset] += source[sourceOffset];
+            aMixedSamples[outputOffset + 1] += source[sourceOffset + 1];
+        }
+    }
+    else if (volume > 0)
+    {
+        const TInt gain = (volume * 32768 + 50) / 100;
+        for (TInt frame = 0; frame < frames; ++frame)
+        {
+            const TInt sourceOffset = frame * KOutputChannels;
+            const TInt outputOffset = frame * KOutputChannels;
+            aMixedSamples[outputOffset] +=
+                (static_cast<TInt>(source[sourceOffset]) * gain) >> 15;
+            aMixedSamples[outputOffset + 1] +=
+                (static_cast<TInt>(source[sourceOffset + 1]) * gain) >> 15;
+        }
     }
     aVoice.iPosition += frames;
     if (aVoice.iPosition >= aVoice.iClip->iFrameCount)
@@ -558,22 +584,38 @@ TBool CAudioMixer::FillSingleStreamOutput(TInt aBufferIndex, TInt aFrameCount)
     TBuf8<KOutputBufferBytes>& output = iOutputBuffers[aBufferIndex];
     output.SetLength(KOutputBufferBytes);
     TInt16* destination = reinterpret_cast<TInt16*>(const_cast<TUint8*>(output.Ptr()));
-    const TInt gain = (stream.iVolume * 32768 + 50) / 100;
+    const TInt volume = stream.iVolume;
+    const TInt gain = volume >= 100 ? 24576 : (volume * 24576 + 50) / 100;
     TInt outputFrame = 0;
     TInt remaining = aFrameCount;
     while (remaining > 0)
     {
         const TInt span = Min(remaining, KStreamBufferFrames - stream.iReadFrame);
         const TInt16* source = &stream.iSamples[stream.iReadFrame * KOutputChannels];
-        TInt frame;
-        for (frame = 0; frame < span; ++frame)
+        if (volume >= 100)
         {
-            const TInt sourceOffset = frame * KOutputChannels;
-            const TInt destinationOffset = (outputFrame + frame) * KOutputChannels;
-            const TInt left = (static_cast<TInt>(source[sourceOffset]) * gain) >> 15;
-            const TInt right = (static_cast<TInt>(source[sourceOffset + 1]) * gain) >> 15;
-            destination[destinationOffset] = static_cast<TInt16>((left * 3) / 4);
-            destination[destinationOffset + 1] = static_cast<TInt16>((right * 3) / 4);
+            for (TInt frame = 0; frame < span; ++frame)
+            {
+                const TInt sourceOffset = frame * KOutputChannels;
+                const TInt destinationOffset = (outputFrame + frame) * KOutputChannels;
+                destination[destinationOffset] = static_cast<TInt16>((static_cast<TInt>(source[sourceOffset]) * 3) >> 2);
+                destination[destinationOffset + 1] = static_cast<TInt16>((static_cast<TInt>(source[sourceOffset + 1]) * 3) >> 2);
+            }
+        }
+        else if (volume > 0)
+        {
+            for (TInt frame = 0; frame < span; ++frame)
+            {
+                const TInt sourceOffset = frame * KOutputChannels;
+                const TInt destinationOffset = (outputFrame + frame) * KOutputChannels;
+                destination[destinationOffset] = static_cast<TInt16>((static_cast<TInt>(source[sourceOffset]) * gain) >> 15);
+                destination[destinationOffset + 1] = static_cast<TInt16>((static_cast<TInt>(source[sourceOffset + 1]) * gain) >> 15);
+            }
+        }
+        else
+        {
+            Mem::FillZ(destination + outputFrame * KOutputChannels,
+                       span * KOutputChannels * static_cast<TInt>(sizeof(TInt16)));
         }
         stream.iReadFrame += span;
         if (stream.iReadFrame >= KStreamBufferFrames)

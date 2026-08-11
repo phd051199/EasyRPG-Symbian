@@ -217,10 +217,7 @@ async function main() {
         return;
     }
 
-    assertFile(options.rom, 'ROM');
-    assertFile(options.rpkg, 'RPKG');
     assertFile(options.sis, 'SIS');
-    assertFile(options.game, 'Game zip');
     if (path.isAbsolute(options.chrome)) assertFile(options.chrome, 'Chrome');
 
     if (options.resetProfile) fs.rmSync(options.profile, { recursive: true, force: true });
@@ -412,6 +409,8 @@ async function main() {
 
         let indexState = await readIndexState();
         if (!indexState.hasDevice) {
+            assertFile(options.rom, 'ROM');
+            assertFile(options.rpkg, 'RPKG');
             pushLog('device: installing ROM/RPKG into persistent headless profile');
             await setInputFiles('#romInput', [options.rom]);
             await evaluate("document.getElementById('romInput').dispatchEvent(new Event('change', {bubbles:true}))");
@@ -483,45 +482,67 @@ async function main() {
         result.sisInstalled = true;
         pushLog(`sis: installed UID 0x${(options.uid >>> 0).toString(16)}`);
 
-        await evaluate(`(() => {
-            const old = document.getElementById('headlessGameInput');
-            if (old) old.remove();
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.id = 'headlessGameInput';
-            input.style.display = 'none';
-            document.body.appendChild(input);
-            return true;
-        })()`);
-        await setInputFiles('#headlessGameInput', [options.game]);
-        const guestFileName = path.basename(options.game).toLowerCase();
-        const guestFsPath = `/eka2l1/drives/c/data/easyrpg/games/${guestFileName}`;
-        const uploadResult = await evaluate(`(async () => {
-            const input = document.getElementById('headlessGameInput');
-            const file = input.files[0];
-            if (!file) throw new Error('Game file input is empty');
-            const dir = '/eka2l1/drives/c/data/easyrpg/games';
-            const target = ${JSON.stringify(guestFsPath)};
-            EKA2L1.module.FS.mkdirTree(dir);
-            for (const name of EKA2L1.module.FS.readdir(dir)) {
-                if (name === '.' || name === '..') continue;
-                const existing = dir + '/' + name;
-                try {
-                    const st = EKA2L1.module.FS.stat(existing);
-                    if (EKA2L1.module.FS.isFile(st.mode)) EKA2L1.module.FS.unlink(existing);
-                } catch (e) {}
+        if (fs.existsSync(options.game) && fs.statSync(options.game).isFile()) {
+            await evaluate(`(() => {
+                const old = document.getElementById('headlessGameInput');
+                if (old) old.remove();
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.id = 'headlessGameInput';
+                input.style.display = 'none';
+                document.body.appendChild(input);
+                return true;
+            })()`);
+            await setInputFiles('#headlessGameInput', [options.game]);
+            const guestFileName = path.basename(options.game).toLowerCase();
+            const guestFsPath = `/eka2l1/drives/c/data/easyrpg/games/${guestFileName}`;
+            const uploadResult = await evaluate(`(async () => {
+                const input = document.getElementById('headlessGameInput');
+                const file = input.files[0];
+                if (!file) throw new Error('Game file input is empty');
+                const dir = '/eka2l1/drives/c/data/easyrpg/games';
+                const target = ${JSON.stringify(guestFsPath)};
+                EKA2L1.module.FS.mkdirTree(dir);
+                for (const name of EKA2L1.module.FS.readdir(dir)) {
+                    if (name === '.' || name === '..') continue;
+                    const existing = dir + '/' + name;
+                    try {
+                        const st = EKA2L1.module.FS.stat(existing);
+                        if (EKA2L1.module.FS.isFile(st.mode)) EKA2L1.module.FS.unlink(existing);
+                    } catch (e) {}
+                }
+                await EKA2L1.writeFileToVFS(file, target);
+                await EKA2L1.save();
+                const st = EKA2L1.module.FS.stat(target);
+                return { size: st.size, target };
+            })()`, true);
+            const localGameSize = fs.statSync(options.game).size;
+            if (!uploadResult || uploadResult.size !== localGameSize) {
+                throw new Error(`Game upload size mismatch: local=${localGameSize} remote=${uploadResult?.size}`);
             }
-            await EKA2L1.writeFileToVFS(file, target);
-            await EKA2L1.save();
-            const st = EKA2L1.module.FS.stat(target);
-            return { size: st.size, target };
-        })()`, true);
-        const localGameSize = fs.statSync(options.game).size;
-        if (!uploadResult || uploadResult.size !== localGameSize) {
-            throw new Error(`Game upload size mismatch: local=${localGameSize} remote=${uploadResult?.size}`);
+            result.gameUploaded = true;
+            pushLog(`game: uploaded ${uploadResult.target} (${uploadResult.size} bytes)`);
+        } else {
+            const existingGame = await evaluate(`(() => {
+                const dir = '/eka2l1/drives/c/data/easyrpg/games';
+                try {
+                    const files = EKA2L1.module.FS.readdir(dir).filter(name => {
+                        if (name === '.' || name === '..') return false;
+                        try {
+                            const st = EKA2L1.module.FS.stat(dir + '/' + name);
+                            return EKA2L1.module.FS.isFile(st.mode);
+                        } catch (e) { return false; }
+                    });
+                    if (!files.length) return null;
+                    const target = dir + '/' + files[0];
+                    return { target, size: EKA2L1.module.FS.stat(target).size };
+                } catch (e) { return null; }
+            })()`);
+            if (!existingGame)
+                throw new Error(`Game zip not found locally and profile has no guest game: ${options.game}`);
+            result.gameUploaded = true;
+            pushLog(`game: reusing ${existingGame.target} (${existingGame.size} bytes)`);
         }
-        result.gameUploaded = true;
-        pushLog(`game: uploaded ${uploadResult.target} (${uploadResult.size} bytes)`);
 
         const siteUrl = new URL(options.site);
         const runUrl = new URL('run.html', siteUrl);

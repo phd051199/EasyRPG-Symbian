@@ -27,6 +27,10 @@ set "SIS_DIR=%PROJECT_DIR%\sis"
 set "PACKAGE_DEF=%SIS_DIR%\EasyRPG.pkg"
 set "STAGE_DIR=%SIS_DIR%\stage"
 set "DEVICE_EXE=EasyRPG.exe"
+set "ICON_SOURCE=%PROJECT_DIR%\build\vendor\easyrpg-player-0.5.0\src\icon.h"
+set "ICON_GENERATOR=%PROJECT_DIR%\tools\generate_app_icon.pl"
+set "ICON_SVG=%STAGE_DIR%\EasyRPG.svg"
+set "ICON_MIF=%STAGE_DIR%\EasyRPG.mif"
 
 if /I "%BUILD_PROFILE%"=="debug" (
     set "EASYRPG_BUILD_TARGET=udeb"
@@ -40,6 +44,10 @@ where bldmake >nul 2>&1
 if errorlevel 1 goto bldmake_error
 where makesis >nul 2>&1
 if errorlevel 1 goto makesis_error
+where mifconv >nul 2>&1
+if errorlevel 1 goto mifconv_error
+where perl >nul 2>&1
+if errorlevel 1 goto perl_error
 where arm-none-symbianelf-g++.exe >nul 2>&1
 if errorlevel 1 goto gcce_error
 
@@ -76,6 +84,16 @@ if not exist "%PACKAGE_DEF%" goto package_error
 
 if not exist "%STAGE_DIR%" mkdir "%STAGE_DIR%"
 if errorlevel 1 goto stage_error
+if not exist "%ICON_SOURCE%" goto icon_source_error
+if not exist "%ICON_GENERATOR%" goto icon_generator_error
+if exist "%ICON_SVG%" del /q "%ICON_SVG%" >nul 2>&1
+if exist "%ICON_MIF%" del /q "%ICON_MIF%" >nul 2>&1
+perl "%ICON_GENERATOR%" "%ICON_SOURCE%" "%ICON_SVG%"
+if errorlevel 1 goto icon_generate_error
+mifconv "%ICON_MIF%" /T"%STAGE_DIR%" /S"%SDK_ROOT%\epoc32\tools" /c32,8 "%ICON_SVG%"
+if errorlevel 1 goto icon_compile_error
+if not exist "%ICON_MIF%" goto icon_compile_error
+del /q "%ICON_SVG%" >nul 2>&1
 copy /b /y "%GCCE_EXE%" "%STAGE_DIR%\%DEVICE_EXE%" >nul
 if errorlevel 1 goto stage_error
 copy /b /y "%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.rsc" "%STAGE_DIR%\EasyRPG.rsc" >nul
@@ -121,6 +139,12 @@ exit /b 1
 :makesis_error
 echo makesis not found. >&2
 exit /b 1
+:mifconv_error
+echo mifconv not found. >&2
+exit /b 1
+:perl_error
+echo perl not found. >&2
+exit /b 1
 :gcce_error
 echo GCCE compiler not found. >&2
 exit /b 1
@@ -144,6 +168,18 @@ echo Registration resource was not produced. >&2
 exit /b 1
 :package_error
 echo Package definition missing. >&2
+exit /b 1
+:icon_source_error
+echo EasyRPG Player icon source missing: %ICON_SOURCE% >&2
+exit /b 1
+:icon_generator_error
+echo Icon generator missing: %ICON_GENERATOR% >&2
+exit /b 1
+:icon_generate_error
+echo EasyRPG application icon SVG generation failed. >&2
+exit /b 1
+:icon_compile_error
+echo EasyRPG application icon MIF compilation failed. >&2
 exit /b 1
 :stage_error
 echo Cannot stage GCCE executable/resources for makesis. >&2

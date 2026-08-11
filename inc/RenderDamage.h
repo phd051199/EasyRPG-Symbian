@@ -27,6 +27,7 @@ bool IsRecording();
 bool IsPainting();
 bool IsFullPaintRecording();
 void Record(unsigned int aSignature, const Rect& aRect);
+void MarkDirty(const Rect& aRect);
 void RequireFullPaint();
 void EndRecord();
 void EndFullPaintRecord();

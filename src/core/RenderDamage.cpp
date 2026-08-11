@@ -261,6 +261,11 @@ void Record(unsigned int aSignature, const Rect& aInput) {
     ++gCurrentCount;
 }
 
+void MarkDirty(const Rect& aRect) {
+    if (gPhase == ERecording)
+        AddDirty(aRect);
+}
+
 void RequireFullPaint() {
     if (gPhase == ERecording)
         gFullDependency = true;

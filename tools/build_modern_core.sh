@@ -52,6 +52,14 @@ for header in "$PLAYER_ROOT"/*.h; do
         cp "$header" "$PLAYER_VENDOR_ROOT/$name"
     fi
 done
+PLAYER_WINDOW_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-window-symbian.patch"
+PLAYER_VENDOR_BASE=$(dirname "$PLAYER_VENDOR_ROOT")
+if patch -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$PLAYER_WINDOW_PATCH" >/dev/null 2>&1; then
+    patch -p1 -d "$PLAYER_VENDOR_BASE" < "$PLAYER_WINDOW_PATCH"
+elif ! patch -R -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$PLAYER_WINDOW_PATCH" >/dev/null 2>&1; then
+    echo "Unable to apply EasyRPG Player Symbian window patch." >&2
+    exit 1
+fi
 SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
     "$PROJECT_DIR/src/core/CoreZipCrypto.cpp"
@@ -344,12 +352,13 @@ for source in "${SOURCES[@]}"; do
 
     "$CLANGXX" \
         --target=arm-none-eabi \
-        -march=armv5t \
+        -march=armv6 \
+        -mtune=arm1136jf-s \
         -mfloat-abi=soft \
         -fshort-wchar \
         $language_flag \
         $standard_flag \
-        -O2 \
+        -O3 \
         -ffreestanding \
         -fno-exceptions \
         -fno-rtti \
@@ -398,7 +407,7 @@ for source in "${SOURCES[@]}"; do
         "$assembly_raw" > "$assembly"
 
     WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
-        "$WINE_BIN" "$ASSEMBLER" -march=armv5t -o "$win_object" "$win_assembly"
+        "$WINE_BIN" "$ASSEMBLER" -march=armv6 -o "$win_object" "$win_assembly"
 
     objects+=("$object")
     win_objects+=("$win_object")

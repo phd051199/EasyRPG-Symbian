@@ -24,9 +24,10 @@ private:
     enum
     {
         KLogicFps = 60,
-        KRenderDivisor = 2,
-        KMaxCatchUpTicks = 2,
-        KMaxTimerDelayMicroseconds = 16667
+        KRenderFps = 30,
+        KLogicTicksPerRender = 2,
+        KMaxCatchUpFrames = 2,
+        KMaxTimerDelayMicroseconds = 33334
     };
 
     explicit CFrameTimer(MFrameTimerObserver& aObserver);
@@ -52,7 +53,6 @@ private:
     TInt64 iElapsedCounter;
     TInt64 iNextDeadlineCounter;
     TUint32 iLogicFrame;
-    TUint32 iLastRenderedLogicFrame;
     TBool iRunning;
 };
 

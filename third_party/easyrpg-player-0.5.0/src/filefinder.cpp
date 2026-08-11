@@ -109,10 +109,18 @@ namespace {
 		using namespace FileFinder;
 
 #ifdef EASYRPG_SYMBIAN
+		if (game_directory_tree && game_directory_tree.get() == &tree) {
+			for (char const** c = exts; *c != NULL; ++c) {
+				std::string resolved = ResolveSymbianResource(dir, name + *c);
+				if (!resolved.empty())
+					return resolved;
+			}
+			return "";
+		}
 		for (char const** c = exts; *c != NULL; ++c) {
-			std::string resolved = ResolveSymbianResource(dir, name + *c);
-			if (!resolved.empty())
-				return resolved;
+			const std::string candidate = MakePath(MakePath(tree.directory_path, dir), name + *c);
+			if (Exists(candidate))
+				return candidate;
 		}
 		return "";
 #endif
@@ -212,6 +220,13 @@ namespace {
 		if (!ret.empty()) { return ret; }
 
 		std::string const& rtp_name = translate_rtp(dir, name);
+
+#ifdef EASYRPG_SYMBIAN
+		if (rtp_name != name) {
+			std::string const ret_rtp_game = FindFile(*tree, dir, rtp_name, exts);
+			if (!ret_rtp_game.empty()) { return ret_rtp_game; }
+		}
+#endif
 
 		for(search_path_list::const_iterator i = search_paths.begin(); i != search_paths.end(); ++i) {
 			if (! *i) { continue; }

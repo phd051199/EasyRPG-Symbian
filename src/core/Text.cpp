@@ -489,7 +489,7 @@ void Text::Draw(Bitmap& aDestination,
             DrawSystemGlyph(aDestination, *glyph, x, y, *system, aColor);
         x += GlyphAdvance(glyph);
     }
-    aDestination.Touch();
+    aDestination.Touch(drawRect);
 }
 
 void Text::Draw(Bitmap& aDestination,
@@ -539,5 +539,5 @@ void Text::Draw(Bitmap& aDestination,
             DrawSolidGlyph(aDestination, *glyph, x, y, aColor);
         x += GlyphAdvance(glyph);
     }
-    aDestination.Touch();
+    aDestination.Touch(drawRect);
 }

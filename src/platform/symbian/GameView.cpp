@@ -391,9 +391,8 @@ void CGameView::StartSelectedGameL()
         iPerfOverlay->Reset();
     DrawNow();
 
-    if (iForeground) {
+    if (iForeground)
         iFrameTimer->Start();
-    }
 }
 
 void CGameView::StopGame()
@@ -464,8 +463,8 @@ void CGameView::SetForeground(TBool aForeground)
         iRuntime->Resume();
         if (iPerfOverlay)
             iPerfOverlay->Reset();
-        iFrameTimer->Start();
         DrawNow();
+        iFrameTimer->Start();
     }
 }
 
@@ -676,7 +675,7 @@ void CGameView::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
         if (iDisplaySurface->HasDirtyRegions() || overlayDirty)
         {
             iFrameDrawPending = ETrue;
-            DrawDeferred();
+            DrawNow();
         }
     }
     if (!iRuntime->IsRunning())

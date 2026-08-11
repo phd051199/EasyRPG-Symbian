@@ -13,7 +13,7 @@ CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 }
 
 CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
-    : CActive(CActive::EPriorityStandard),
+    : CActive(CActive::EPriorityHigh),
       iObserver(aObserver),
       iCounterFrequency(0),
       iCounterCountsUp(ETrue),
@@ -24,7 +24,6 @@ CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
       iElapsedCounter(0),
       iNextDeadlineCounter(0),
       iLogicFrame(0),
-      iLastRenderedLogicFrame(0),
       iRunning(EFalse)
 {
 }
@@ -36,10 +35,10 @@ void CFrameTimer::ConstructL()
     TInt counterCountsUp = 0;
     User::LeaveIfError(HAL::Get(HALData::EFastCounterCountsUp, counterCountsUp));
     iCounterCountsUp = counterCountsUp != 0;
-    if (iCounterFrequency < KLogicFps)
+    if (iCounterFrequency < KRenderFps)
         User::Leave(KErrNotSupported);
-    iFramePeriodCounter = iCounterFrequency / KLogicFps;
-    iFramePeriodRemainder = iCounterFrequency % KLogicFps;
+    iFramePeriodCounter = iCounterFrequency / KRenderFps;
+    iFramePeriodRemainder = iCounterFrequency % KRenderFps;
     CActiveScheduler::Add(this);
 }
 
@@ -78,10 +77,10 @@ void CFrameTimer::AdvanceDeadline()
 {
     iNextDeadlineCounter += iFramePeriodCounter;
     iFrameRemainderAccumulator += iFramePeriodRemainder;
-    if (iFrameRemainderAccumulator >= KLogicFps)
+    if (iFrameRemainderAccumulator >= KRenderFps)
     {
         ++iNextDeadlineCounter;
-        iFrameRemainderAccumulator -= KLogicFps;
+        iFrameRemainderAccumulator -= KRenderFps;
     }
 }
 
@@ -137,44 +136,42 @@ void CFrameTimer::RunL()
 
     UpdateElapsedCounter(User::FastCounter());
 
-    TInt ticksToRun = 0;
-    while (iElapsedCounter >= iNextDeadlineCounter && ticksToRun < KMaxCatchUpTicks)
+    TInt framesToRun = 0;
+    while (iElapsedCounter >= iNextDeadlineCounter && framesToRun < KMaxCatchUpFrames)
     {
-        ++ticksToRun;
+        ++framesToRun;
         AdvanceDeadline();
     }
 
-    if (ticksToRun <= 0)
+    if (framesToRun <= 0)
     {
         QueueToDeadline();
         return;
     }
 
-    if (ticksToRun == KMaxCatchUpTicks && iElapsedCounter >= iNextDeadlineCounter)
+    if (framesToRun == KMaxCatchUpFrames && iElapsedCounter >= iNextDeadlineCounter)
     {
         iNextDeadlineCounter = iElapsedCounter;
         iFrameRemainderAccumulator = 0;
         AdvanceDeadline();
     }
 
-    for (TInt tick = 0; tick < ticksToRun; ++tick)
+    for (TInt frame = 0; frame < framesToRun; ++frame)
     {
-        ++iLogicFrame;
-        const TBool finalTick = tick == ticksToRun - 1;
-        const TBool renderFrame = finalTick &&
-            (iLogicFrame == 1 || iLogicFrame - iLastRenderedLogicFrame >= KRenderDivisor);
-        if (renderFrame)
-            iLastRenderedLogicFrame = iLogicFrame;
-
-        TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
-        if (error != KErrNone)
+        for (TInt tick = 0; tick < KLogicTicksPerRender; ++tick)
         {
-            Stop();
-            iObserver.FrameError(error);
-            return;
+            ++iLogicFrame;
+            const TBool renderFrame = frame == framesToRun - 1 && tick == KLogicTicksPerRender - 1;
+            TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
+            if (error != KErrNone)
+            {
+                Stop();
+                iObserver.FrameError(error);
+                return;
+            }
+            if (!iRunning)
+                return;
         }
-        if (!iRunning)
-            return;
     }
 
     UpdateElapsedCounter(User::FastCounter());

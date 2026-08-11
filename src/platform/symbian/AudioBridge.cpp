@@ -783,6 +783,38 @@ void PumpBgm(TInt aMaxFrames)
     if (framesToWrite <= 0)
         return;
     freeFrames = Min(freeFrames, framesToWrite);
+    if (gBgmStep == (static_cast<TInt64>(1) << 16) && gBgmChannels == 2)
+    {
+        const TInt16* samples = reinterpret_cast<const TInt16*>(gBgmPcm->Ptr());
+        while (freeFrames > 0)
+        {
+            TInt sourceFrame = static_cast<TInt>(gBgmPhase >> 16);
+            if (sourceFrame >= gBgmFrameCount)
+            {
+                sourceFrame = 0;
+                gBgmPhase = 0;
+            }
+            const TInt batch = Min(Min(freeFrames, 512), gBgmFrameCount - sourceFrame);
+            if (batch <= 0)
+                break;
+            const TInt written = gMixer->WriteStreamPcm16(
+                CAudioMixer::EStreamBgm,
+                samples + sourceFrame * 2,
+                batch);
+            if (written <= 0)
+                break;
+            gBgmPhase += static_cast<TInt64>(written) << 16;
+            while (gBgmPhase >= totalPhase)
+                gBgmPhase -= totalPhase;
+            gBgmFramesQueued += static_cast<TUint64>(written);
+            freeFrames -= written;
+            if (written != batch)
+                break;
+        }
+        gMixer->CommitStreams();
+        return;
+    }
+
     while (freeFrames > 0)
     {
         const TInt batch = Min(freeFrames, 512);
