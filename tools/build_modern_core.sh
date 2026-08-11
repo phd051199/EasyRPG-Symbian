@@ -141,7 +141,7 @@ SOURCES=(
     "$PLAYER_ROOT/input.cpp"
     "$PLAYER_ROOT/input_buttons_desktop.cpp"
     "$PLAYER_ROOT/filefinder.cpp"
-    "$PLAYER_VENDOR_ROOT/cache.cpp"
+    "$PLAYER_ROOT/cache.cpp"
     "$PLAYER_VENDOR_ROOT/game_actor.cpp"
     "$PLAYER_VENDOR_ROOT/game_battler.cpp"
     "$PLAYER_VENDOR_ROOT/game_enemy.cpp"

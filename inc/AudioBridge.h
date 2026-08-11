@@ -6,6 +6,7 @@ extern "C" {
 #endif
 
 int EasyRpgAudioPreloadSe(const char* path, int pitch);
+int EasyRpgAudioWarmSe(const char* path, int pitch);
 int EasyRpgAudioPlaySe(const char* path, int volume, int pitch);
 void EasyRpgAudioStopSe(void);
 int EasyRpgAudioPlayBgm(const char* path, int volume, int pitch, int fadein);

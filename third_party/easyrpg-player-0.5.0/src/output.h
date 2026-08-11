@@ -122,14 +122,14 @@ namespace Output {
 	 *
 	 * @param fmt formatted debug text to display.
 	 */
-	void Debug(const char* fmt, ...);
+	inline void Debug(const char*, ...) {}
 
 	/**
 	 * Prints a debug message to the console.
 	 *
 	 * @param msg formatted debug text to display.
 	 */
-	void DebugStr(std::string const& msg);
+	inline void DebugStr(std::string const&) {}
 
 #ifdef GEKKO
 	/**

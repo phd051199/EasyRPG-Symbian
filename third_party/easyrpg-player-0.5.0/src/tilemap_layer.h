@@ -54,7 +54,7 @@ class TilemapLayer {
 public:
 	TilemapLayer(int ilayer);
 
-	void DrawTile(Bitmap& destination, Bitmap& screen, int x, int y, int row, int col);
+	void DrawTile(Bitmap& destination, Bitmap& screen, int x, int y, int row, int col, int opacity);
 	void Draw(int z_order);
 
 	void Update();
@@ -113,6 +113,7 @@ private:
 	bool fast_blit = false;
 
 	void CreateTileCache(const std::vector<short>& nmap_data);
+	void PrepareTileDrawCache();
 	void GenerateAutotileAB(short ID, short animID);
 	void GenerateAutotileD(short ID);
 
@@ -146,9 +147,21 @@ private:
 	std::map<uint32_t, TileXY> autotiles_ab_map;
 	std::map<uint32_t, TileXY> autotiles_d_map;
 
+	enum TileSource {
+		SourceNone,
+		SourceChipset,
+		SourceChipsetAnimatedC,
+		SourceAutotileAB,
+		SourceAutotileD
+	};
+
 	struct TileData {
 		short ID;
 		int z;
+		uint8_t source;
+		uint8_t source_x[4];
+		uint8_t source_y[4];
+		uint8_t opacity[4];
 	};
 	std::vector<std::vector<TileData> > data_cache;
 	std::vector<std::shared_ptr<TilemapSubLayer> > sublayers;

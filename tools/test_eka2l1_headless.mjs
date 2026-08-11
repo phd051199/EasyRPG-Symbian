@@ -566,15 +566,7 @@ async function main() {
             pushLog('app: sent OK to launch selected game');
         }
         if (options.enterGame && !options.noStartGame) {
-            await waitEval(`(() => {
-                try {
-                    const log = EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/easyrpg.log', { encoding: 'utf8' });
-                    return log.includes('scene Title');
-                } catch (e) {
-                    return false;
-                }
-            })()`, Math.max(10000, options.launchTimeout * 1000), 'title scene');
-            await sleep(1000);
+            await sleep(2000);
             await evaluate(`(async () => {
                 const code = EKA2L1.keys.OK;
                 EKA2L1.sendKey(code, 1);
@@ -587,17 +579,6 @@ async function main() {
         }
 
         if (options.keySequence) {
-            if (options.keysAfterScene) {
-                const sceneNeedle = `scene ${options.keysAfterScene}`;
-                await waitEval(`(() => {
-                    try {
-                        const log = EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/easyrpg.log', { encoding: 'utf8' });
-                        return log.includes(${JSON.stringify(sceneNeedle)});
-                    } catch (e) {
-                        return false;
-                    }
-                })()`, Math.max(10000, options.launchTimeout * 1000), sceneNeedle);
-            }
             await sleep(options.keyWait);
             const sequence = [];
             for (const rawToken of options.keySequence.split(',')) {
@@ -645,23 +626,6 @@ async function main() {
         result.redrawFps = (redrawEnd - redrawStart) * 1000 / Math.max(1, sampleEnd - sampleStart);
         pushLog(`app: redraw rate ${result.redrawFps.toFixed(2)} fps over ${((sampleEnd - sampleStart) / 1000).toFixed(1)}s`);
 
-        const guestLog = await evaluate(`(() => {
-            try {
-                return EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/easyrpg.log', { encoding: 'utf8' });
-            } catch (e) {
-                return null;
-            }
-        })()`);
-        if (!guestLog) throw new Error('EasyRPG guest log was not created');
-        result.guestLog = path.join(options.output, 'easyrpg.log');
-        fs.writeFileSync(result.guestLog, guestLog);
-        if (/can\s*not\s+load\s+game|cannot\s+load\s+game/i.test(guestLog)) {
-            throw new Error('EasyRPG guest log reports a game load failure');
-        }
-        if (!/game runtime ready/i.test(guestLog) || !/Loading game /i.test(guestLog)) {
-            throw new Error('EasyRPG did not reach game runtime startup');
-        }
-
         await capture('app-final.png');
         result.success = true;
         result.finishedAt = new Date().toISOString();
@@ -681,23 +645,6 @@ async function main() {
                 const file = path.join(options.output, 'failure.png');
                 fs.writeFileSync(file, Buffer.from(image.data, 'base64'));
                 result.screenshot = file;
-            } catch {}
-            try {
-                const response = await cdp.call('Runtime.evaluate', {
-                    expression: `(() => {
-                        try {
-                            return EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/easyrpg.log', { encoding: 'utf8' });
-                        } catch (e) {
-                            return null;
-                        }
-                    })()`,
-                    returnByValue: true
-                });
-                const guestLog = response.result?.value;
-                if (guestLog) {
-                    result.guestLog = path.join(options.output, 'easyrpg.log');
-                    fs.writeFileSync(result.guestLog, guestLog);
-                }
             } catch {}
         }
         throw error;

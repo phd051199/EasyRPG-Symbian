@@ -35,6 +35,7 @@ namespace {
 	FileRequestBinding music_request_id;
 	std::map<std::string, FileRequestBinding> se_request_ids;
 	std::map<std::pair<std::string, int>, FileRequestBinding> se_preload_request_ids;
+	std::map<std::pair<std::string, int>, FileRequestBinding> se_warm_request_ids;
 
 	void PreloadSeReady(FileRequestResult* result, int tempo) {
 		se_preload_request_ids.erase(std::make_pair(result->file, tempo));
@@ -45,6 +46,15 @@ namespace {
 		if (!path.empty()) {
 			Audio().SE_Preload(path, tempo);
 		}
+	}
+
+	void WarmSeReady(FileRequestResult* result, int tempo) {
+		se_warm_request_ids.erase(std::make_pair(result->file, tempo));
+		if (!result->success)
+			return;
+		std::string const path = FileFinder::FindSound(result->file);
+		if (!path.empty())
+			Audio().SE_Warm(path, tempo);
 	}
 
 	void PreloadSystemSe(const RPG::Sound& se) {
@@ -75,6 +85,7 @@ bool bgm_pending = false;
 void Game_System::Init() {
 	data.Setup();
 	se_preload_request_ids.clear();
+	se_warm_request_ids.clear();
 	PreloadSystemSe(data.cursor_se);
 	PreloadSystemSe(data.decision_se);
 	PreloadSystemSe(data.cancel_se);
@@ -144,6 +155,23 @@ void Game_System::BgmStop() {
 	music_request_id = FileRequestBinding();
 	data.current_music.name = "(OFF)";
 	Audio().BGM_Stop();
+}
+
+void Game_System::SeWarm(RPG::Sound const& se) {
+	if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)" || se.volume == 0)
+		return;
+	if (se.name.length() >= 7 && se.name.compare(se.name.length() - 7, 7, ".script") == 0)
+		return;
+
+	int tempo = se.tempo;
+	if (tempo < 50 || tempo > 200)
+		tempo = 100;
+	std::pair<std::string, int> const key = std::make_pair(se.name, tempo);
+	if (se_warm_request_ids.find(key) != se_warm_request_ids.end())
+		return;
+	FileRequestAsync* request = AsyncHandler::RequestFile("Sound", se.name);
+	se_warm_request_ids[key] = request->Bind(std::bind(&WarmSeReady, std::placeholders::_1, tempo));
+	request->Start();
 }
 
 void Game_System::SePlay(RPG::Sound const& se) {

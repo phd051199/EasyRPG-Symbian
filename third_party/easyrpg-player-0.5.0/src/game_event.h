@@ -137,6 +137,7 @@ public:
 	 * @return trigger condition.
 	 */
 	int GetTrigger() const;
+	bool RequiresParallelUpdate() const;
 
 	/**
 	 * Gets event commands list.

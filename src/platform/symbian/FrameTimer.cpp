@@ -2,7 +2,6 @@
 #include <hal_data.h>
 
 #include "FrameTimer.h"
-#include "LogBridge.h"
 
 CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 {
@@ -66,8 +65,6 @@ void CFrameTimer::Start()
 
 void CFrameTimer::Stop()
 {
-    if (iRunning && iLogicFrame == 0)
-        EasyRpgLogDebug("frame timer stopped before first tick");
     iRunning = EFalse;
     Cancel();
 }
@@ -130,9 +127,6 @@ void CFrameTimer::RunL()
     if (!iRunning)
         return;
 
-    if (iLogicFrame == 0)
-        EasyRpgLogDebug("frame timer dispatched");
-
     if (iStatus.Int() != KErrNone)
     {
         const TInt error = iStatus.Int();
@@ -166,9 +160,6 @@ void CFrameTimer::RunL()
     for (TInt tick = 0; tick < ticksToRun; ++tick)
     {
         ++iLogicFrame;
-        if (iLogicFrame == 1)
-            EasyRpgLogDebug("frame timer first tick");
-
         const TBool finalTick = tick == ticksToRun - 1;
         const TBool renderFrame = finalTick &&
             (iLogicFrame == 1 || iLogicFrame - iLastRenderedLogicFrame >= KRenderDivisor);

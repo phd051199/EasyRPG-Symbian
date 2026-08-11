@@ -16,6 +16,7 @@ TInt gBgmChannels = 0;
 TInt gBgmPitch = 100;
 TInt gBgmVolume = 100;
 TInt64 gBgmPhase = 0;
+TInt64 gBgmStep = 0;
 TUint64 gBgmFramesQueued = 0;
 TUint32 gBgmStartMs = 0;
 TUint32 gFadeStartMs = 0;
@@ -62,6 +63,19 @@ void EnsureMixerL()
 {
     if (!gMixer)
         gMixer = CAudioMixer::NewL();
+}
+
+void UpdateBgmStep()
+{
+    if (gBgmSampleRate <= 0 || gBgmPitch <= 0)
+    {
+        gBgmStep = 0;
+        return;
+    }
+    gBgmStep = (static_cast<TInt64>(gBgmSampleRate) * gBgmPitch << 16) /
+               (CAudioMixer::OutputSampleRate() * 100);
+    if (gBgmStep <= 0)
+        gBgmStep = 1;
 }
 
 class CNativeBgmPlayer : public CBase,
@@ -739,6 +753,7 @@ void StopBgmNow()
     gBgmSampleRate = 0;
     gBgmChannels = 0;
     gBgmPhase = 0;
+    gBgmStep = 0;
     gBgmFramesQueued = 0;
     gFadeDurationMs = 0;
     gBgmPlaying = EFalse;
@@ -758,10 +773,8 @@ void PumpBgm(TInt aMaxFrames)
         gBgmFrameCount <= 0 || gBgmSampleRate <= 0 || aMaxFrames <= 0)
         return;
 
-    TInt64 step = static_cast<TInt64>(gBgmSampleRate) * gBgmPitch;
-    step = (step << 16) / (CAudioMixer::OutputSampleRate() * 100);
-    if (step <= 0)
-        step = 1;
+    if (gBgmStep <= 0)
+        UpdateBgmStep();
     const TInt64 totalPhase = static_cast<TInt64>(gBgmFrameCount) << 16;
     const TInt targetFrames = 3072;
     const TInt queuedFrames = gMixer->StreamQueuedFrames(CAudioMixer::EStreamBgm);
@@ -794,7 +807,7 @@ void PumpBgm(TInt aMaxFrames)
                     first + (((second - first) * fraction) >> 15));
             }
 
-            gBgmPhase += step;
+            gBgmPhase += gBgmStep;
             while (gBgmPhase >= totalPhase)
                 gBgmPhase -= totalPhase;
         }
@@ -848,6 +861,7 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
     gBgmSampleRate = sampleRate;
     gBgmChannels = channels;
     gBgmPhase = 0;
+    UpdateBgmStep();
     gBgmFramesQueued = 0;
     gBgmPlaying = ETrue;
     gBgmPaused = EFalse;
@@ -902,6 +916,20 @@ void PreloadSeL(const char* aPath, TInt aPitch)
     CacheSeL(path, aPitch, ETrue);
 }
 
+void WarmSeL(const char* aPath, TInt aPitch)
+{
+    if (aPitch < 50 || aPitch > 200)
+        User::Leave(KErrArgument);
+    EnsureMixerL();
+
+    TFileName path;
+    AsciiPathL(aPath, path);
+    _LIT(KWav, ".wav");
+    if (!HasExtension(path, KWav))
+        return;
+    CacheSeL(path, aPitch, EFalse);
+}
+
 void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
 {
     if (aPitch < 50 || aPitch > 200)
@@ -928,6 +956,12 @@ void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
 extern "C" int EasyRpgAudioPreloadSe(const char* aPath, int aPitch)
 {
     TRAPD(error, PreloadSeL(aPath, aPitch));
+    return error;
+}
+
+extern "C" int EasyRpgAudioWarmSe(const char* aPath, int aPitch)
+{
+    TRAPD(error, WarmSeL(aPath, aPitch));
     return error;
 }
 
@@ -996,6 +1030,7 @@ extern "C" void EasyRpgAudioSetBgmPitch(int aPitch)
     if (aPitch >= 50 && aPitch <= 200)
     {
         gBgmPitch = aPitch;
+        UpdateBgmStep();
         if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
             gNativeBgm->SetPitch(aPitch);
     }
@@ -1060,6 +1095,8 @@ extern "C" void EasyRpgAudioUpdate(void)
             gMixer->SetStreamVolume(CAudioMixer::EStreamBgm, volume);
     }
     PumpBgm(1024);
+    if (gMixer)
+        gMixer->CommitStreams();
 }
 
 extern "C" int EasyRpgAudioConsumeError(void)

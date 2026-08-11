@@ -532,12 +532,68 @@ TBool CAudioMixer::MixVoice(TVoice& aVoice,
     return frames > 0;
 }
 
+TBool CAudioMixer::FillSingleStreamOutput(TInt aBufferIndex, TInt aFrameCount)
+{
+    TInt voice;
+    for (voice = 0; voice < KMaxVoices; ++voice)
+    {
+        if (VoiceIsActive(iVoices[voice]))
+            return EFalse;
+    }
+
+    TInt selected = -1;
+    TInt bus;
+    for (bus = 0; bus < EStreamBusCount; ++bus)
+    {
+        if (iStreams[bus].iQueuedFrames <= 0)
+            continue;
+        if (selected >= 0 || iStreams[bus].iQueuedFrames < aFrameCount)
+            return EFalse;
+        selected = bus;
+    }
+    if (selected < 0)
+        return EFalse;
+
+    TStreamState& stream = iStreams[selected];
+    TBuf8<KOutputBufferBytes>& output = iOutputBuffers[aBufferIndex];
+    output.SetLength(KOutputBufferBytes);
+    TInt16* destination = reinterpret_cast<TInt16*>(const_cast<TUint8*>(output.Ptr()));
+    const TInt gain = (stream.iVolume * 32768 + 50) / 100;
+    TInt outputFrame = 0;
+    TInt remaining = aFrameCount;
+    while (remaining > 0)
+    {
+        const TInt span = Min(remaining, KStreamBufferFrames - stream.iReadFrame);
+        const TInt16* source = &stream.iSamples[stream.iReadFrame * KOutputChannels];
+        TInt frame;
+        for (frame = 0; frame < span; ++frame)
+        {
+            const TInt sourceOffset = frame * KOutputChannels;
+            const TInt destinationOffset = (outputFrame + frame) * KOutputChannels;
+            const TInt left = (static_cast<TInt>(source[sourceOffset]) * gain) >> 15;
+            const TInt right = (static_cast<TInt>(source[sourceOffset + 1]) * gain) >> 15;
+            destination[destinationOffset] = static_cast<TInt16>((left * 3) / 4);
+            destination[destinationOffset + 1] = static_cast<TInt16>((right * 3) / 4);
+        }
+        stream.iReadFrame += span;
+        if (stream.iReadFrame >= KStreamBufferFrames)
+            stream.iReadFrame = 0;
+        outputFrame += span;
+        remaining -= span;
+    }
+    stream.iQueuedFrames -= aFrameCount;
+    return ETrue;
+}
+
 void CAudioMixer::FillOutputBuffer(TInt aBufferIndex)
 {
+    const TInt frameCount = KOutputBufferBytes / (KOutputChannels * 2);
+    if (FillSingleStreamOutput(aBufferIndex, frameCount))
+        return;
+
     TBuf8<KOutputBufferBytes>& output = iOutputBuffers[aBufferIndex];
     output.SetLength(KOutputBufferBytes);
     Mem::FillZ(iMixBuffer, sizeof(iMixBuffer));
-    const TInt frameCount = KOutputBufferBytes / (KOutputChannels * 2);
 
     TInt bus;
     for (bus = 0; bus < EStreamBusCount; ++bus)
@@ -739,9 +795,7 @@ void CAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
         if (iQueuedOutputBufferCount > 0)
             --iQueuedOutputBufferCount;
     }
-    if (aError == KErrNone)
-        QueueOutputBuffers();
-    else if (aError != KErrAbort && !iShuttingDown)
+    if (aError != KErrNone && aError != KErrAbort && !iShuttingDown)
     {
         iReady = EFalse;
         iLastError = aError;
@@ -755,7 +809,6 @@ void CAudioMixer::MaoscPlayComplete(TInt aError)
     if (aError == KErrNone || aError == KErrUnderflow)
     {
         ResetOutputQueue();
-        QueueOutputBuffers();
     }
     else if (aError != KErrAbort)
     {

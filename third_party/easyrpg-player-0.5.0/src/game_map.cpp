@@ -21,10 +21,12 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <set>
 
 #include "async_handler.h"
 #include "system.h"
 #include "battle_animation.h"
+#include "cache.h"
 #include "game_battle.h"
 #include "game_battler.h"
 #include "game_map.h"
@@ -62,6 +64,16 @@ namespace {
 	std::vector<unsigned char> passages_up;
 	std::vector<Game_Event> events;
 	std::vector<Game_CommonEvent> common_events;
+	std::vector<Game_CommonEvent*> common_parallel_events;
+	std::vector<Game_CommonEvent*> common_auto_events;
+	std::vector<Game_Event*> event_parallel_updates;
+	std::vector<Game_Event*> event_trigger_checks;
+	std::vector<int> event_cell_heads;
+	std::vector<int> event_next;
+	std::vector<int> event_prev;
+	std::vector<int> event_index_by_id;
+	std::vector<unsigned int> event_query_marks;
+	unsigned int event_query_serial = 1;
 
 	std::unique_ptr<RPG::Map> map;
 	int scroll_direction;
@@ -80,6 +92,262 @@ namespace {
 	int pan_speed;
 
 	int last_map_id;
+
+	int EventCellIndex(int x, int y) {
+		if (!map || x < 0 || y < 0 || x >= map->width || y >= map->height)
+			return -1;
+		return x + y * map->width;
+	}
+
+	void UnlinkSpatialEvent(int event_index, int cell) {
+		if (event_index < 0 || event_index >= static_cast<int>(event_next.size()) ||
+			cell < 0 || cell >= static_cast<int>(event_cell_heads.size()))
+			return;
+		const int previous = event_prev[event_index];
+		const int next = event_next[event_index];
+		if (previous >= 0)
+			event_next[previous] = next;
+		else if (event_cell_heads[cell] == event_index)
+			event_cell_heads[cell] = next;
+		if (next >= 0)
+			event_prev[next] = previous;
+		event_prev[event_index] = -1;
+		event_next[event_index] = -1;
+	}
+
+	void LinkSpatialEvent(int event_index, int cell) {
+		if (event_index < 0 || event_index >= static_cast<int>(event_next.size()) ||
+			cell < 0 || cell >= static_cast<int>(event_cell_heads.size()))
+			return;
+		int current = event_cell_heads[cell];
+		if (current < 0 || event_index < current) {
+			event_prev[event_index] = -1;
+			event_next[event_index] = current;
+			if (current >= 0)
+				event_prev[current] = event_index;
+			event_cell_heads[cell] = event_index;
+			return;
+		}
+		while (event_next[current] >= 0 && event_next[current] < event_index)
+			current = event_next[current];
+		const int next = event_next[current];
+		event_prev[event_index] = current;
+		event_next[event_index] = next;
+		event_next[current] = event_index;
+		if (next >= 0)
+			event_prev[next] = event_index;
+	}
+
+	void RebuildEventUpdateLists() {
+		event_parallel_updates.clear();
+		event_trigger_checks.clear();
+		event_parallel_updates.reserve(events.size());
+		event_trigger_checks.reserve(events.size());
+		for (Game_Event& event : events) {
+			if (event.RequiresParallelUpdate())
+				event_parallel_updates.push_back(&event);
+			const int trigger = event.GetTrigger();
+			if (trigger == RPG::EventPage::Trigger_auto_start ||
+				trigger == RPG::EventPage::Trigger_collision)
+				event_trigger_checks.push_back(&event);
+		}
+	}
+
+	void RebuildEventSpatialIndex() {
+		if (!map) {
+			event_cell_heads.clear();
+			event_next.clear();
+			event_prev.clear();
+			event_index_by_id.clear();
+			event_query_marks.clear();
+			return;
+		}
+		event_cell_heads.assign(map->width * map->height, -1);
+		event_next.assign(events.size(), -1);
+		event_prev.assign(events.size(), -1);
+		event_query_marks.assign(events.size(), 0);
+		int max_id = 0;
+		for (const Game_Event& event : events)
+			max_id = std::max(max_id, event.GetId());
+		event_index_by_id.assign(max_id + 1, -1);
+		for (size_t index = 0; index < events.size(); ++index) {
+			Game_Event& event = events[index];
+			const int id = event.GetId();
+			if (id >= 0 && id < static_cast<int>(event_index_by_id.size()))
+				event_index_by_id[id] = static_cast<int>(index);
+			LinkSpatialEvent(static_cast<int>(index), EventCellIndex(event.GetX(), event.GetY()));
+		}
+		event_query_serial = 1;
+	}
+
+	int WrapCoordinate(int value, int size) {
+		if (value >= 0 && value < size)
+			return value;
+		if (value < 0) {
+			value += size;
+			if (value >= 0)
+				return value;
+		} else {
+			value -= size;
+			if (value < size)
+				return value;
+		}
+		value %= size;
+		return value < 0 ? value + size : value;
+	}
+
+	const int KMapWarmSeLimit = 16;
+	const int KMapWarmCharsetLimit = 12;
+	const int KMapWarmPictureLimit = 8;
+	std::map<std::string, FileRequestBinding> map_charset_warm_requests;
+	std::map<std::pair<std::string, bool>, FileRequestBinding> map_picture_warm_requests;
+
+	void WarmCharsetReady(FileRequestResult* result) {
+		map_charset_warm_requests.erase(result->file);
+		if (result->success)
+			Cache::Charset(result->file);
+	}
+
+	void WarmPictureReady(FileRequestResult* result, bool transparent) {
+		map_picture_warm_requests.erase(std::make_pair(result->file, transparent));
+		if (result->success)
+			Cache::Picture(result->file, transparent);
+	}
+
+	void WarmCharset(const std::string& name) {
+		if (name.empty() || map_charset_warm_requests.find(name) != map_charset_warm_requests.end())
+			return;
+		FileRequestAsync* request = AsyncHandler::RequestFile("CharSet", name);
+		map_charset_warm_requests[name] = request->Bind(&WarmCharsetReady);
+		request->Start();
+	}
+
+	void WarmPicture(const std::string& name, bool transparent) {
+		if (name.empty())
+			return;
+		const std::pair<std::string, bool> key(name, transparent);
+		if (map_picture_warm_requests.find(key) != map_picture_warm_requests.end())
+			return;
+		FileRequestAsync* request = AsyncHandler::RequestFile("Picture", name);
+		map_picture_warm_requests[key] = request->Bind(std::bind(&WarmPictureReady, std::placeholders::_1, transparent));
+		request->Start();
+	}
+
+	void WarmEventCommands(const std::vector<RPG::EventCommand>& commands,
+		std::set<std::pair<std::string, int> >& warmed,
+		std::set<int>& visited_common,
+		int& warm_count) {
+		for (std::vector<RPG::EventCommand>::const_iterator it = commands.begin();
+			it != commands.end() && warm_count < KMapWarmSeLimit; ++it) {
+			if (it->code == RPG::EventCommand::Code::PlaySound && it->parameters.size() >= 2) {
+				RPG::Sound sound;
+				sound.name = it->string;
+				sound.volume = it->parameters[0];
+				sound.tempo = it->parameters[1];
+				sound.balance = it->parameters.size() >= 3 ? it->parameters[2] : 50;
+				int tempo = sound.tempo;
+				if (tempo < 50 || tempo > 200)
+					tempo = 100;
+				const std::pair<std::string, int> key(sound.name, tempo);
+				if (warmed.insert(key).second) {
+					Game_System::SeWarm(sound);
+					++warm_count;
+				}
+			} else if (it->code == RPG::EventCommand::Code::CallCommonEvent && !it->parameters.empty()) {
+				const int id = it->parameters[0];
+				if (!visited_common.insert(id).second)
+					continue;
+				for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
+					common != Data::commonevents.end(); ++common) {
+					if (common->ID == id) {
+						WarmEventCommands(common->event_commands, warmed, visited_common, warm_count);
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	void WarmImageCommands(const std::vector<RPG::EventCommand>& commands,
+		std::set<std::pair<std::string, bool> >& warmed,
+		std::set<int>& visited_common,
+		int& warm_count) {
+		for (std::vector<RPG::EventCommand>::const_iterator it = commands.begin();
+			it != commands.end() && warm_count < KMapWarmPictureLimit; ++it) {
+			if (it->code == RPG::EventCommand::Code::ShowPicture && it->parameters.size() >= 8) {
+				const bool transparent = it->parameters[7] > 0;
+				const std::pair<std::string, bool> key(it->string, transparent);
+				if (warmed.insert(key).second) {
+					WarmPicture(it->string, transparent);
+					++warm_count;
+				}
+			} else if (it->code == RPG::EventCommand::Code::CallCommonEvent && !it->parameters.empty()) {
+				const int id = it->parameters[0];
+				if (!visited_common.insert(id).second)
+					continue;
+				for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
+					common != Data::commonevents.end(); ++common) {
+					if (common->ID == id) {
+						WarmImageCommands(common->event_commands, warmed, visited_common, warm_count);
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	void WarmMapImages() {
+		std::set<std::string> warmed_charsets;
+		int charset_count = 0;
+		for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
+			event != map->events.end() && charset_count < KMapWarmCharsetLimit; ++event) {
+			for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
+				page != event->pages.end() && charset_count < KMapWarmCharsetLimit; ++page) {
+				if (!page->character_name.empty() && warmed_charsets.insert(page->character_name).second) {
+					WarmCharset(page->character_name);
+					++charset_count;
+				}
+			}
+		}
+
+		std::set<std::pair<std::string, bool> > warmed_pictures;
+		std::set<int> visited_common;
+		int picture_count = 0;
+		for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
+			event != map->events.end() && picture_count < KMapWarmPictureLimit; ++event) {
+			for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
+				page != event->pages.end() && picture_count < KMapWarmPictureLimit; ++page)
+				WarmImageCommands(page->event_commands, warmed_pictures, visited_common, picture_count);
+		}
+		for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
+			common != Data::commonevents.end() && picture_count < KMapWarmPictureLimit; ++common) {
+			if (common->trigger == RPG::EventPage::Trigger_parallel ||
+				common->trigger == RPG::EventPage::Trigger_auto_start) {
+				if (visited_common.insert(common->ID).second)
+					WarmImageCommands(common->event_commands, warmed_pictures, visited_common, picture_count);
+			}
+		}
+	}
+
+	void WarmMapSounds() {
+		std::set<std::pair<std::string, int> > warmed;
+		std::set<int> visited_common;
+		int warm_count = 0;
+		for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
+			event != map->events.end() && warm_count < KMapWarmSeLimit; ++event) {
+			for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
+				page != event->pages.end() && warm_count < KMapWarmSeLimit; ++page)
+				WarmEventCommands(page->event_commands, warmed, visited_common, warm_count);
+		}
+		for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
+			common != Data::commonevents.end() && warm_count < KMapWarmSeLimit; ++common) {
+			if (common->trigger == RPG::EventPage::Trigger_parallel ||
+				common->trigger == RPG::EventPage::Trigger_auto_start) {
+				if (visited_common.insert(common->ID).second)
+					WarmEventCommands(common->event_commands, warmed, visited_common, warm_count);
+			}
+		}
+	}
 }
 
 void Game_Map::Init() {
@@ -97,9 +365,19 @@ void Game_Map::Init() {
 	map_info.encounter_rate = 0;
 
 	common_events.clear();
+	common_parallel_events.clear();
+	common_auto_events.clear();
 	common_events.reserve(Data::commonevents.size());
 	for (const RPG::CommonEvent& ev : Data::commonevents) {
 		common_events.emplace_back(ev.ID);
+	}
+	common_parallel_events.reserve(common_events.size());
+	common_auto_events.reserve(common_events.size());
+	for (Game_CommonEvent& ev : common_events) {
+		if (ev.GetTrigger() == RPG::EventPage::Trigger_parallel)
+			common_parallel_events.push_back(&ev);
+		else if (ev.GetTrigger() == RPG::EventPage::Trigger_auto_start)
+			common_auto_events.push_back(&ev);
 	}
 
 	vehicles.clear();
@@ -117,6 +395,15 @@ void Game_Map::Init() {
 }
 
 void Game_Map::Dispose() {
+	map_charset_warm_requests.clear();
+	map_picture_warm_requests.clear();
+	event_cell_heads.clear();
+	event_next.clear();
+	event_prev.clear();
+	event_index_by_id.clear();
+	event_query_marks.clear();
+	event_parallel_updates.clear();
+	event_trigger_checks.clear();
 	events.clear();
 	pending.clear();
 
@@ -131,6 +418,8 @@ void Game_Map::Dispose() {
 void Game_Map::Quit() {
 	Dispose();
 
+	common_parallel_events.clear();
+	common_auto_events.clear();
 	common_events.clear();
 	interpreter.reset();
 }
@@ -154,6 +443,8 @@ void Game_Map::Setup(int _id) {
 	for (const RPG::Event& ev : map->events) {
 		events.emplace_back(location.map_id, ev);
 	}
+	RebuildEventSpatialIndex();
+	RebuildEventUpdateLists();
 
 	location.pan_finish_x = 0;
 	location.pan_finish_y = 0;
@@ -200,6 +491,8 @@ void Game_Map::SetupFromSave() {
 		if (events.back().IsMoveRouteOverwritten())
 			pending.push_back(&events.back());
 	}
+	RebuildEventSpatialIndex();
+	RebuildEventUpdateLists();
 
 	for (size_t i = 0; i < Main_Data::game_data.common_events.size() && i < common_events.size(); ++i) {
 		common_events[i].SetSaveData(Main_Data::game_data.common_events[i].event_data);
@@ -244,6 +537,8 @@ void Game_Map::SetupCommon(int _id) {
 		Output::ErrorStr(LcfReader::GetError());
 	}
 
+	WarmMapSounds();
+	WarmMapImages();
 	refresh_type = Refresh_All;
 
 	scroll_direction = 2;
@@ -332,6 +627,7 @@ void Game_Map::Refresh() {
 				ev.Refresh();
 			}
 		}
+		RebuildEventUpdateLists();
 	}
 
 	refresh_type = Refresh_None;
@@ -348,8 +644,8 @@ void Game_Map::ReserveInterpreterDeletion(std::shared_ptr<Game_Interpreter> inte
 
 void Game_Map::ScrollDown(int distance) {
 	if (LoopVertical()) {
-		int height = GetHeight() * SCREEN_TILE_WIDTH;
-		map_info.position_y = (map_info.position_y + distance + height) % height;
+		const int height = GetHeight() * SCREEN_TILE_WIDTH;
+		map_info.position_y = WrapCoordinate(map_info.position_y + distance, height);
 		parallax_y -= map_info.parallax_vert ? distance / 2 : 0;
 	} else {
 		if (map_info.position_y + distance <= (GetHeight() - 15) * SCREEN_TILE_WIDTH) {
@@ -365,8 +661,8 @@ void Game_Map::ScrollDown(int distance) {
 
 void Game_Map::ScrollLeft(int distance) {
 	if (LoopHorizontal()) {
-		int width = GetWidth() * SCREEN_TILE_WIDTH;
-		map_info.position_x = (map_info.position_x - distance + width) % width;
+		const int width = GetWidth() * SCREEN_TILE_WIDTH;
+		map_info.position_x = WrapCoordinate(map_info.position_x - distance, width);
 		parallax_x += map_info.parallax_horz ? distance / 2 : 0;
 	} else {
 		if (map_info.position_x - distance >= 0) {
@@ -382,8 +678,8 @@ void Game_Map::ScrollLeft(int distance) {
 
 void Game_Map::ScrollRight(int distance) {
 	if (LoopHorizontal()) {
-		int width = GetWidth() * SCREEN_TILE_WIDTH;
-		map_info.position_x = (map_info.position_x + distance + width) % width;
+		const int width = GetWidth() * SCREEN_TILE_WIDTH;
+		map_info.position_x = WrapCoordinate(map_info.position_x + distance, width);
 		parallax_x -= map_info.parallax_horz ? distance / 2 : 0;
 	} else {
 		if (map_info.position_x + distance <= (GetWidth() - 20) * SCREEN_TILE_WIDTH) {
@@ -399,8 +695,8 @@ void Game_Map::ScrollRight(int distance) {
 
 void Game_Map::ScrollUp(int distance) {
 	if (LoopVertical()) {
-		int height = GetHeight() * SCREEN_TILE_WIDTH;
-		map_info.position_y = (map_info.position_y - distance + height) % height;
+		const int height = GetHeight() * SCREEN_TILE_WIDTH;
+		map_info.position_y = WrapCoordinate(map_info.position_y - distance, height);
 		parallax_y += map_info.parallax_vert ? distance / 2 : 0;
 	} else {
 		if (map_info.position_y - distance >= 0) {
@@ -538,20 +834,51 @@ bool Game_Map::MakeWay(int x, int y, int d, const Game_Character& self) {
 	bool stepped_off_event = false;
 	bool stepped_onto_event = false;
 
-	for (Game_Event& other : GetEvents()) {
+	auto process_event = [&](Game_Event& other) -> bool {
 		CollisionResult result = TestCollisionDuringMove(x, y, new_x, new_y, d, self, other);
 		if (result == Collision) {
-			// Try updating the offending event to give it a chance to move out of the
-			// way and recheck.
 			other.UpdateParallel();
-			if (TestCollisionDuringMove(x, y, new_x, new_y, d, self, other) == Collision) {
+			if (TestCollisionDuringMove(x, y, new_x, new_y, d, self, other) == Collision)
 				return false;
-			}
 		}
 		else if (result == CanStepOffCurrentTile) {
 			stepped_off_event = true;
 		} else if (result == CanStepOntoNewTile) {
 			stepped_onto_event = true;
+		}
+		return true;
+	};
+
+	const int old_cell = EventCellIndex(x, y);
+	const int new_cell = EventCellIndex(new_x, new_y);
+	if (old_cell >= 0 && new_cell >= 0 &&
+		old_cell < static_cast<int>(event_cell_heads.size()) &&
+		new_cell < static_cast<int>(event_cell_heads.size()) &&
+		event_query_marks.size() == events.size()) {
+		++event_query_serial;
+		if (event_query_serial == 0) {
+			std::fill(event_query_marks.begin(), event_query_marks.end(), 0);
+			event_query_serial = 1;
+		}
+		const int cells[2] = {old_cell, new_cell};
+		for (int cell_index = 0; cell_index < 2; ++cell_index) {
+			if (cell_index == 1 && cells[1] == cells[0])
+				continue;
+			int event_index = event_cell_heads[cells[cell_index]];
+			while (event_index >= 0) {
+				const int next_index = event_next[event_index];
+				if (event_query_marks[event_index] != event_query_serial) {
+					event_query_marks[event_index] = event_query_serial;
+					if (!process_event(events[event_index]))
+						return false;
+				}
+				event_index = next_index;
+			}
+		}
+	} else {
+		for (Game_Event& other : GetEvents()) {
+			if (!process_event(other))
+				return false;
 		}
 	}
 
@@ -583,42 +910,47 @@ bool Game_Map::IsPassable(int x, int y, int d, const Game_Character* self_event)
 
 	if (self_event) {
 		bool pass = false;
-		std::vector<Game_Event*> events;
-		std::vector<Game_Event*>::iterator it;
-
-		Game_Map::GetEventsXY(events, x, y);
-		for (it = events.begin(); it != events.end(); ++it) {
-			if (*it == self_event || (*it)->GetThrough()) {
-				continue;
-			}
-
-			if (self_event != Main_Data::game_player.get()) {
-				if (self_event->IsOverlapForbidden() || (*it)->IsOverlapForbidden())
-					return false;
-			}
-
-			if ((*it)->GetLayer() == self_event->GetLayer()) {
+		auto process_event = [&](Game_Event& event) {
+			if (!event.GetActive() || &event == self_event || event.GetThrough())
+				return true;
+			if (self_event != Main_Data::game_player.get() &&
+				(self_event->IsOverlapForbidden() || event.IsOverlapForbidden()))
+				return false;
+			if (event.GetLayer() == self_event->GetLayer()) {
 				if (self_event->IsInPosition(x, y))
 					pass = true;
 				else
 					return false;
+			} else if (event.GetLayer() == RPG::EventPage::Layers_below) {
+				tile_id = event.GetTileId();
+				if ((passages_up[tile_id] & Passable::Above) == 0) {
+					if ((passages_up[tile_id] & bit) != 0)
+						pass = true;
+					else
+						return false;
+				}
 			}
-			else if ((*it)->GetLayer() == RPG::EventPage::Layers_below) {
-				// Event layer Chipset Tile
-				tile_id = (*it)->GetTileId();
-				if ((passages_up[tile_id] & Passable::Above) != 0)
-					continue;
-				if ((passages_up[tile_id] & bit) != 0)
-					pass = true;
-				else
+			return true;
+		};
+
+		const int cell = EventCellIndex(x, y);
+		if (cell >= 0 && cell < static_cast<int>(event_cell_heads.size())) {
+			int event_index = event_cell_heads[cell];
+			while (event_index >= 0) {
+				if (!process_event(events[event_index]))
+					return false;
+				event_index = event_next[event_index];
+			}
+		} else {
+			for (Game_Event& event : events) {
+				if (event.IsInPosition(x, y) && !process_event(event))
 					return false;
 			}
 		}
 
 		if (!self_event->IsInPosition(x, y) && (vehicles[0]->IsInPosition(x, y) || vehicles[1]->IsInPosition(x, y)))
 			return false;
-
-		if (pass) // All events here are passable
+		if (pass)
 			return true;
 	}
 
@@ -639,19 +971,29 @@ bool Game_Map::IsPassableVehicle(int x, int y, Game_Vehicle::Type vehicle_type) 
 	}
 
 	int tile_id;
-	std::vector<Game_Event*> events;
-	std::vector<Game_Event*>::iterator it;
-
-	Game_Map::GetEventsXY(events, x, y);
-	for (it = events.begin(); it != events.end(); ++it) {
-		if ((*it)->GetThrough()) {
-			continue;
-		} else if ((*it)->GetLayer() == 1) {
+	auto process_event = [&](Game_Event& event) {
+		if (!event.GetActive() || event.GetThrough())
+			return true;
+		if (event.GetLayer() == RPG::EventPage::Layers_same)
 			return false;
-		} else if ((*it)->GetTileId() > 0 && (*it)->GetLayer() == RPG::EventPage::Layers_below) {
-			// Event layer Chipset Tile
-			tile_id = (*it)->GetTileId();
+		if (event.GetTileId() > 0 && event.GetLayer() == RPG::EventPage::Layers_below) {
+			tile_id = event.GetTileId();
 			if ((passages_up[tile_id] & Passable::Above) == 0)
+				return false;
+		}
+		return true;
+	};
+	const int cell = EventCellIndex(x, y);
+	if (cell >= 0 && cell < static_cast<int>(event_cell_heads.size())) {
+		int event_index = event_cell_heads[cell];
+		while (event_index >= 0) {
+			if (!process_event(events[event_index]))
+				return false;
+			event_index = event_next[event_index];
+		}
+	} else {
+		for (Game_Event& event : events) {
+			if (event.IsInPosition(x, y) && !process_event(event))
 				return false;
 		}
 	}
@@ -682,13 +1024,27 @@ bool Game_Map::IsLandable(int x, int y, const Game_Character *self_event) {
 	int bit = Passable::Down | Passable::Right | Passable::Left | Passable::Up;
 
 	if (self_event) {
-		for (Game_Event& ev : events) {
-			if (&ev != self_event && ev.IsInPosition(x, y)) {
-				if (!ev.GetThrough()) {
-					if (ev.GetLayer() == RPG::EventPage::Layers_same) {
+		const int cell = EventCellIndex(x, y);
+		if (cell >= 0 && cell < static_cast<int>(event_cell_heads.size())) {
+			int event_index = event_cell_heads[cell];
+			while (event_index >= 0) {
+				Game_Event& ev = events[event_index];
+				if (&ev != self_event && !ev.GetThrough()) {
+					if (ev.GetLayer() == RPG::EventPage::Layers_same)
 						return false;
-					} else if (ev.GetTileId() >= 0 && ev.GetLayer() == RPG::EventPage::Layers_below) {
-						// Event layer Chipset Tile
+					if (ev.GetTileId() >= 0 && ev.GetLayer() == RPG::EventPage::Layers_below) {
+						tile_id = ev.GetTileId();
+						return (passages_up[tile_id] & bit) != 0;
+					}
+				}
+				event_index = event_next[event_index];
+			}
+		} else {
+			for (Game_Event& ev : events) {
+				if (&ev != self_event && ev.IsInPosition(x, y) && !ev.GetThrough()) {
+					if (ev.GetLayer() == RPG::EventPage::Layers_same)
+						return false;
+					if (ev.GetTileId() >= 0 && ev.GetLayer() == RPG::EventPage::Layers_below) {
 						tile_id = ev.GetTileId();
 						return (passages_up[tile_id] & bit) != 0;
 					}
@@ -786,11 +1142,36 @@ bool Game_Map::AirshipLandOk(int const x, int const y) {
 	return Data::data.terrains[GetTerrainTag(x, y) - 1].airship_land;
 }
 
-void Game_Map::GetEventsXY(std::vector<Game_Event*>& events, int x, int y) {
-	for (Game_Event& ev : GetEvents()) {
-		if (ev.IsInPosition(x, y) && ev.GetActive()) {
-			events.push_back(&ev);
+void Game_Map::UpdateEventSpatialIndex(Game_Event& event, int old_x, int old_y, int new_x, int new_y) {
+	const int id = event.GetId();
+	if (id < 0 || id >= static_cast<int>(event_index_by_id.size()))
+		return;
+	const int event_index = event_index_by_id[id];
+	if (event_index < 0 || event_index >= static_cast<int>(event_next.size()))
+		return;
+	const int old_cell = EventCellIndex(old_x, old_y);
+	const int new_cell = EventCellIndex(new_x, new_y);
+	if (old_cell == new_cell)
+		return;
+	UnlinkSpatialEvent(event_index, old_cell);
+	LinkSpatialEvent(event_index, new_cell);
+}
+
+void Game_Map::GetEventsXY(std::vector<Game_Event*>& result, int x, int y) {
+	const int cell = EventCellIndex(x, y);
+	if (cell >= 0 && cell < static_cast<int>(event_cell_heads.size())) {
+		int event_index = event_cell_heads[cell];
+		while (event_index >= 0) {
+			Game_Event& event = events[event_index];
+			if (event.GetActive())
+				result.push_back(&event);
+			event_index = event_next[event_index];
 		}
+		return;
+	}
+	for (Game_Event& event : GetEvents()) {
+		if (event.IsInPosition(x, y) && event.GetActive())
+			result.push_back(&event);
 	}
 }
 
@@ -803,19 +1184,15 @@ bool Game_Map::LoopVertical() {
 }
 
 int Game_Map::RoundX(int x) {
-	if ( LoopHorizontal() ) {
-		return (x + GetWidth()) % GetWidth();
-	} else {
-		return x;
-	}
+	if (LoopHorizontal())
+		return WrapCoordinate(x, GetWidth());
+	return x;
 }
 
 int Game_Map::RoundY(int y) {
-	if ( LoopVertical() ) {
-		return (y + GetHeight()) % GetHeight();
-	} else {
-		return y;
-	}
+	if (LoopVertical())
+		return WrapCoordinate(y, GetHeight());
+	return y;
 }
 
 int Game_Map::XwithDirection(int x, int direction) {
@@ -827,12 +1204,15 @@ int Game_Map::YwithDirection(int y, int direction) {
 }
 
 int Game_Map::CheckEvent(int x, int y) {
-	for (const Game_Event& ev : events) {
-		if (ev.IsInPosition(x, y)) {
-			return ev.GetId();
-		}
+	const int cell = EventCellIndex(x, y);
+	if (cell >= 0 && cell < static_cast<int>(event_cell_heads.size())) {
+		const int event_index = event_cell_heads[cell];
+		return event_index >= 0 ? events[event_index].GetId() : 0;
 	}
-
+	for (const Game_Event& ev : events) {
+		if (ev.IsInPosition(x, y))
+			return ev.GetId();
+	}
 	return 0;
 }
 
@@ -879,20 +1259,23 @@ void Game_Map::Update(bool only_parallel) {
 		}
 	}
 
-	for (Game_CommonEvent& ev : common_events) {
-		ev.UpdateParallel();
+	for (Game_CommonEvent* ev : common_parallel_events) {
+		ev->UpdateParallel();
 	}
 
-	for (Game_Event& ev : events) {
-		ev.UpdateParallel();
+	if (pending.empty()) {
+		for (Game_Event* ev : event_parallel_updates)
+			ev->UpdateParallel();
+	} else {
+		for (Game_Event& ev : events)
+			ev.UpdateParallel();
 	}
 
 	if (only_parallel)
 		return;
 
-	for (Game_Event& ev : events) {
-		ev.CheckEventTriggers();
-	}
+	for (Game_Event* ev : event_trigger_checks)
+		ev->CheckEventTriggers();
 
 	Main_Data::game_player->Update();
 	GetInterpreter().Update();
@@ -901,8 +1284,8 @@ void Game_Map::Update(bool only_parallel) {
 		ev.Update();
 	}
 
-	for (Game_CommonEvent& ev : common_events) {
-		ev.Update();
+	for (Game_CommonEvent* ev : common_auto_events) {
+		ev->Update();
 	}
 
 	for (int i = 0; i < 3; ++i)
@@ -1140,8 +1523,16 @@ std::vector<Game_Event>& Game_Map::GetEvents() {
 }
 
 Game_Event* Game_Map::GetEvent(int event_id) {
+	if (event_id >= 0 && event_id < static_cast<int>(event_index_by_id.size())) {
+		const int index = event_index_by_id[event_id];
+		if (index >= 0 && index < static_cast<int>(events.size()))
+			return &events[index];
+		return nullptr;
+	}
+	if (!event_index_by_id.empty())
+		return nullptr;
 	auto it = std::find_if(events.begin(), events.end(),
-			[&event_id](Game_Event& ev) {return ev.GetId() == event_id;});
+		[&event_id](Game_Event& ev) { return ev.GetId() == event_id; });
 	return it == events.end() ? nullptr : &(*it);
 }
 

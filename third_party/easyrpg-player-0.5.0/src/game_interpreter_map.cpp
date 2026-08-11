@@ -102,7 +102,7 @@ std::vector<RPG::SaveEventCommands> Game_Interpreter_Map::GetSaveData() const {
 
 	while (save_interpreter != NULL) {
 		RPG::SaveEventCommands save_commands;
-		save_commands.commands = save_interpreter->list;
+		save_commands.commands = save_interpreter->list.Get();
 		save_commands.current_command = save_interpreter->index;
 		save_commands.commands_size = GetEventCommandSize(save_commands.commands);
 		save_commands.ID = i++;

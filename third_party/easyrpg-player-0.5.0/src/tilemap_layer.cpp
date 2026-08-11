@@ -182,6 +182,22 @@ unsigned int TilemapLayer::SymbianSignature(int z_order) const {
 }
 #endif
 
+static int WrapTileIndex(int value, int size) {
+	if (value >= 0 && value < size)
+		return value;
+	if (value < 0) {
+		value += size;
+		if (value >= 0)
+			return value;
+	} else {
+		value -= size;
+		if (value < size)
+			return value;
+	}
+	value %= size;
+	return value < 0 ? value + size : value;
+}
+
 static Bitmap& ToneTile(BitmapRef& aEffect,
 	std::vector<uint8_t>& aCachedTiles,
 	const BitmapRef& aSource,
@@ -205,17 +221,20 @@ static Bitmap& ToneTile(BitmapRef& aEffect,
 	return *aEffect;
 }
 
-void TilemapLayer::DrawTile(Bitmap& destination, Bitmap& screen, int x, int y, int row, int col) {
-	Bitmap::TileOpacity op = screen.GetTileOpacity(row, col);
-
+void TilemapLayer::DrawTile(Bitmap& destination, Bitmap& screen, int x, int y, int row, int col, int opacity) {
+	const Bitmap::TileOpacity op = static_cast<Bitmap::TileOpacity>(opacity);
 	if (!fast_blit && op == Bitmap::Transparent)
 		return;
-	Rect rect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-
-	if (fast_blit || op == Bitmap::Opaque) {
-		destination.BlitFast(x, y, screen, rect, 255);
-	} else {
-		destination.Blit(x, y, screen, rect, 255);
+	const int source_x = col * TILE_SIZE;
+	const int source_y = row * TILE_SIZE;
+	if (op == Bitmap::Opaque)
+		destination.BlitTileFast565(x, y, screen, source_x, source_y);
+	else {
+		Rect rect(source_x, source_y, TILE_SIZE, TILE_SIZE);
+		if (fast_blit)
+			destination.BlitFast(x, y, screen, rect, 255);
+		else
+			destination.Blit(x, y, screen, rect, 255);
 	}
 }
 
@@ -237,8 +256,8 @@ void TilemapLayer::Draw(int z_order) {
 	if (SymbianRenderDamage::IsRecording()) {
 		SymbianRenderDamage::Record(SymbianSignature(z_order), Rect(0, 0, display_width, display_height));
 		if (layer == 0 && (symbian_has_animated_ab || symbian_has_animated_c)) {
-			const int first_map_y = (oy / TILE_SIZE + height) % height;
-			int map_x = (ox / TILE_SIZE + width) % width;
+			const int first_map_y = WrapTileIndex(oy / TILE_SIZE, height);
+			int map_x = WrapTileIndex(ox / TILE_SIZE, width);
 			int map_draw_x = -offset_x;
 			for (int x = 0; x < tiles_x; ++x) {
 				int map_y = first_map_y;
@@ -246,14 +265,13 @@ void TilemapLayer::Draw(int z_order) {
 				for (int y = 0; y < tiles_y; ++y) {
 					const TileData& tile = data_cache[map_x][map_y];
 					if (tile.z == z_order &&
-						((symbian_has_animated_ab && tile.ID < BLOCK_C) ||
-						 (symbian_has_animated_c && tile.ID >= BLOCK_C && tile.ID < BLOCK_D))) {
+						(tile.source == SourceAutotileAB || tile.source == SourceChipsetAnimatedC)) {
 						unsigned int signature = SymbianRenderDamage::HashSeed(
 							static_cast<unsigned int>(reinterpret_cast<size_t>(this)) ^ 0x74696c65u);
 						signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(z_order));
 						signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(static_cast<unsigned short>(tile.ID)));
 						signature = SymbianRenderDamage::HashValue(signature,
-							tile.ID < BLOCK_C ? static_cast<unsigned int>(animation_step_ab) : static_cast<unsigned int>(animation_step_c));
+							tile.source == SourceAutotileAB ? static_cast<unsigned int>(animation_step_ab) : static_cast<unsigned int>(animation_step_c));
 						signature = SymbianRenderDamage::HashValue(signature,
 							(static_cast<unsigned int>(map_x) << 16) ^ static_cast<unsigned int>(map_y));
 						SymbianRenderDamage::Record(signature, Rect(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE));
@@ -296,8 +314,9 @@ void TilemapLayer::Draw(int z_order) {
 			--last_tile_y;
 	}
 #endif
-	const int first_map_y = (oy / TILE_SIZE + height) % height;
-	int map_x = (ox / TILE_SIZE + width) % width;
+	const bool neutral_tone = tone == Tone();
+	const int first_map_y = WrapTileIndex(oy / TILE_SIZE, height);
+	int map_x = WrapTileIndex(ox / TILE_SIZE, width);
 	map_x += first_tile_x;
 	while (map_x >= width)
 		map_x -= width;
@@ -309,81 +328,45 @@ void TilemapLayer::Draw(int z_order) {
 			map_y -= height;
 		int map_draw_y = -offset_y + first_tile_y * TILE_SIZE;
 		for (int y = first_tile_y; y < last_tile_y; ++y) {
-			TileData &tile = data_cache[map_x][map_y];
-
-			// Draw the sublayer if its z is being draw now
+			TileData& tile = data_cache[map_x][map_y];
 			if (z_order == tile.z) {
-				if (layer == 0) {
-					// If lower layer
-
-					if (tile.ID >= BLOCK_E && tile.ID < BLOCK_E + BLOCK_E_TILES) {
-						int id = substitutions[tile.ID - BLOCK_E];
-						// If Block E
-
-						int row, col;
-
-						// Get the tile coordinates from chipset
-						if (id < 96) {
-							// If from first column of the block
-							col = 12 + id % 6;
-							row = id / 6;
-						} else {
-							// If from second column of the block
-							col = 18 + (id - 96) % 6;
-							row = (id - 96) / 6;
-						}
-
-						Bitmap& tile_screen = ToneTile(chipset_effect, chipset_tone_tiles, chipset, row, col, tone);
-						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, row, col);
-					} else if (tile.ID >= BLOCK_C && tile.ID < BLOCK_D) {
-						// If Block C
-
-						// Get the tile coordinates from chipset
-						int col = 3 + (tile.ID - BLOCK_C) / 50;
-						int row = 4 + animation_step_c;
-
-						Bitmap& tile_screen = ToneTile(chipset_effect, chipset_tone_tiles, chipset, row, col, tone);
-						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, row, col);
-					} else if (tile.ID < BLOCK_C) {
-						// If Blocks A1, A2, B
-
-						// Draw the tile from autotile cache
-						TileXY pos = GetCachedAutotileAB(tile.ID, animation_step_ab);
-
-						Bitmap& tile_screen = ToneTile(autotiles_ab_screen_effect,
-							autotiles_ab_screen_tone_tiles, autotiles_ab_screen, pos.y, pos.x, tone);
-						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, pos.y, pos.x);
+				int frame = 0;
+				const BitmapRef* source = NULL;
+				switch (tile.source) {
+				case SourceChipset:
+					source = &chipset;
+					break;
+				case SourceChipsetAnimatedC:
+					source = &chipset;
+					frame = animation_step_c;
+					break;
+				case SourceAutotileAB:
+					source = &autotiles_ab_screen;
+					frame = animation_step_ab;
+					break;
+				case SourceAutotileD:
+					source = &autotiles_d_screen;
+					break;
+				default:
+					break;
+				}
+				if (source && *source) {
+					const int col = tile.source_x[frame];
+					const int row = tile.source_y[frame];
+					if (neutral_tone) {
+						DrawTile(destination, **source, map_draw_x, map_draw_y, row, col, tile.opacity[frame]);
 					} else {
-						// If blocks D1-D12
-
-						// Draw the tile from autotile cache
-						TileXY pos = GetCachedAutotileD(tile.ID);
-
-						Bitmap& tile_screen = ToneTile(autotiles_d_screen_effect,
-							autotiles_d_screen_tone_tiles, autotiles_d_screen, pos.y, pos.x, tone);
-						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, pos.y, pos.x);
-					}
-				} else {
-					// If upper layer
-
-					// Check that block F is being drawn
-					if (tile.ID >= BLOCK_F && tile.ID < BLOCK_F + BLOCK_F_TILES) {
-						int id = substitutions[tile.ID - BLOCK_F];
-						int row, col;
-
-						// Get the tile coordinates from chipset
-						if (id < 48) {
-							// If from first column of the block
-							col = 18 + id % 6;
-							row = 8 + id / 6;
-						} else {
-							// If from second column of the block
-							col = 24 + (id - 48) % 6;
-							row = (id - 48) / 6;
+						BitmapRef* effect = &chipset_effect;
+						std::vector<uint8_t>* tone_tiles = &chipset_tone_tiles;
+						if (tile.source == SourceAutotileAB) {
+							effect = &autotiles_ab_screen_effect;
+							tone_tiles = &autotiles_ab_screen_tone_tiles;
+						} else if (tile.source == SourceAutotileD) {
+							effect = &autotiles_d_screen_effect;
+							tone_tiles = &autotiles_d_screen_tone_tiles;
 						}
-
-						Bitmap& tile_screen = ToneTile(chipset_effect, chipset_tone_tiles, chipset, row, col, tone);
-						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, row, col);
+						Bitmap& tile_screen = ToneTile(*effect, *tone_tiles, *source, row, col, tone);
+						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, row, col, tile.opacity[frame]);
 					}
 				}
 			}
@@ -418,11 +401,12 @@ void TilemapLayer::CreateTileCache(const std::vector<short>& nmap_data) {
 		data_cache[x].resize(height);
 		for (int y = 0; y < height; y++) {
 			TileData tile;
-
-			// Get the tile ID
 			tile.ID = nmap_data[x + y * width];
-
 			tile.z = 0;
+			tile.source = SourceNone;
+			memset(tile.source_x, 0, sizeof(tile.source_x));
+			memset(tile.source_y, 0, sizeof(tile.source_y));
+			memset(tile.opacity, Bitmap::Partial, sizeof(tile.opacity));
 
 			// Calculate the tile Z
 			if (!passable.empty()) {
@@ -446,6 +430,88 @@ void TilemapLayer::CreateTileCache(const std::vector<short>& nmap_data) {
 				}
 			}
 			data_cache[x][y] = tile;
+		}
+	}
+}
+
+void TilemapLayer::PrepareTileDrawCache() {
+	for (int x = 0; x < width; ++x) {
+		for (int y = 0; y < height; ++y) {
+			TileData& tile = data_cache[x][y];
+			tile.source = SourceNone;
+			memset(tile.source_x, 0, sizeof(tile.source_x));
+			memset(tile.source_y, 0, sizeof(tile.source_y));
+			memset(tile.opacity, Bitmap::Partial, sizeof(tile.opacity));
+
+			if (layer == 0) {
+				if (tile.ID >= BLOCK_E && tile.ID < BLOCK_E + BLOCK_E_TILES) {
+					const int index = tile.ID - BLOCK_E;
+					const int id = index < static_cast<int>(substitutions.size()) ? substitutions[index] : index;
+					tile.source = SourceChipset;
+					if (id < 96) {
+						tile.source_x[0] = static_cast<uint8_t>(12 + id % 6);
+						tile.source_y[0] = static_cast<uint8_t>(id / 6);
+					} else {
+						tile.source_x[0] = static_cast<uint8_t>(18 + (id - 96) % 6);
+						tile.source_y[0] = static_cast<uint8_t>((id - 96) / 6);
+					}
+				} else if (tile.ID >= BLOCK_C && tile.ID < BLOCK_D) {
+					tile.source = SourceChipsetAnimatedC;
+					const uint8_t col = static_cast<uint8_t>(3 + (tile.ID - BLOCK_C) / 50);
+					for (int frame = 0; frame < 4; ++frame) {
+						tile.source_x[frame] = col;
+						tile.source_y[frame] = static_cast<uint8_t>(4 + frame);
+					}
+				} else if (tile.ID < BLOCK_C) {
+					tile.source = SourceAutotileAB;
+					for (int frame = 0; frame < 3; ++frame) {
+						const TileXY pos = GetCachedAutotileAB(tile.ID, frame);
+						tile.source_x[frame] = pos.x;
+						tile.source_y[frame] = pos.y;
+					}
+				} else if (tile.ID >= BLOCK_D && tile.ID < BLOCK_E) {
+					tile.source = SourceAutotileD;
+					const TileXY pos = GetCachedAutotileD(tile.ID);
+					tile.source_x[0] = pos.x;
+					tile.source_y[0] = pos.y;
+				}
+			} else if (tile.ID >= BLOCK_F && tile.ID < BLOCK_F + BLOCK_F_TILES) {
+				const int index = tile.ID - BLOCK_F;
+				const int id = index < static_cast<int>(substitutions.size()) ? substitutions[index] : index;
+				tile.source = SourceChipset;
+				if (id < 48) {
+					tile.source_x[0] = static_cast<uint8_t>(18 + id % 6);
+					tile.source_y[0] = static_cast<uint8_t>(8 + id / 6);
+				} else {
+					tile.source_x[0] = static_cast<uint8_t>(24 + (id - 48) % 6);
+					tile.source_y[0] = static_cast<uint8_t>((id - 48) / 6);
+				}
+			}
+
+			const BitmapRef* source = NULL;
+			int frames = 1;
+			switch (tile.source) {
+			case SourceChipset:
+				source = &chipset;
+				break;
+			case SourceChipsetAnimatedC:
+				source = &chipset;
+				frames = 4;
+				break;
+			case SourceAutotileAB:
+				source = &autotiles_ab_screen;
+				frames = 3;
+				break;
+			case SourceAutotileD:
+				source = &autotiles_d_screen;
+				break;
+			default:
+				break;
+			}
+			if (source && *source) {
+				for (int frame = 0; frame < frames; ++frame)
+					tile.opacity[frame] = static_cast<uint8_t>((*source)->GetTileOpacity(tile.source_y[frame], tile.source_x[frame]));
+			}
 		}
 	}
 }
@@ -617,7 +683,7 @@ void TilemapLayer::GenerateAutotileD(short ID) {
 
 BitmapRef TilemapLayer::GenerateAutotiles(int count, const std::map<uint32_t, TileXY>& map) {
 	int rows = (count + TILES_PER_ROW - 1) / TILES_PER_ROW;
-	BitmapRef tiles = Bitmap::Create(TILES_PER_ROW * TILE_SIZE, rows * TILE_SIZE);
+	BitmapRef tiles = Bitmap::Create(TILES_PER_ROW * TILE_SIZE, rows * TILE_SIZE, true, 16);
 	tiles->Clear();
 	Rect rect(0, 0, TILE_SIZE/2, TILE_SIZE/2);
 
@@ -696,6 +762,8 @@ void TilemapLayer::SetChipset(BitmapRef const& nchipset) {
 		autotiles_ab_screen_tone_tiles.clear();
 		autotiles_d_screen_tone_tiles.clear();
 	}
+	if (!data_cache.empty())
+		PrepareTileDrawCache();
 }
 
 std::vector<short> TilemapLayer::GetMapData() const {
@@ -749,6 +817,7 @@ void TilemapLayer::SetMapData(const std::vector<short>& nmap_data) {
 	}
 
 	map_data = nmap_data;
+	PrepareTileDrawCache();
 }
 
 std::vector<unsigned char> TilemapLayer::GetPassable() const {
@@ -770,6 +839,7 @@ void TilemapLayer::SetPassable(const std::vector<unsigned char>& npassable) {
 
 	// Recalculate z values of all tiles
 	CreateTileCache(map_data);
+	PrepareTileDrawCache();
 }
 
 bool TilemapLayer::GetVisible() const {
@@ -860,6 +930,7 @@ void TilemapLayer::Substitute(int old_id, int new_id) {
 #endif
 		// Recalculate z values of all tiles
 		CreateTileCache(map_data);
+		PrepareTileDrawCache();
 	}
 }
 

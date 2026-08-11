@@ -1,15 +1,20 @@
 #include <memory>
+#include <sstream>
 #include <string>
 
 #include "baseui.h"
 #include "bitmap.h"
 #include "color.h"
+#include "filefinder.h"
 #include "graphics.h"
 #include "input.h"
+#include "main_data.h"
 #include "output.h"
 #include "player.h"
 #include "scene.h"
-#include "scene_logo.h"
+#include "scene_gamebrowser.h"
+#include "scene_map.h"
+#include "scene_title.h"
 #include "RenderDamage.h"
 #include "../../inc/CoreAudio.h"
 #include "UpstreamPlayerBridge.h"
@@ -18,7 +23,6 @@ namespace {
 unsigned int gTicks = 0;
 bool gPlayerStarted = false;
 bool gRenderFrame = true;
-int gLastSceneType = -1;
 
 class EasyRpgUi : public BaseUi {
 public:
@@ -86,6 +90,30 @@ void SetKeys(unsigned int keys_0,
             value &= value - 1;
         }
     }
+}
+
+void PushInitialGameScene() {
+    std::shared_ptr<FileFinder::DirectoryTree> tree =
+        FileFinder::CreateDirectoryTree(Main_Data::GetProjectPath(), false);
+    if (!tree)
+        Output::Error("%s is not a valid path", Main_Data::GetProjectPath().c_str());
+
+    if (!tree || !FileFinder::IsValidProject(*tree)) {
+        Scene::Push(std::make_shared<Scene_GameBrowser>());
+        return;
+    }
+
+    FileFinder::SetDirectoryTree(FileFinder::CreateDirectoryTree(Main_Data::GetProjectPath()));
+    Player::CreateGameObjects();
+    Scene::Push(std::make_shared<Scene_Title>());
+
+    if (Player::load_game_id <= 0)
+        return;
+
+    std::stringstream ss;
+    ss << "Save" << (Player::load_game_id <= 9 ? "0" : "") << Player::load_game_id << ".lsd";
+    Player::LoadSavegame(FileFinder::FindDefault(ss.str()));
+    Scene::Push(std::make_shared<Scene_Map>(true));
 }
 }
 
@@ -182,22 +210,17 @@ extern "C" int EasyRpgUpstreamPlayerInit(const char* project_path,
     };
 
     Player::Init(5, argv);
-    Output::Debug("bridge player init returned");
     if (!DisplayUi)
         return -3;
     if (DisplayUi->GetWidth() != width || DisplayUi->GetHeight() != height)
         DisplayUi->Resize(width, height);
 
     Graphics::Init();
-    Output::Debug("bridge graphics init done");
     Input::Init();
-    Output::Debug("bridge input init done");
     Scene::Push(std::make_shared<Scene>());
-    Scene::Push(std::shared_ptr<Scene>(new Scene_Logo()));
-    Output::Debug("bridge scene stack ready");
+    PushInitialGameScene();
     Player::reset_flag = false;
     Player::FrameReset();
-    gLastSceneType = -1;
     gPlayerStarted = true;
     return 0;
 }
@@ -232,22 +255,7 @@ extern "C" int EasyRpgUpstreamPlayerTick(unsigned int ticks,
     gTicks = ticks;
     gRenderFrame = render_frame != 0;
     SetKeys(keys_0, keys_1, keys_2, keys_3);
-    static bool first_tick = true;
-    if (first_tick)
-        Output::Debug("first tick enter render=%d", gRenderFrame ? 1 : 0);
     Player::MainLoop();
-    if (first_tick) {
-        Output::Debug("first tick leave");
-        first_tick = false;
-    }
-    if (DisplayUi && Scene::instance) {
-        const int scene_type = static_cast<int>(Scene::instance->type);
-        if (scene_type != gLastSceneType) {
-            gLastSceneType = scene_type;
-            if (scene_type >= 0 && scene_type < Scene::SceneMax)
-                Output::Debug("scene %s", Scene::scene_names[scene_type]);
-        }
-    }
     if (!DisplayUi) {
         gPlayerStarted = false;
         return 1;

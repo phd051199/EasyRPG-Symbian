@@ -107,7 +107,7 @@ void Bitmap::EffectsBlit(int x, int y, int ox, int oy, Bitmap const& src, Rect c
 	BitmapRef draw_;
 
 	if (tone_change) {
-		if (!scale && !opacity.IsOpaque()) {
+		if (!scale) {
 			ToneBlit(x - ox, y - oy, src, src_rect, tone, opacity);
 			return;
 		}

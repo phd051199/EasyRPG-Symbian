@@ -194,6 +194,8 @@ void Graphics::DrawFrame() {
 	if (SymbianRenderDamage::FullFrameRequested()) {
 		surface->ClearClipRects();
 		SymbianRenderDamage::BeginFullPaintRecord(surface->GetWidth(), surface->GetHeight());
+		if (!state->draw_background)
+			surface->Fill(Color(0, 0, 0, 255));
 		DrawFrameContents();
 		SymbianRenderDamage::EndFullPaintRecord();
 	} else {
@@ -206,6 +208,8 @@ void Graphics::DrawFrame() {
 			if (SymbianRenderDamage::IsFullFrameDirty()) {
 				surface->ClearClipRects();
 				SymbianRenderDamage::BeginPaint(0);
+				if (!state->draw_background)
+					surface->Fill(Color(0, 0, 0, 255));
 				DrawFrameContents();
 				SymbianRenderDamage::EndPaint();
 			} else {
@@ -213,6 +217,8 @@ void Graphics::DrawFrame() {
 					const Rect dirty = SymbianRenderDamage::DirtyRect(index);
 					surface->SetClipRects(&dirty, 1);
 					SymbianRenderDamage::BeginPaint(index);
+					if (!state->draw_background)
+						surface->FillRect(dirty, Color(0, 0, 0, 255));
 					DrawFrameContents();
 					SymbianRenderDamage::EndPaint();
 				}
@@ -500,10 +506,11 @@ void Graphics::FrameReset() {
 void Graphics::RegisterDrawable(Drawable* drawable) {
 	if (drawable->IsGlobal()) {
 		global_state->drawable_list.push_back(drawable);
+		global_state->zlist_dirty = true;
 	} else {
 		state->drawable_list.push_back(drawable);
+		state->zlist_dirty = true;
 	}
-	UpdateZCallback();
 }
 
 void Graphics::RemoveDrawable(Drawable* drawable) {
@@ -520,6 +527,13 @@ void Graphics::RemoveDrawable(Drawable* drawable) {
 void Graphics::UpdateZCallback() {
 	state->zlist_dirty = true;
 	global_state->zlist_dirty = true;
+}
+
+void Graphics::UpdateZCallback(Drawable* drawable) {
+	if (drawable && drawable->IsGlobal())
+		global_state->zlist_dirty = true;
+	else
+		state->zlist_dirty = true;
 }
 
 inline bool Graphics::SortDrawableList(const Drawable* first, const Drawable* second) {

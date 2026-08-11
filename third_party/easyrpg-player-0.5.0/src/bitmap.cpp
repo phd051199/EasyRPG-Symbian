@@ -389,7 +389,11 @@ uint8_t const* Bitmap::pointer(int x, int y) const {
 	return (uint8_t const*) pixels() + y * pitch() + x * bytes();
 }
 
-BitmapRef Bitmap::Create(int width, int height, bool transparent, int /* bpp */) {
+BitmapRef Bitmap::Create(int width, int height, bool transparent, int bpp) {
+#ifdef EASYRPG_SYMBIAN
+	if (transparent && bpp == 16)
+		return std::make_shared<Bitmap>((void*)NULL, width, height, 0, SymbianA1555Format());
+#endif
 	return std::make_shared<Bitmap>(width, height, transparent);
 }
 
@@ -1011,6 +1015,63 @@ void Bitmap::Blit(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity
 	RefreshCallback();
 }
 
+void Bitmap::BlitTileFast565(int x, int y, Bitmap const& src, int src_x, int src_y) {
+#ifdef EASYRPG_SYMBIAN
+	if (this != &src && pixman_format == PIXMAN_r5g6b5 &&
+		(src.pixman_format == PIXMAN_r5g6b5 || src.pixman_format == PIXMAN_a1r5g5b5)) {
+		int sx = src_x;
+		int sy = src_y;
+		int dx = x;
+		int dy = y;
+		int width = TILE_SIZE;
+		int height = TILE_SIZE;
+		if (dx < 0) { sx -= dx; width += dx; dx = 0; }
+		if (dy < 0) { sy -= dy; height += dy; dy = 0; }
+		width = std::min(width, this->width() - dx);
+		height = std::min(height, this->height() - dy);
+		if (SymbianRenderDamage::IsPainting()) {
+			const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+			const int left = std::max(dx, dirty.x);
+			const int top = std::max(dy, dirty.y);
+			const int right = std::min(dx + width, dirty.x + dirty.width);
+			const int bottom = std::min(dy + height, dirty.y + dirty.height);
+			sx += left - dx;
+			sy += top - dy;
+			dx = left;
+			dy = top;
+			width = right - left;
+			height = bottom - top;
+		}
+		if (width > 0 && height > 0 && sx >= 0 && sy >= 0 &&
+			sx + width <= src.width() && sy + height <= src.height()) {
+			const int destination_pitch = pitch();
+			const int source_pitch = src.pitch();
+			uint8_t* destination = static_cast<uint8_t*>(pixels()) + dy * destination_pitch + dx * 2;
+			const uint8_t* source = static_cast<const uint8_t*>(src.pixels()) + sy * source_pitch + sx * 2;
+			const size_t row_bytes = static_cast<size_t>(width) * 2u;
+			if (src.pixman_format == PIXMAN_r5g6b5) {
+				for (int row = 0; row < height; ++row)
+					std::memcpy(destination + row * destination_pitch, source + row * source_pitch, row_bytes);
+			} else {
+				for (int row = 0; row < height; ++row) {
+					uint16_t* dst = reinterpret_cast<uint16_t*>(destination + row * destination_pitch);
+					const uint16_t* src_row = reinterpret_cast<const uint16_t*>(source + row * source_pitch);
+					for (int column = 0; column < width; ++column) {
+						const uint16_t pixel = src_row[column];
+						const uint16_t green = static_cast<uint16_t>((pixel >> 5) & 31u);
+						dst[column] = static_cast<uint16_t>(((pixel & 0x7c00u) << 1) |
+							(((green << 1) | (green >> 4)) << 5) | (pixel & 0x001fu));
+					}
+				}
+			}
+			RefreshCallback();
+		}
+		return;
+	}
+#endif
+	BlitFast(x, y, src, Rect(src_x, src_y, TILE_SIZE, TILE_SIZE), Opacity::opaque);
+}
+
 void Bitmap::BlitFast(int x, int y, Bitmap const & src, Rect const & src_rect, Opacity const & opacity) {
 	if (opacity.IsTransparent())
 		return;
@@ -1021,6 +1082,49 @@ void Bitmap::BlitFast(int x, int y, Bitmap const & src, Rect const & src_rect, O
 	signature = SymbianHashOpacity(signature, opacity);
 	if (SymbianRecordDraw(this, signature, Rect(x, y, src_rect.width, src_rect.height)))
 		return;
+	if (this != &src && opacity.IsOpaque() &&
+		pixman_format == PIXMAN_r5g6b5 && src.pixman_format == PIXMAN_r5g6b5) {
+		int sx = src_rect.x;
+		int sy = src_rect.y;
+		int dx = x;
+		int dy = y;
+		int width = src_rect.width;
+		int height = src_rect.height;
+		if (sx < 0) { dx -= sx; width += sx; sx = 0; }
+		if (sy < 0) { dy -= sy; height += sy; sy = 0; }
+		if (dx < 0) { sx -= dx; width += dx; dx = 0; }
+		if (dy < 0) { sy -= dy; height += dy; dy = 0; }
+		width = std::min(width, src.width() - sx);
+		height = std::min(height, src.height() - sy);
+		width = std::min(width, this->width() - dx);
+		height = std::min(height, this->height() - dy);
+		if (SymbianRenderDamage::IsPainting()) {
+			const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+			const int left = std::max(dx, dirty.x);
+			const int top = std::max(dy, dirty.y);
+			const int right = std::min(dx + width, dirty.x + dirty.width);
+			const int bottom = std::min(dy + height, dirty.y + dirty.height);
+			sx += left - dx;
+			sy += top - dy;
+			dx = left;
+			dy = top;
+			width = right - left;
+			height = bottom - top;
+		}
+		if (width > 0 && height > 0) {
+			uint8_t* destination = static_cast<uint8_t*>(pixels()) + dy * pitch() + dx * 2;
+			const uint8_t* source = static_cast<const uint8_t*>(src.pixels()) + sy * src.pitch() + sx * 2;
+			const size_t row_bytes = static_cast<size_t>(width) * 2u;
+			if (row_bytes == static_cast<size_t>(pitch()) && row_bytes == static_cast<size_t>(src.pitch())) {
+				std::memcpy(destination, source, row_bytes * static_cast<size_t>(height));
+			} else {
+				for (int row = 0; row < height; ++row)
+					std::memcpy(destination + row * pitch(), source + row * src.pitch(), row_bytes);
+			}
+			RefreshCallback();
+		}
+		return;
+	}
 #endif
 
 	pixman_image_composite32(src.GetOperator(),

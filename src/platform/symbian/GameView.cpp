@@ -16,7 +16,6 @@
 #include "PerfOverlay.h"
 #include "PlayerRuntime.h"
 #include "AppUi.h"
-#include "LogBridge.h"
 #include "ZipVfs.h"
 
 namespace
@@ -354,20 +353,15 @@ void CGameView::StartSelectedGameL()
         CDisplaySurface::NewL(TSize(KGameWidth, KGameHeight));
     CleanupStack::PushL(displaySurface);
 
-    EasyRpgLogDebug("zip open begin");
     CZipVfs* resources = CZipVfs::OpenL(iFs,
                                         selectedArchive,
                                         KTargetArchivePassword);
-    EasyRpgLogDebug("zip open done");
     CleanupStack::PushL(resources);
 
-    EasyRpgLogDebug("runtime create begin");
     CPlayerRuntime* runtime = CPlayerRuntime::NewL(resources,
                                                    selectedArchive,
                                                    *displaySurface);
-    EasyRpgLogDebug("runtime create done");
     CleanupStack::PushL(runtime);
-    EasyRpgLogDebug("game runtime ready");
 
     if (iListBox->ScrollBarFrame())
     {
@@ -399,9 +393,7 @@ void CGameView::StartSelectedGameL()
 
     if (iForeground) {
         iFrameTimer->Start();
-        EasyRpgLogDebug("frame timer started");
     }
-    EasyRpgLogDebug("game start returned");
 }
 
 void CGameView::StopGame()
@@ -447,7 +439,6 @@ void CGameView::ShowLoadErrorL(TInt aError)
 
 void CGameView::SetForeground(TBool aForeground)
 {
-    EasyRpgLogDebug(aForeground ? "foreground on" : "foreground off");
     iForeground = aForeground;
 
     if (!iRuntime || !iFrameTimer)
@@ -652,7 +643,6 @@ void CGameView::HandleListBoxEventL(CEikListBox*, TListBoxEvent aEventType)
          aEventType == EEventItemClicked) &&
         !iStartGameCallback->IsActive())
     {
-        EasyRpgLogDebug("game start deferred");
         iStartGameCallback->CallBack();
     }
 }
@@ -663,14 +653,12 @@ TInt CGameView::StartGameCallback(TAny* aPtr)
     if (!self || self->iRuntime)
         return KErrNone;
 
-    EasyRpgLogDebug("game start callback");
     TRAPD(error, self->StartSelectedGameL());
     if (error != KErrNone)
     {
         self->iGameRoot.Zero();
         TRAP_IGNORE(self->ShowLoadErrorL(error));
     }
-    EasyRpgLogDebug("game start callback returned");
     return KErrNone;
 }
 

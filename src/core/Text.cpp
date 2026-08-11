@@ -84,12 +84,18 @@ BitmapRef CachedGlyph(const FontRef& aFont, char32_t aCode)
     return glyph;
 }
 
+uint32_t MulDiv255(uint32_t aValue, uint32_t aAlpha)
+{
+    const uint32_t value = aValue * aAlpha + 128u;
+    return (value + (value >> 8)) >> 8;
+}
+
 uint32_t PackColor(const Color& aColor)
 {
     const uint32_t alpha = static_cast<uint32_t>(aColor.alpha);
-    const uint32_t red = (static_cast<uint32_t>(aColor.red) * alpha + 127u) / 255u;
-    const uint32_t green = (static_cast<uint32_t>(aColor.green) * alpha + 127u) / 255u;
-    const uint32_t blue = (static_cast<uint32_t>(aColor.blue) * alpha + 127u) / 255u;
+    const uint32_t red = MulDiv255(static_cast<uint32_t>(aColor.red), alpha);
+    const uint32_t green = MulDiv255(static_cast<uint32_t>(aColor.green), alpha);
+    const uint32_t blue = MulDiv255(static_cast<uint32_t>(aColor.blue), alpha);
     return (alpha << 24) | (red << 16) | (green << 8) | blue;
 }
 
@@ -100,10 +106,10 @@ uint32_t ScalePixel(uint32_t aPixel, uint8_t aAlpha)
     if (aAlpha == 0)
         return 0;
 
-    const uint32_t alpha = (static_cast<uint32_t>((aPixel >> 24) & 0xffu) * aAlpha + 127u) / 255u;
-    const uint32_t red = (static_cast<uint32_t>((aPixel >> 16) & 0xffu) * aAlpha + 127u) / 255u;
-    const uint32_t green = (static_cast<uint32_t>((aPixel >> 8) & 0xffu) * aAlpha + 127u) / 255u;
-    const uint32_t blue = (static_cast<uint32_t>(aPixel & 0xffu) * aAlpha + 127u) / 255u;
+    const uint32_t alpha = MulDiv255(static_cast<uint32_t>((aPixel >> 24) & 0xffu), aAlpha);
+    const uint32_t red = MulDiv255(static_cast<uint32_t>((aPixel >> 16) & 0xffu), aAlpha);
+    const uint32_t green = MulDiv255(static_cast<uint32_t>((aPixel >> 8) & 0xffu), aAlpha);
+    const uint32_t blue = MulDiv255(static_cast<uint32_t>(aPixel & 0xffu), aAlpha);
     return (alpha << 24) | (red << 16) | (green << 8) | blue;
 }
 
@@ -160,27 +166,41 @@ uint32_t PackNative32(uint32_t aPixel)
     return Bitmap::pixel_format.rgba_to_uint32_t(red, green, blue, alpha);
 }
 
-uint32_t ReadColorPixel(const Bitmap& aBitmap, const uint8_t* aRow, int aX)
+uint32_t ReadColorPixel(const uint8_t* aRow, int aX, int aBpp)
 {
-    if (aBitmap.bpp() == 2)
+    if (aBpp == 2)
         return ExpandRgb565(reinterpret_cast<const uint16_t*>(aRow)[aX]);
-    if (aBitmap.bpp() == 4)
+    if (aBpp == 4)
         return ExpandNative32(reinterpret_cast<const uint32_t*>(aRow)[aX]);
     return 0;
 }
 
-void BlendColorPixel(Bitmap& aBitmap, uint8_t* aRow, int aX, uint32_t aSource)
+void BlendColorPixel(uint8_t* aRow, int aX, int aBpp, uint32_t aSource)
 {
     const uint32_t sourceAlpha = aSource >> 24;
-    if (aBitmap.bpp() == 2)
+    if (aBpp == 2)
     {
         uint16_t* destination = reinterpret_cast<uint16_t*>(aRow) + aX;
         if (sourceAlpha == 255)
             *destination = PackRgb565(aSource);
         else if (sourceAlpha != 0)
-            *destination = PackRgb565(OverPixel(aSource, ExpandRgb565(*destination)));
+        {
+            const uint16_t pixel = *destination;
+            const uint32_t red5 = (pixel >> 11) & 31u;
+            const uint32_t green6 = (pixel >> 5) & 63u;
+            const uint32_t blue5 = pixel & 31u;
+            const uint32_t red = (red5 << 3) | (red5 >> 2);
+            const uint32_t green = (green6 << 2) | (green6 >> 4);
+            const uint32_t blue = (blue5 << 3) | (blue5 >> 2);
+            const uint32_t inverse = 255u - sourceAlpha;
+            const uint32_t outRed = ((aSource >> 16) & 0xffu) + MulDiv255(red, inverse);
+            const uint32_t outGreen = ((aSource >> 8) & 0xffu) + MulDiv255(green, inverse);
+            const uint32_t outBlue = (aSource & 0xffu) + MulDiv255(blue, inverse);
+            *destination = static_cast<uint16_t>(((outRed >> 3) << 11) |
+                ((outGreen >> 2) << 5) | (outBlue >> 3));
+        }
     }
-    else if (aBitmap.bpp() == 4)
+    else if (aBpp == 4)
     {
         uint32_t* destination = reinterpret_cast<uint32_t*>(aRow) + aX;
         if (sourceAlpha == 255)
@@ -190,14 +210,13 @@ void BlendColorPixel(Bitmap& aBitmap, uint8_t* aRow, int aX, uint32_t aSource)
     }
 }
 
-uint8_t GlyphAlpha(const Bitmap& aGlyph, int aX, int aY)
+uint8_t GlyphAlpha(const uint8_t* aRow, int aX, int aBpp)
 {
-    const uint8_t* row = reinterpret_cast<const uint8_t*>(aGlyph.pixels()) + aY * aGlyph.pitch();
-    if (aGlyph.bpp() == 1)
-        return row[aX];
-    if (aGlyph.bpp() == 4)
+    if (aBpp == 1)
+        return aRow[aX];
+    if (aBpp == 4)
     {
-        const uint32_t pixel = reinterpret_cast<const uint32_t*>(row)[aX];
+        const uint32_t pixel = reinterpret_cast<const uint32_t*>(aRow)[aX];
         return Bitmap::pixel_format.a.unpack(pixel);
     }
     return 0;
@@ -209,10 +228,15 @@ void DrawSolidGlyph(Bitmap& aDestination,
                     int aY,
                     const Color& aColor)
 {
-    if ((aDestination.bpp() != 2 && aDestination.bpp() != 4) ||
+    const int destinationBpp = aDestination.bpp();
+    const int glyphBpp = aGlyph.bpp();
+    if ((destinationBpp != 2 && destinationBpp != 4) ||
+        (glyphBpp != 1 && glyphBpp != 4) ||
         !aDestination.pixels() || !aGlyph.pixels())
         return;
 
+    const int destinationPitch = aDestination.pitch();
+    const int glyphPitch = aGlyph.pitch();
     const uint32_t color = PackColor(aColor);
     int glyphLeft = aX < 0 ? -aX : 0;
     int glyphTop = aY < 0 ? -aY : 0;
@@ -240,20 +264,22 @@ void DrawSolidGlyph(Bitmap& aDestination,
         return;
 
     uint8_t* destinationPixels = reinterpret_cast<uint8_t*>(aDestination.pixels());
+    const uint8_t* glyphPixels = reinterpret_cast<const uint8_t*>(aGlyph.pixels());
     for (int glyphY = glyphTop; glyphY < glyphBottom; ++glyphY)
     {
         const int destinationY = aY + glyphY;
-        uint8_t* destination = destinationPixels + destinationY * aDestination.pitch();
+        uint8_t* destination = destinationPixels + destinationY * destinationPitch;
+        const uint8_t* glyphRow = glyphPixels + glyphY * glyphPitch;
         for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
         {
             const int destinationX = aX + glyphX;
             if (multiClip && !SymbianRenderDamage::ContainsDirtyPoint(destinationX, destinationY))
                 continue;
-            const uint8_t mask = GlyphAlpha(aGlyph, glyphX, glyphY);
+            const uint8_t mask = GlyphAlpha(glyphRow, glyphX, glyphBpp);
             if (mask == 255)
-                BlendColorPixel(aDestination, destination, destinationX, color);
+                BlendColorPixel(destination, destinationX, destinationBpp, color);
             else if (mask != 0)
-                BlendColorPixel(aDestination, destination, destinationX, ScalePixel(color, mask));
+                BlendColorPixel(destination, destinationX, destinationBpp, ScalePixel(color, mask));
         }
     }
 }
@@ -268,11 +294,18 @@ void DrawSystemGlyph(Bitmap& aDestination,
     if (aColor != Font::ColorShadow)
         DrawSolidGlyph(aDestination, aGlyph, aX + 1, aY + 1, aSystem.GetShadowColor());
 
-    if ((aDestination.bpp() != 2 && aDestination.bpp() != 4) ||
-        (aSystem.bpp() != 2 && aSystem.bpp() != 4) ||
+    const int destinationBpp = aDestination.bpp();
+    const int systemBpp = aSystem.bpp();
+    const int glyphBpp = aGlyph.bpp();
+    if ((destinationBpp != 2 && destinationBpp != 4) ||
+        (systemBpp != 2 && systemBpp != 4) ||
+        (glyphBpp != 1 && glyphBpp != 4) ||
         !aDestination.pixels() || !aGlyph.pixels() || !aSystem.pixels())
         return;
 
+    const int destinationPitch = aDestination.pitch();
+    const int systemPitch = aSystem.pitch();
+    const int glyphPitch = aGlyph.pitch();
     const int sourceX = aColor == Font::ColorShadow ? 16 : aColor % 10 * 16 + 2;
     const int sourceY = aColor == Font::ColorShadow
         ? 32
@@ -312,23 +345,25 @@ void DrawSystemGlyph(Bitmap& aDestination,
 
     uint8_t* destinationPixels = reinterpret_cast<uint8_t*>(aDestination.pixels());
     const uint8_t* systemPixels = reinterpret_cast<const uint8_t*>(aSystem.pixels());
+    const uint8_t* glyphPixels = reinterpret_cast<const uint8_t*>(aGlyph.pixels());
     for (int glyphY = glyphTop; glyphY < glyphBottom; ++glyphY)
     {
         const int destinationY = aY + glyphY;
         const int systemY = sourceY + glyphY;
-        uint8_t* destination = destinationPixels + destinationY * aDestination.pitch();
-        const uint8_t* source = systemPixels + systemY * aSystem.pitch();
+        uint8_t* destination = destinationPixels + destinationY * destinationPitch;
+        const uint8_t* source = systemPixels + systemY * systemPitch;
+        const uint8_t* glyphRow = glyphPixels + glyphY * glyphPitch;
         for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
         {
             const int destinationX = aX + glyphX;
             if (multiClip && !SymbianRenderDamage::ContainsDirtyPoint(destinationX, destinationY))
                 continue;
-            const uint8_t mask = GlyphAlpha(aGlyph, glyphX, glyphY);
-            const uint32_t sourcePixel = ReadColorPixel(aSystem, source, sourceX + glyphX);
+            const uint8_t mask = GlyphAlpha(glyphRow, glyphX, glyphBpp);
+            const uint32_t sourcePixel = ReadColorPixel(source, sourceX + glyphX, systemBpp);
             if (mask == 255)
-                BlendColorPixel(aDestination, destination, destinationX, sourcePixel);
+                BlendColorPixel(destination, destinationX, destinationBpp, sourcePixel);
             else if (mask != 0)
-                BlendColorPixel(aDestination, destination, destinationX, ScalePixel(sourcePixel, mask));
+                BlendColorPixel(destination, destinationX, destinationBpp, ScalePixel(sourcePixel, mask));
         }
     }
 }

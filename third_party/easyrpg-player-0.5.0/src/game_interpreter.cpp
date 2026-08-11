@@ -115,6 +115,30 @@ void Game_Interpreter::Setup(
 		Game_Message::SetFaceName("");
 }
 
+void Game_Interpreter::SetupReference(
+	const std::vector<RPG::EventCommand>& _list,
+	int _event_id,
+	bool started_by_decision_key,
+	int dbg_x, int dbg_y
+) {
+	Clear();
+
+	map_id = Game_Map::GetMapId();
+	event_id = _event_id;
+	list.Reference(_list);
+	triggered_by_decision_key = started_by_decision_key;
+
+	debug_x = dbg_x;
+	debug_y = dbg_y;
+
+	index = 0;
+
+	CancelMenuCall();
+
+	if (main_flag && depth == 0)
+		Game_Message::SetFaceName("");
+}
+
 void Game_Interpreter::CancelMenuCall() {
 	// TODO
 }
@@ -244,7 +268,7 @@ void Game_Interpreter::SetupStartingEvent(Game_Event* ev) {
 }
 
 void Game_Interpreter::SetupStartingEvent(Game_CommonEvent* ev) {
-	Setup(ev->GetList(), 0, false, ev->GetIndex(), -2);
+	SetupReference(ev->GetList(), 0, false, ev->GetIndex(), -2);
 }
 
 void Game_Interpreter::CheckGameOver() {

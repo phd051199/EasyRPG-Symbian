@@ -339,7 +339,7 @@ int Sprite::GetZ() const {
 	return z;
 }
 void Sprite::SetZ(int nz) {
-	if (z != nz) Graphics::UpdateZCallback();
+	if (z != nz) Graphics::UpdateZCallback(this);
 	z = nz;
 }
 

@@ -2,7 +2,6 @@
 
 #include "CoreZipCrypto.h"
 #include "Encoding.h"
-#include "LogBridge.h"
 #include "ZipVfs.h"
 
 namespace
@@ -256,12 +255,8 @@ void CZipVfs::ConstructL(const TDesC& aArchivePath, const TDesC8& aPassword)
                                      iArchivePath,
                                      EFileRead | EFileShareReadersOnly));
 
-    EasyRpgLogDebug("zip index begin");
     BuildIndexL();
-    EasyRpgLogDebug("zip index done");
-    EasyRpgLogDebug("zip root begin");
     ResolveProjectRootL();
-    EasyRpgLogDebug("zip root done");
 }
 
 CZipVfs::~CZipVfs()
@@ -338,22 +333,8 @@ void CZipVfs::BuildIndexL()
 
     TInt cursor = 0;
     TInt entryNumber = 0;
-    EasyRpgLogDebug("zip central ready");
     for (entryNumber = 0; entryNumber < totalEntries; ++entryNumber)
     {
-        if (entryNumber == 64) EasyRpgLogDebug("zip index 64");
-        if (entryNumber == 128) EasyRpgLogDebug("zip index 128");
-        if (entryNumber == 192) EasyRpgLogDebug("zip index 192");
-        if (entryNumber == 256) EasyRpgLogDebug("zip index 256");
-        if (entryNumber == 320) EasyRpgLogDebug("zip index 320");
-        if (entryNumber == 384) EasyRpgLogDebug("zip index 384");
-        if (entryNumber == 448) EasyRpgLogDebug("zip index 448");
-        if (entryNumber == 512) EasyRpgLogDebug("zip index 512");
-        if (entryNumber == 1024) EasyRpgLogDebug("zip index 1024");
-        if (entryNumber == 1536) EasyRpgLogDebug("zip index 1536");
-        if (entryNumber == 2048) EasyRpgLogDebug("zip index 2048");
-        if (entryNumber == 2560) EasyRpgLogDebug("zip index 2560");
-        if (entryNumber == 3072) EasyRpgLogDebug("zip index 3072");
         if (cursor > centralSize - 46)
             User::Leave(KErrCorrupt);
         const TUint8* header = centralBytes.Ptr() + cursor;

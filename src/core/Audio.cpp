@@ -17,7 +17,6 @@ public:
     }
 
     void BGM_Play(std::string const& file, int volume, int pitch, int fadein) override {
-        Output::Debug("BGM play: %s volume=%d pitch=%d fade=%d", file.c_str(), volume, pitch, fadein);
         const int result = EasyRpgAudioPlayBgm(file.c_str(), volume, pitch, fadein);
         bgm_playing = result == 0;
         if (result != 0)
@@ -65,6 +64,12 @@ public:
         const int result = EasyRpgAudioPreloadSe(file.c_str(), pitch);
         if (result != 0)
             Output::Warning("SE preload failed: %s (%d)", file.c_str(), result);
+    }
+
+    void SE_Warm(std::string const& file, int pitch) override {
+        const int result = EasyRpgAudioWarmSe(file.c_str(), pitch);
+        if (result != 0)
+            Output::Warning("SE warm failed: %s (%d)", file.c_str(), result);
     }
 
     void SE_Play(std::string const& file, int volume, int pitch) override {

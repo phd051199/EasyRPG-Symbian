@@ -305,6 +305,7 @@ public:
 	 * @param opacity opacity for blending with bitmap.
 	 */
 	void BlitFast(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity const& opacity);
+	void BlitTileFast565(int x, int y, Bitmap const& src, int src_x, int src_y);
 
 	/**
 	 * Blits source bitmap in tiles to this one.

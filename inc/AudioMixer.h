@@ -97,6 +97,7 @@ private:
     TInt SelectPlaybackVoice(TInt aPriority) const;
     TBool MixVoice(TVoice& aVoice, TInt* aMixedSamples, TInt aFrameCount);
     TBool MixStream(TStreamState& aStream, TInt* aMixedSamples, TInt aFrameCount);
+    TBool FillSingleStreamOutput(TInt aBufferIndex, TInt aFrameCount);
     void FillOutputBuffer(TInt aBufferIndex);
     TInt FreeOutputBufferIndex() const;
     TInt OutputBufferIndex(const TDesC8& aBuffer) const;
