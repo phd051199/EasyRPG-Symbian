@@ -2,6 +2,5 @@
 #define EASYRPG_APP_HRH
 
 #define _UID3 0xE31EA5A1
-#define KEasyRpgLocalisableAppInfoResourceId 6
 
 #endif

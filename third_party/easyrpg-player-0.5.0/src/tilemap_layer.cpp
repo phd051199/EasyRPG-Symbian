@@ -25,7 +25,7 @@
 #include "map_data.h"
 #include "bitmap.h"
 #ifdef EASYRPG_SYMBIAN
-#include "easyrpgsymbian/RenderDamage.h"
+#include "RenderDamage.h"
 #endif
 
 // Blocks subtiles IDs
@@ -167,20 +167,43 @@ void TilemapLayer::SymbianTouch() {
 	++symbian_revision;
 	if (symbian_revision == 0)
 		symbian_revision = 1;
+	SymbianRenderDamage::RequestFullFrame();
 }
 
-unsigned long long TilemapLayer::SymbianSignature(int z_order) const {
-	unsigned long long hash = 1469598103934665603ULL;
-	hash = (hash ^ static_cast<unsigned long long>(reinterpret_cast<size_t>(this))) * 1099511628211ULL;
-	hash = (hash ^ symbian_revision) * 1099511628211ULL;
-	hash = (hash ^ static_cast<unsigned int>(z_order)) * 1099511628211ULL;
+unsigned int TilemapLayer::SymbianSignature(int z_order) const {
+	unsigned int hash = SymbianRenderDamage::HashSeed(static_cast<unsigned int>(reinterpret_cast<size_t>(this)));
+	hash = SymbianRenderDamage::HashValue(hash, symbian_revision);
+	hash = SymbianRenderDamage::HashValue(hash, static_cast<unsigned int>(z_order));
 	if (chipset) {
-		hash = (hash ^ static_cast<unsigned long long>(reinterpret_cast<size_t>(chipset.get()))) * 1099511628211ULL;
-		hash = (hash ^ chipset->Revision()) * 1099511628211ULL;
+		hash = SymbianRenderDamage::HashValue(hash, static_cast<unsigned int>(reinterpret_cast<size_t>(chipset.get())));
+		hash = SymbianRenderDamage::HashValue(hash, chipset->Revision());
 	}
 	return hash;
 }
 #endif
+
+static Bitmap& ToneTile(BitmapRef& aEffect,
+	std::vector<uint8_t>& aCachedTiles,
+	const BitmapRef& aSource,
+	int aRow,
+	int aCol,
+	const Tone& aTone) {
+	if (aTone == Tone())
+		return *aSource;
+	if (!aEffect) {
+		aEffect = Bitmap::Create(aSource->width(), aSource->height());
+		aCachedTiles.assign((aSource->width() / TILE_SIZE) * (aSource->height() / TILE_SIZE), 0);
+	}
+	const int columns = aSource->width() / TILE_SIZE;
+	const int index = aRow * columns + aCol;
+	if (!aCachedTiles[index]) {
+		Rect rect(aCol * TILE_SIZE, aRow * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+		aEffect->ClearRect(rect);
+		aEffect->ToneBlit(rect.x, rect.y, *aSource, rect, aTone, Opacity::opaque);
+		aCachedTiles[index] = 1;
+	}
+	return *aEffect;
+}
 
 void TilemapLayer::DrawTile(Bitmap& destination, Bitmap& screen, int x, int y, int row, int col) {
 	Bitmap::TileOpacity op = screen.GetTileOpacity(row, col);
@@ -197,16 +220,7 @@ void TilemapLayer::DrawTile(Bitmap& destination, Bitmap& screen, int x, int y, i
 }
 
 void TilemapLayer::Draw(int z_order) {
-	if (!visible) return;
-#ifdef EASYRPG_SYMBIAN
-	if (SymbianRenderDamage::IsRecording()) {
-		SymbianRenderDamage::Record(SymbianSignature(z_order),
-			Rect(0, 0, DisplayUi->GetWidth(), DisplayUi->GetHeight()));
-		return;
-	}
-#endif
-
-	if (width <= 0 || height <= 0)
+	if (!visible || width <= 0 || height <= 0)
 		return;
 
 	const int display_width = DisplayUi->GetWidth();
@@ -219,34 +233,82 @@ void TilemapLayer::Draw(int z_order) {
 		++tiles_x;
 	if (offset_y != 0)
 		++tiles_y;
+#ifdef EASYRPG_SYMBIAN
+	if (SymbianRenderDamage::IsRecording()) {
+		SymbianRenderDamage::Record(SymbianSignature(z_order), Rect(0, 0, display_width, display_height));
+		if (layer == 0 && (symbian_has_animated_ab || symbian_has_animated_c)) {
+			const int first_map_y = (oy / TILE_SIZE + height) % height;
+			int map_x = (ox / TILE_SIZE + width) % width;
+			int map_draw_x = -offset_x;
+			for (int x = 0; x < tiles_x; ++x) {
+				int map_y = first_map_y;
+				int map_draw_y = -offset_y;
+				for (int y = 0; y < tiles_y; ++y) {
+					const TileData& tile = data_cache[map_x][map_y];
+					if (tile.z == z_order &&
+						((symbian_has_animated_ab && tile.ID < BLOCK_C) ||
+						 (symbian_has_animated_c && tile.ID >= BLOCK_C && tile.ID < BLOCK_D))) {
+						unsigned int signature = SymbianRenderDamage::HashSeed(
+							static_cast<unsigned int>(reinterpret_cast<size_t>(this)) ^ 0x74696c65u);
+						signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(z_order));
+						signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(static_cast<unsigned short>(tile.ID)));
+						signature = SymbianRenderDamage::HashValue(signature,
+							tile.ID < BLOCK_C ? static_cast<unsigned int>(animation_step_ab) : static_cast<unsigned int>(animation_step_c));
+						signature = SymbianRenderDamage::HashValue(signature,
+							(static_cast<unsigned int>(map_x) << 16) ^ static_cast<unsigned int>(map_y));
+						SymbianRenderDamage::Record(signature, Rect(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE));
+					}
+					++map_y;
+					if (map_y == height)
+						map_y = 0;
+					map_draw_y += TILE_SIZE;
+				}
+				++map_x;
+				if (map_x == width)
+					map_x = 0;
+				map_draw_x += TILE_SIZE;
+			}
+		}
+		return;
+	}
+#endif
 
 	BitmapRef const& destination_ref = DisplayUi->GetDisplaySurface();
 	if (!destination_ref)
 		return;
 	Bitmap& destination = *destination_ref;
-	const int chipset_columns = chipset_effect ? chipset_effect->width() / TILE_SIZE : 0;
+	int first_tile_x = 0;
+	int first_tile_y = 0;
+	int last_tile_x = tiles_x;
+	int last_tile_y = tiles_y;
 #ifdef EASYRPG_SYMBIAN
-	const bool painting = SymbianRenderDamage::IsPainting();
+	if (SymbianRenderDamage::IsPainting()) {
+		const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+		const int base_x = -offset_x;
+		const int base_y = -offset_y;
+		while (first_tile_x < last_tile_x && base_x + (first_tile_x + 1) * TILE_SIZE <= dirty.x)
+			++first_tile_x;
+		while (first_tile_y < last_tile_y && base_y + (first_tile_y + 1) * TILE_SIZE <= dirty.y)
+			++first_tile_y;
+		while (last_tile_x > first_tile_x && base_x + (last_tile_x - 1) * TILE_SIZE >= dirty.x + dirty.width)
+			--last_tile_x;
+		while (last_tile_y > first_tile_y && base_y + (last_tile_y - 1) * TILE_SIZE >= dirty.y + dirty.height)
+			--last_tile_y;
+	}
 #endif
 	const int first_map_y = (oy / TILE_SIZE + height) % height;
 	int map_x = (ox / TILE_SIZE + width) % width;
-	int map_draw_x = -offset_x;
+	map_x += first_tile_x;
+	while (map_x >= width)
+		map_x -= width;
+	int map_draw_x = -offset_x + first_tile_x * TILE_SIZE;
 
-	for (int x = 0; x < tiles_x; ++x) {
-		int map_y = first_map_y;
-		int map_draw_y = -offset_y;
-		for (int y = 0; y < tiles_y; ++y) {
-#ifdef EASYRPG_SYMBIAN
-			if (painting &&
-				!SymbianRenderDamage::IntersectsDirty(Rect(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE))) {
-				++map_y;
-				if (map_y == height)
-					map_y = 0;
-				map_draw_y += TILE_SIZE;
-				continue;
-			}
-#endif
-
+	for (int x = first_tile_x; x < last_tile_x; ++x) {
+		int map_y = first_map_y + first_tile_y;
+		while (map_y >= height)
+			map_y -= height;
+		int map_draw_y = -offset_y + first_tile_y * TILE_SIZE;
+		for (int y = first_tile_y; y < last_tile_y; ++y) {
 			TileData &tile = data_cache[map_x][map_y];
 
 			// Draw the sublayer if its z is being draw now
@@ -271,15 +333,8 @@ void TilemapLayer::Draw(int z_order) {
 							row = (id - 96) / 6;
 						}
 
-						// Create tone changed tile
-						const int tone_index = row * chipset_columns + col;
-						if (!chipset_tone_tiles[tone_index]) {
-							Rect r(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-							chipset_effect->ToneBlit(col * TILE_SIZE, row * TILE_SIZE, *chipset, r, tone, Opacity::opaque);
-							chipset_tone_tiles[tone_index] = 1;
-						}
-
-						DrawTile(destination, *chipset_effect, map_draw_x, map_draw_y, row, col);
+						Bitmap& tile_screen = ToneTile(chipset_effect, chipset_tone_tiles, chipset, row, col, tone);
+						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, row, col);
 					} else if (tile.ID >= BLOCK_C && tile.ID < BLOCK_D) {
 						// If Block C
 
@@ -287,46 +342,26 @@ void TilemapLayer::Draw(int z_order) {
 						int col = 3 + (tile.ID - BLOCK_C) / 50;
 						int row = 4 + animation_step_c;
 
-						// Create tone changed tile
-						const int tone_index = row * chipset_columns + col;
-						if (!chipset_tone_tiles[tone_index]) {
-							Rect r(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-							chipset_effect->ToneBlit(col * TILE_SIZE, row * TILE_SIZE, *chipset, r, tone, Opacity::opaque);
-							chipset_tone_tiles[tone_index] = 1;
-						}
-
-						// Draw the tile
-						DrawTile(destination, *chipset_effect, map_draw_x, map_draw_y, row, col);
+						Bitmap& tile_screen = ToneTile(chipset_effect, chipset_tone_tiles, chipset, row, col, tone);
+						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, row, col);
 					} else if (tile.ID < BLOCK_C) {
 						// If Blocks A1, A2, B
 
 						// Draw the tile from autotile cache
 						TileXY pos = GetCachedAutotileAB(tile.ID, animation_step_ab);
 
-						// Create tone changed tile
-						const int tone_index = pos.y * TILES_PER_ROW + pos.x;
-						if (!autotiles_ab_screen_tone_tiles[tone_index]) {
-							Rect r(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-							autotiles_ab_screen_effect->ToneBlit(pos.x * TILE_SIZE, pos.y * TILE_SIZE, *autotiles_ab_screen, r, tone, Opacity::opaque);
-							autotiles_ab_screen_tone_tiles[tone_index] = 1;
-						}
-
-						DrawTile(destination, *autotiles_ab_screen_effect, map_draw_x, map_draw_y, pos.y, pos.x);
+						Bitmap& tile_screen = ToneTile(autotiles_ab_screen_effect,
+							autotiles_ab_screen_tone_tiles, autotiles_ab_screen, pos.y, pos.x, tone);
+						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, pos.y, pos.x);
 					} else {
 						// If blocks D1-D12
 
 						// Draw the tile from autotile cache
 						TileXY pos = GetCachedAutotileD(tile.ID);
 
-						// Create tone changed tile
-						const int tone_index = pos.y * TILES_PER_ROW + pos.x;
-						if (!autotiles_d_screen_tone_tiles[tone_index]) {
-							Rect r(pos.x * TILE_SIZE, pos.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-							autotiles_d_screen_effect->ToneBlit(pos.x * TILE_SIZE, pos.y * TILE_SIZE, *autotiles_d_screen, r, tone, Opacity::opaque);
-							autotiles_d_screen_tone_tiles[tone_index] = 1;
-						}
-
-						DrawTile(destination, *autotiles_d_screen_effect, map_draw_x, map_draw_y, pos.y, pos.x);
+						Bitmap& tile_screen = ToneTile(autotiles_d_screen_effect,
+							autotiles_d_screen_tone_tiles, autotiles_d_screen, pos.y, pos.x, tone);
+						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, pos.y, pos.x);
 					}
 				} else {
 					// If upper layer
@@ -347,16 +382,8 @@ void TilemapLayer::Draw(int z_order) {
 							row = (id - 48) / 6;
 						}
 
-						// Create tone changed tile
-						const int tone_index = row * chipset_columns + col;
-						if (!chipset_tone_tiles[tone_index]) {
-							Rect r(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-							chipset_effect->ToneBlit(col * TILE_SIZE, row * TILE_SIZE, *chipset, r, tone, Opacity::opaque);
-							chipset_tone_tiles[tone_index] = 1;
-						}
-
-						// Draw the tile
-						DrawTile(destination, *chipset_effect, map_draw_x, map_draw_y, row, col);
+						Bitmap& tile_screen = ToneTile(chipset_effect, chipset_tone_tiles, chipset, row, col, tone);
+						DrawTile(destination, tile_screen, map_draw_x, map_draw_y, row, col);
 					}
 				}
 			}
@@ -624,10 +651,6 @@ BitmapRef TilemapLayer::GenerateAutotiles(int count, const std::map<uint32_t, Ti
 }
 
 void TilemapLayer::Update() {
-#ifdef EASYRPG_SYMBIAN
-	const char old_step_ab = animation_step_ab;
-	const char old_step_c = animation_step_c;
-#endif
 	animation_frame += 1;
 
 	// Step to the next animation frame
@@ -651,11 +674,6 @@ void TilemapLayer::Update() {
 		animation_step_ab = 0;
 		animation_frame = 0;
 	}
-#ifdef EASYRPG_SYMBIAN
-	if ((symbian_has_animated_ab && old_step_ab != animation_step_ab) ||
-		(symbian_has_animated_c && old_step_c != animation_step_c))
-		SymbianTouch();
-#endif
 }
 
 BitmapRef const& TilemapLayer::GetChipset() const {
@@ -667,21 +685,16 @@ void TilemapLayer::SetChipset(BitmapRef const& nchipset) {
 #ifdef EASYRPG_SYMBIAN
 	SymbianTouch();
 #endif
-	chipset_effect = Bitmap::Create(chipset->width(), chipset->height());
-	chipset_tone_tiles.assign((chipset_effect->width() / TILE_SIZE) *
-		(chipset_effect->height() / TILE_SIZE), 0);
+	chipset_effect.reset();
+	chipset_tone_tiles.clear();
 
 	if (autotiles_ab_next != 0 && autotiles_d_screen != nullptr && layer == 0) {
 		autotiles_ab_screen = GenerateAutotiles(autotiles_ab_next, autotiles_ab_map);
 		autotiles_d_screen = GenerateAutotiles(autotiles_d_next, autotiles_d_map);
-
-		autotiles_ab_screen_effect = Bitmap::Create(autotiles_ab_screen->width(), autotiles_ab_screen->height());
-		autotiles_d_screen_effect = Bitmap::Create(autotiles_d_screen->width(), autotiles_d_screen->height());
-
-		autotiles_ab_screen_tone_tiles.assign((autotiles_ab_screen_effect->width() / TILE_SIZE) *
-			(autotiles_ab_screen_effect->height() / TILE_SIZE), 0);
-		autotiles_d_screen_tone_tiles.assign((autotiles_d_screen_effect->width() / TILE_SIZE) *
-			(autotiles_d_screen_effect->height() / TILE_SIZE), 0);
+		autotiles_ab_screen_effect.reset();
+		autotiles_d_screen_effect.reset();
+		autotiles_ab_screen_tone_tiles.clear();
+		autotiles_d_screen_tone_tiles.clear();
 	}
 }
 
@@ -729,14 +742,10 @@ void TilemapLayer::SetMapData(const std::vector<short>& nmap_data) {
 		}
 		autotiles_ab_screen = GenerateAutotiles(autotiles_ab_next, autotiles_ab_map);
 		autotiles_d_screen = GenerateAutotiles(autotiles_d_next, autotiles_d_map);
-
-		autotiles_ab_screen_effect = Bitmap::Create(autotiles_ab_screen->width(), autotiles_ab_screen->height());
-		autotiles_d_screen_effect = Bitmap::Create(autotiles_d_screen->width(), autotiles_d_screen->height());
-
-		autotiles_ab_screen_tone_tiles.assign((autotiles_ab_screen_effect->width() / TILE_SIZE) *
-			(autotiles_ab_screen_effect->height() / TILE_SIZE), 0);
-		autotiles_d_screen_tone_tiles.assign((autotiles_d_screen_effect->width() / TILE_SIZE) *
-			(autotiles_d_screen_effect->height() / TILE_SIZE), 0);
+		autotiles_ab_screen_effect.reset();
+		autotiles_d_screen_effect.reset();
+		autotiles_ab_screen_tone_tiles.clear();
+		autotiles_d_screen_tone_tiles.clear();
 	}
 
 	map_data = nmap_data;
@@ -894,18 +903,21 @@ void TilemapLayer::SetTone(Tone tone) {
 	this->tone = tone;
 #ifdef EASYRPG_SYMBIAN
 	SymbianTouch();
+	if (tone == Tone()) {
+		autotiles_d_screen_effect.reset();
+		autotiles_ab_screen_effect.reset();
+		chipset_effect.reset();
+		autotiles_d_screen_tone_tiles.clear();
+		autotiles_ab_screen_tone_tiles.clear();
+		chipset_tone_tiles.clear();
+		return;
+	}
 #endif
 
-	if (autotiles_d_screen_effect) {
-		autotiles_d_screen_effect->Clear();
+	if (autotiles_d_screen_effect)
 		std::fill(autotiles_d_screen_tone_tiles.begin(), autotiles_d_screen_tone_tiles.end(), 0);
-	}
-	if (autotiles_ab_screen_effect) {
-		autotiles_ab_screen_effect->Clear();
+	if (autotiles_ab_screen_effect)
 		std::fill(autotiles_ab_screen_tone_tiles.begin(), autotiles_ab_screen_tone_tiles.end(), 0);
-	}
-	if (chipset_effect) {
-		chipset_effect->Clear();
+	if (chipset_effect)
 		std::fill(chipset_tone_tiles.begin(), chipset_tone_tiles.end(), 0);
-	}
 }

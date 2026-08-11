@@ -15,6 +15,7 @@ public:
     TBool IsDirty() const;
     void ClearDirty();
     const CFbsBitmap& Bitmap() const;
+    const CFbsBitmap& MaskBitmap() const;
 
 private:
     CPerfOverlay();
@@ -28,9 +29,14 @@ private:
                          TInt aX,
                          TInt aY,
                          const TDesC8& aText);
+    static void DrawMaskText(CFbsBitmap& aBitmap,
+                             TInt aX,
+                             TInt aY,
+                             const TDesC8& aText);
 
 private:
     CFbsBitmap* iBitmap;
+    CFbsBitmap* iMaskBitmap;
     RThread iThread;
     TInt iCounterPeriodUs;
     TBool iUseNanoCounter;

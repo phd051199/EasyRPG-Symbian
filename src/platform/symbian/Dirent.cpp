@@ -1,9 +1,9 @@
 #include <e32base.h>
 #include <badesca.h>
 #include <f32file.h>
-#include "easyrpgsymbian/Encoding.h"
-#include "easyrpgsymbian/SymbianDirentBridge.h"
-#include "easyrpgsymbian/ZipVfs.h"
+#include "Encoding.h"
+#include "DirentBridge.h"
+#include "ZipVfs.h"
 
 struct __sFILE;
 typedef struct __sFILE FILE;
@@ -260,7 +260,7 @@ FILE* OpenFileL(const char* aPath, const char* aMode)
             gVirtualVfs->MaterializeFileL(relative,
                                           cacheName,
                                           path,
-                                          16 * 1024 * 1024);
+                                          KMaxTInt);
         }
     }
 

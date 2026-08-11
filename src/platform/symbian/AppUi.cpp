@@ -1,25 +1,17 @@
 #include <avkon.hrh>
 #include <eikbtgpc.h>
 #include <eikspane.h>
+#include "GameView.h"
+#include "AppUi.h"
 
-#include "easyrpgsymbian/GameView.h"
-#include "easyrpgsymbian/SymbianAppUi.h"
-
-CEasyRpgAppUi::CEasyRpgAppUi()
-    : iGameView(NULL)
-{
-}
+CEasyRpgAppUi::CEasyRpgAppUi() : iGameView(NULL) {}
 
 void CEasyRpgAppUi::ConstructL()
 {
     BaseConstructL(CAknAppUi::EAknEnableSkin);
     SetFullScreenApp(EFalse);
-
-    if (StatusPane())
-        StatusPane()->MakeVisible(ETrue);
-    if (Cba())
-        Cba()->MakeVisible(ETrue);
-
+    if (StatusPane()) StatusPane()->MakeVisible(ETrue);
+    if (Cba()) Cba()->MakeVisible(ETrue);
     iGameView = CGameView::NewL(ClientRect());
     AddToStackL(iGameView);
 }
@@ -37,19 +29,15 @@ CEasyRpgAppUi::~CEasyRpgAppUi()
 void CEasyRpgAppUi::EnterGameFullscreen()
 {
     SetFullScreenApp(ETrue);
-    if (StatusPane())
-        StatusPane()->MakeVisible(EFalse);
-    if (Cba())
-        Cba()->MakeVisible(EFalse);
+    if (StatusPane()) StatusPane()->MakeVisible(EFalse);
+    if (Cba()) Cba()->MakeVisible(EFalse);
 }
 
 void CEasyRpgAppUi::ExitGameFullscreen()
 {
     SetFullScreenApp(EFalse);
-    if (StatusPane())
-        StatusPane()->MakeVisible(ETrue);
-    if (Cba())
-        Cba()->MakeVisible(ETrue);
+    if (StatusPane()) StatusPane()->MakeVisible(ETrue);
+    if (Cba()) Cba()->MakeVisible(ETrue);
 }
 
 void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
@@ -67,14 +55,11 @@ void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 
 void CEasyRpgAppUi::HandleStatusPaneSizeChange()
 {
-    if (iGameView)
-        iGameView->UpdateLayout();
+    if (iGameView) iGameView->UpdateLayout();
 }
 
 void CEasyRpgAppUi::HandleForegroundEventL(TBool aForeground)
 {
     CAknAppUi::HandleForegroundEventL(aForeground);
-    if (iGameView)
-        iGameView->SetForeground(aForeground);
+    if (iGameView) iGameView->SetForeground(aForeground);
 }
-

@@ -1,7 +1,7 @@
 #include <hal.h>
 #include <hal_data.h>
 
-#include "easyrpgsymbian/PerfOverlay.h"
+#include "PerfOverlay.h"
 
 namespace
 {
@@ -75,6 +75,7 @@ CPerfOverlay* CPerfOverlay::NewL()
 
 CPerfOverlay::CPerfOverlay()
     : iBitmap(NULL),
+      iMaskBitmap(NULL),
       iCounterPeriodUs(0),
       iUseNanoCounter(ETrue),
       iCpuAvailable(EFalse),
@@ -93,6 +94,8 @@ void CPerfOverlay::ConstructL()
 {
     iBitmap = new (ELeave) CFbsBitmap;
     User::LeaveIfError(iBitmap->Create(TSize(KOverlayWidth, KOverlayHeight), EColor64K));
+    iMaskBitmap = new (ELeave) CFbsBitmap;
+    User::LeaveIfError(iMaskBitmap->Create(TSize(KOverlayWidth, KOverlayHeight), EGray2));
 
     TInt period = 0;
     if (HAL::Get(HALData::ENanoTickPeriod, period) == KErrNone && period > 0)
@@ -130,6 +133,8 @@ void CPerfOverlay::ConstructL()
 CPerfOverlay::~CPerfOverlay()
 {
     iThread.Close();
+    delete iMaskBitmap;
+    iMaskBitmap = NULL;
     delete iBitmap;
     iBitmap = NULL;
 }
@@ -211,6 +216,11 @@ const CFbsBitmap& CPerfOverlay::Bitmap() const
     return *iBitmap;
 }
 
+const CFbsBitmap& CPerfOverlay::MaskBitmap() const
+{
+    return *iMaskBitmap;
+}
+
 TUint32 CPerfOverlay::ReadCounter() const
 {
     return iUseNanoCounter ? User::NTickCount() : User::TickCount();
@@ -239,7 +249,7 @@ void CPerfOverlay::ReadRam()
 
 void CPerfOverlay::RebuildBitmap()
 {
-    if (!iBitmap)
+    if (!iBitmap || !iMaskBitmap)
         return;
 
     iBitmap->LockHeap();
@@ -254,12 +264,26 @@ void CPerfOverlay::RebuildBitmap()
     for (TInt y = 0; y < KOverlayHeight; ++y)
         Mem::FillZ(pixels + y * stride, KOverlayWidth * static_cast<TInt>(sizeof(TUint16)));
 
+    iMaskBitmap->LockHeap();
+    TUint8* maskPixels = reinterpret_cast<TUint8*>(iMaskBitmap->DataAddress());
+    if (!maskPixels)
+    {
+        iMaskBitmap->UnlockHeap();
+        iBitmap->UnlockHeap();
+        return;
+    }
+    const TInt maskStride = iMaskBitmap->DataStride();
+    for (TInt y = 0; y < KOverlayHeight; ++y)
+        Mem::FillZ(maskPixels + y * maskStride, maskStride);
+    iMaskBitmap->UnlockHeap();
+
     TBuf8<32> line;
     if (iCpuPercent >= 0)
         line.Format(_L8("FPS %d CPU %d%%"), iFps, iCpuPercent);
     else
         line.Format(_L8("FPS %d CPU --%%"), iFps);
     DrawText(pixels, stride, 2, 2, line);
+    DrawMaskText(*iMaskBitmap, 2, 2, line);
 
     line.Zero();
     if (iRamUsedTenthsMb >= 0 && iRamTotalTenthsMb >= 0)
@@ -275,6 +299,7 @@ void CPerfOverlay::RebuildBitmap()
         line.Copy(_L8("RAM --.-/--.-M"));
     }
     DrawText(pixels, stride, 2, 10, line);
+    DrawMaskText(*iMaskBitmap, 2, 10, line);
 
     iBitmap->UnlockHeap();
     iDirty = ETrue;
@@ -312,4 +337,33 @@ void CPerfOverlay::DrawText(TUint8* aPixels,
             }
         }
     }
+}
+
+void CPerfOverlay::DrawMaskText(CFbsBitmap& aBitmap,
+                                TInt aX,
+                                TInt aY,
+                                const TDesC8& aText)
+{
+    TBitmapUtil bitmapUtil(&aBitmap);
+    bitmapUtil.Begin(TPoint(0, 0));
+    for (TInt index = 0; index < aText.Length(); ++index)
+    {
+        const TUint8 character = aText[index];
+        if (character != ' ')
+        {
+            for (TInt row = 0; row < 7; ++row)
+            {
+                const TUint8 bits = GlyphRow(character, row);
+                for (TInt column = 0; column < 5; ++column)
+                {
+                    if ((bits & (1u << (4 - column))) != 0)
+                    {
+                        bitmapUtil.SetPos(TPoint(aX + index * 6 + column, aY + row));
+                        bitmapUtil.SetPixel(1);
+                    }
+                }
+            }
+        }
+    }
+    bitmapUtil.End();
 }

@@ -10,9 +10,9 @@
 #include "player.h"
 #include "scene.h"
 #include "scene_logo.h"
-#include "easyrpgsymbian/RenderDamage.h"
-#include "easyrpgsymbian/SymbianAudio.h"
-#include "easyrpgsymbian/UpstreamPlayerBridge.h"
+#include "RenderDamage.h"
+#include "../../inc/CoreAudio.h"
+#include "UpstreamPlayerBridge.h"
 
 namespace {
 unsigned int gTicks = 0;
@@ -20,9 +20,9 @@ bool gPlayerStarted = false;
 bool gRenderFrame = true;
 int gLastSceneType = -1;
 
-class SymbianUi : public BaseUi {
+class EasyRpgUi : public BaseUi {
 public:
-    SymbianUi(long width, long height) {
+    EasyRpgUi(long width, long height) {
         Bitmap::SetFormat(DynamicFormat(16, 5, 11, 6, 5, 5, 0, 0, 0, PF::NoAlpha));
         Resize(width, height);
         mouse_focus = false;
@@ -62,7 +62,7 @@ public:
     uint32_t GetTicks() const override { return gTicks; }
     void Sleep(uint32_t) override {}
 #ifdef SUPPORT_AUDIO
-    AudioInterface& GetAudio() override { return EasyRpgSymbianAudio(); }
+    AudioInterface& GetAudio() override { return EasyRpgAudio(); }
 #endif
 };
 
@@ -101,7 +101,7 @@ BaseUi::BaseUi() :
 }
 
 std::shared_ptr<BaseUi> BaseUi::CreateUi(long width, long height, bool, bool) {
-    return std::shared_ptr<BaseUi>(new SymbianUi(width, height));
+    return std::shared_ptr<BaseUi>(new EasyRpgUi(width, height));
 }
 
 void BaseUi::CleanDisplay() {
@@ -182,19 +182,19 @@ extern "C" int EasyRpgUpstreamPlayerInit(const char* project_path,
     };
 
     Player::Init(5, argv);
-    Output::Debug("Symbian bridge player init returned");
+    Output::Debug("bridge player init returned");
     if (!DisplayUi)
         return -3;
     if (DisplayUi->GetWidth() != width || DisplayUi->GetHeight() != height)
         DisplayUi->Resize(width, height);
 
     Graphics::Init();
-    Output::Debug("Symbian bridge graphics init done");
+    Output::Debug("bridge graphics init done");
     Input::Init();
-    Output::Debug("Symbian bridge input init done");
+    Output::Debug("bridge input init done");
     Scene::Push(std::make_shared<Scene>());
     Scene::Push(std::shared_ptr<Scene>(new Scene_Logo()));
-    Output::Debug("Symbian bridge scene stack ready");
+    Output::Debug("bridge scene stack ready");
     Player::reset_flag = false;
     Player::FrameReset();
     gLastSceneType = -1;
@@ -234,10 +234,10 @@ extern "C" int EasyRpgUpstreamPlayerTick(unsigned int ticks,
     SetKeys(keys_0, keys_1, keys_2, keys_3);
     static bool first_tick = true;
     if (first_tick)
-        Output::Debug("Symbian first tick enter render=%d", gRenderFrame ? 1 : 0);
+        Output::Debug("first tick enter render=%d", gRenderFrame ? 1 : 0);
     Player::MainLoop();
     if (first_tick) {
-        Output::Debug("Symbian first tick leave");
+        Output::Debug("first tick leave");
         first_tick = false;
     }
     if (DisplayUi && Scene::instance) {
@@ -245,7 +245,7 @@ extern "C" int EasyRpgUpstreamPlayerTick(unsigned int ticks,
         if (scene_type != gLastSceneType) {
             gLastSceneType = scene_type;
             if (scene_type >= 0 && scene_type < Scene::SceneMax)
-                Output::Debug("Symbian scene %s", Scene::scene_names[scene_type]);
+                Output::Debug("scene %s", Scene::scene_names[scene_type]);
         }
     }
     if (!DisplayUi) {

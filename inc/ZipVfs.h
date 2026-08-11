@@ -37,7 +37,7 @@ public:
 private:
     enum
     {
-        KBucketCount = 64,
+        KBucketCount = 512,
         KMaxCentralDirectoryBytes = 2 * 1024 * 1024,
         KMaxArchivePathChars = KMaxFileName
     };
@@ -59,6 +59,8 @@ private:
     const CZipVfsEntry* FindEntry(const TDesC& aRelativePath) const;
     const CZipVfsEntry* FindFullPath(const TDesC& aFullPath) const;
     void BuildFullPathL(const TDesC& aRelativePath, TDes& aFullPath) const;
+    TInt EntryDataOffsetL(const CZipVfsEntry& aEntry) const;
+    void MaterializeEntryL(const CZipVfsEntry& aEntry, RFile& aOutput, TInt aMaxBytes) const;
     HBufC8* DecodeEntryLC(const CZipVfsEntry& aEntry, TInt aMaxBytes) const;
 
     static TUint32 HashPath(const TDesC& aPath);

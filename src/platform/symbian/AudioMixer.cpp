@@ -1,17 +1,17 @@
-#include "easyrpgsymbian/SymbianAudioMixer.h"
+#include "AudioMixer.h"
 
 static const TInt KMasterVolumePercent = 20;
 
-CSymbianAudioMixer* CSymbianAudioMixer::NewL()
+CAudioMixer* CAudioMixer::NewL()
 {
-    CSymbianAudioMixer* self = new (ELeave) CSymbianAudioMixer;
+    CAudioMixer* self = new (ELeave) CAudioMixer;
     CleanupStack::PushL(self);
     self->ConstructL();
     CleanupStack::Pop(self);
     return self;
 }
 
-CSymbianAudioMixer::CSymbianAudioMixer()
+CAudioMixer::CAudioMixer()
     : iStream(NULL),
       iQueuedOutputBufferCount(0),
       iClipCount(0),
@@ -44,9 +44,11 @@ CSymbianAudioMixer::CSymbianAudioMixer()
         iOutputBufferQueued[i] = EFalse;
 }
 
-void CSymbianAudioMixer::ConstructL()
+void CAudioMixer::ConstructL()
 {
-    iStream = CMdaAudioOutputStream::NewL(*this);
+    iStream = CMdaAudioOutputStream::NewL(*this,
+                                         EMdaPriorityNormal,
+                                         EMdaPriorityPreferenceTime);
     TMdaAudioDataSettings settings;
     Mem::FillZ(&settings, sizeof(settings));
     settings.iSampleRate = TMdaAudioDataSettings::ESampleRate22050Hz;
@@ -54,7 +56,7 @@ void CSymbianAudioMixer::ConstructL()
     iStream->Open(&settings);
 }
 
-CSymbianAudioMixer::~CSymbianAudioMixer()
+CAudioMixer::~CAudioMixer()
 {
     iShuttingDown = ETrue;
     if (iStream)
@@ -70,7 +72,7 @@ CSymbianAudioMixer::~CSymbianAudioMixer()
     }
 }
 
-TUint32 CSymbianAudioMixer::HashKey(const TDesC& aKey)
+TUint32 CAudioMixer::HashKey(const TDesC& aKey)
 {
     TUint32 hash = 2166136261u;
     TInt i;
@@ -85,7 +87,7 @@ TUint32 CSymbianAudioMixer::HashKey(const TDesC& aKey)
     return hash;
 }
 
-TInt CSymbianAudioMixer::ClampVolume(TInt aVolume)
+TInt CAudioMixer::ClampVolume(TInt aVolume)
 {
     if (aVolume < 0)
         return 0;
@@ -94,14 +96,14 @@ TInt CSymbianAudioMixer::ClampVolume(TInt aVolume)
     return aVolume;
 }
 
-TInt16 CSymbianAudioMixer::ReadPcm16(const TUint8* aData)
+TInt16 CAudioMixer::ReadPcm16(const TUint8* aData)
 {
     const TUint16 value = static_cast<TUint16>(aData[0]) |
                           static_cast<TUint16>(static_cast<TUint16>(aData[1]) << 8);
     return static_cast<TInt16>(value);
 }
 
-void CSymbianAudioMixer::WritePcm16(TUint8* aData, TInt aValue)
+void CAudioMixer::WritePcm16(TUint8* aData, TInt aValue)
 {
     if (aValue > 32767)
         aValue = 32767;
@@ -112,7 +114,7 @@ void CSymbianAudioMixer::WritePcm16(TUint8* aData, TInt aValue)
     aData[1] = static_cast<TUint8>(value >> 8);
 }
 
-CSymbianAudioMixer::TCachedClip* CSymbianAudioMixer::FindCachedClip(const TDesC& aKey)
+CAudioMixer::TCachedClip* CAudioMixer::FindCachedClip(const TDesC& aKey)
 {
     const TUint32 hash = HashKey(aKey);
     TInt index = iClipHashBuckets[hash & (KClipHashBucketCount - 1)];
@@ -126,7 +128,7 @@ CSymbianAudioMixer::TCachedClip* CSymbianAudioMixer::FindCachedClip(const TDesC&
     return NULL;
 }
 
-const CSymbianAudioMixer::TCachedClip* CSymbianAudioMixer::FindCachedClip(const TDesC& aKey) const
+const CAudioMixer::TCachedClip* CAudioMixer::FindCachedClip(const TDesC& aKey) const
 {
     const TUint32 hash = HashKey(aKey);
     TInt index = iClipHashBuckets[hash & (KClipHashBucketCount - 1)];
@@ -140,7 +142,7 @@ const CSymbianAudioMixer::TCachedClip* CSymbianAudioMixer::FindCachedClip(const 
     return NULL;
 }
 
-void CSymbianAudioMixer::LinkCachedClip(TInt aClipIndex)
+void CAudioMixer::LinkCachedClip(TInt aClipIndex)
 {
     TCachedClip& clip = iClips[aClipIndex];
     const TInt bucket = static_cast<TInt>(clip.iKeyHash & (KClipHashBucketCount - 1));
@@ -148,7 +150,7 @@ void CSymbianAudioMixer::LinkCachedClip(TInt aClipIndex)
     iClipHashBuckets[bucket] = aClipIndex;
 }
 
-void CSymbianAudioMixer::UnlinkCachedClip(TInt aClipIndex)
+void CAudioMixer::UnlinkCachedClip(TInt aClipIndex)
 {
     TCachedClip& clip = iClips[aClipIndex];
     const TInt bucket = static_cast<TInt>(clip.iKeyHash & (KClipHashBucketCount - 1));
@@ -171,13 +173,13 @@ void CSymbianAudioMixer::UnlinkCachedClip(TInt aClipIndex)
     clip.iHashNext = -1;
 }
 
-TBool CSymbianAudioMixer::VoiceIsActive(const TVoice& aVoice)
+TBool CAudioMixer::VoiceIsActive(const TVoice& aVoice)
 {
     return aVoice.iActive && aVoice.iClip && aVoice.iClip->iPcm16 &&
            aVoice.iPosition < aVoice.iClip->iFrameCount;
 }
 
-void CSymbianAudioMixer::ClearVoice(TVoice& aVoice)
+void CAudioMixer::ClearVoice(TVoice& aVoice)
 {
     aVoice.iClip = NULL;
     aVoice.iPosition = 0;
@@ -187,7 +189,7 @@ void CSymbianAudioMixer::ClearVoice(TVoice& aVoice)
     aVoice.iActive = EFalse;
 }
 
-TBool CSymbianAudioMixer::ClipIsActive(TInt aClipIndex) const
+TBool CAudioMixer::ClipIsActive(TInt aClipIndex) const
 {
     const TCachedClip* clip = &iClips[aClipIndex];
     TInt i;
@@ -199,7 +201,7 @@ TBool CSymbianAudioMixer::ClipIsActive(TInt aClipIndex) const
     return EFalse;
 }
 
-TInt CSymbianAudioMixer::LeastRecentlyUsedClip() const
+TInt CAudioMixer::LeastRecentlyUsedClip() const
 {
     TInt selected = -1;
     TUint32 oldest = 0xffffffffu;
@@ -218,7 +220,7 @@ TInt CSymbianAudioMixer::LeastRecentlyUsedClip() const
     return selected;
 }
 
-void CSymbianAudioMixer::ReleaseClip(TInt aClipIndex)
+void CAudioMixer::ReleaseClip(TInt aClipIndex)
 {
     if (aClipIndex < 0 || aClipIndex >= KMaxCachedClips)
         return;
@@ -241,12 +243,12 @@ void CSymbianAudioMixer::ReleaseClip(TInt aClipIndex)
         --iClipCount;
 }
 
-void CSymbianAudioMixer::CachePcm16L(const TDesC& aKey,
-                                     const TInt16* aSamples,
-                                     TInt aFrameCount,
-                                     TInt aSampleRate,
-                                     TInt aChannels,
-                                     TBool aPinned)
+void CAudioMixer::CachePcm16L(const TDesC& aKey,
+                              const TInt16* aSamples,
+                              TInt aFrameCount,
+                              TInt aSampleRate,
+                              TInt aChannels,
+                              TBool aPinned)
 {
     if (!aSamples || aFrameCount <= 0 || aSampleRate <= 0 || (aChannels != 1 && aChannels != 2))
         User::Leave(KErrArgument);
@@ -306,7 +308,7 @@ void CSymbianAudioMixer::CachePcm16L(const TDesC& aKey,
         TInt nextFrame = sourceFrame + 1;
         if (nextFrame >= aFrameCount)
             nextFrame = sourceFrame;
-        const TInt fraction = static_cast<TInt>(phase & 0xffff);
+        const TInt fraction = static_cast<TInt>((phase & 0xffff) >> 1);
 
         TInt channel;
         for (channel = 0; channel < KOutputChannels; ++channel)
@@ -314,8 +316,7 @@ void CSymbianAudioMixer::CachePcm16L(const TDesC& aKey,
             const TInt sourceChannel = aChannels == 1 ? 0 : channel;
             const TInt first = aSamples[sourceFrame * aChannels + sourceChannel];
             const TInt second = aSamples[nextFrame * aChannels + sourceChannel];
-            const TInt sample = first + static_cast<TInt>(
-                (static_cast<TInt64>(second - first) * fraction) >> 16);
+            const TInt sample = first + (((second - first) * fraction) >> 15);
             WritePcm16(destination + (i * KOutputChannels + channel) * 2, sample);
         }
         phase += step;
@@ -335,14 +336,19 @@ void CSymbianAudioMixer::CachePcm16L(const TDesC& aKey,
     CleanupStack::Pop(pcm);
 }
 
-void CSymbianAudioMixer::SetCachedPinned(const TDesC& aKey, TBool aPinned)
+void CAudioMixer::SetCachedPinned(const TDesC& aKey, TBool aPinned)
 {
     TCachedClip* clip = FindCachedClip(aKey);
     if (clip)
         clip->iPinned = aPinned;
 }
 
-TInt CSymbianAudioMixer::SelectPlaybackVoice(TInt aPriority) const
+TBool CAudioMixer::IsCached(const TDesC& aKey) const
+{
+    return FindCachedClip(aKey) != NULL;
+}
+
+TInt CAudioMixer::SelectPlaybackVoice(TInt aPriority) const
 {
     TInt selected = -1;
     TInt selectedPriority = KMaxTInt;
@@ -366,7 +372,7 @@ TInt CSymbianAudioMixer::SelectPlaybackVoice(TInt aPriority) const
     return selected;
 }
 
-TBool CSymbianAudioMixer::PlaySe(const TDesC& aKey, TInt aVolume, TInt aPriority)
+TBool CAudioMixer::PlaySe(const TDesC& aKey, TInt aVolume, TInt aPriority)
 {
     TCachedClip* clip = FindCachedClip(aKey);
     if (!clip)
@@ -387,38 +393,46 @@ TBool CSymbianAudioMixer::PlaySe(const TDesC& aKey, TInt aVolume, TInt aPriority
     return ETrue;
 }
 
-void CSymbianAudioMixer::StopSe()
+void CAudioMixer::StopSe()
 {
     TInt i;
     for (i = 0; i < KMaxVoices; ++i)
         ClearVoice(iVoices[i]);
 }
 
-TInt CSymbianAudioMixer::WriteStreamPcm16(TStreamBus aBus,
-                                          const TInt16* aSamples,
-                                          TInt aFrameCount)
+TInt CAudioMixer::WriteStreamPcm16(TStreamBus aBus,
+                                   const TInt16* aSamples,
+                                   TInt aFrameCount)
 {
     if (aBus < 0 || aBus >= EStreamBusCount || !aSamples || aFrameCount <= 0)
         return 0;
     TStreamState& stream = iStreams[aBus];
     const TInt writable = Min(aFrameCount, KStreamBufferFrames - stream.iQueuedFrames);
-    TInt frame;
-    for (frame = 0; frame < writable; ++frame)
+    const TInt firstFrames = Min(writable, KStreamBufferFrames - stream.iWriteFrame);
+    if (firstFrames > 0)
     {
-        const TInt destinationFrame = stream.iWriteFrame;
-        stream.iSamples[destinationFrame * KOutputChannels] =
-            aSamples[frame * KOutputChannels];
-        stream.iSamples[destinationFrame * KOutputChannels + 1] =
-            aSamples[frame * KOutputChannels + 1];
-        ++stream.iWriteFrame;
+        Mem::Copy(&stream.iSamples[stream.iWriteFrame * KOutputChannels],
+                  aSamples,
+                  firstFrames * KOutputChannels * sizeof(TInt16));
+        stream.iWriteFrame += firstFrames;
         if (stream.iWriteFrame >= KStreamBufferFrames)
             stream.iWriteFrame = 0;
     }
+    const TInt secondFrames = writable - firstFrames;
+    if (secondFrames > 0)
+    {
+        Mem::Copy(&stream.iSamples[stream.iWriteFrame * KOutputChannels],
+                  aSamples + firstFrames * KOutputChannels,
+                  secondFrames * KOutputChannels * sizeof(TInt16));
+        stream.iWriteFrame += secondFrames;
+    }
     stream.iQueuedFrames += writable;
+    if (writable > 0)
+        stream.iActive = ETrue;
     return writable;
 }
 
-void CSymbianAudioMixer::ClearStream(TStreamBus aBus)
+void CAudioMixer::ClearStream(TStreamBus aBus)
 {
     if (aBus < 0 || aBus >= EStreamBusCount)
         return;
@@ -426,60 +440,70 @@ void CSymbianAudioMixer::ClearStream(TStreamBus aBus)
     stream.iReadFrame = 0;
     stream.iWriteFrame = 0;
     stream.iQueuedFrames = 0;
+    stream.iActive = EFalse;
 }
 
-void CSymbianAudioMixer::SetStreamVolume(TStreamBus aBus, TInt aVolume)
+void CAudioMixer::SetStreamVolume(TStreamBus aBus, TInt aVolume)
 {
     if (aBus < 0 || aBus >= EStreamBusCount)
         return;
     iStreams[aBus].iVolume = ClampVolume(aVolume);
 }
 
-TInt CSymbianAudioMixer::StreamFreeFrames(TStreamBus aBus) const
+TInt CAudioMixer::StreamFreeFrames(TStreamBus aBus) const
 {
     if (aBus < 0 || aBus >= EStreamBusCount)
         return 0;
     return KStreamBufferFrames - iStreams[aBus].iQueuedFrames;
 }
 
-TInt CSymbianAudioMixer::StreamQueuedFrames(TStreamBus aBus) const
+TInt CAudioMixer::StreamQueuedFrames(TStreamBus aBus) const
 {
     if (aBus < 0 || aBus >= EStreamBusCount)
         return 0;
     return iStreams[aBus].iQueuedFrames;
 }
 
-void CSymbianAudioMixer::CommitStreams()
+void CAudioMixer::CommitStreams()
 {
     QueueOutputBuffers();
 }
 
-TBool CSymbianAudioMixer::MixStream(TStreamState& aStream,
-                                    TInt* aMixedSamples,
-                                    TInt aFrameCount)
+TBool CAudioMixer::MixStream(TStreamState& aStream,
+                             TInt* aMixedSamples,
+                             TInt aFrameCount)
 {
     const TInt frames = Min(aFrameCount, aStream.iQueuedFrames);
-    const TInt volume = aStream.iVolume;
-    TInt frame;
-    for (frame = 0; frame < frames; ++frame)
+    const TInt gain = (aStream.iVolume * 32768 + 50) / 100;
+    TInt mixedFrame = 0;
+    TInt remaining = frames;
+    while (remaining > 0)
     {
-        const TInt sourceFrame = aStream.iReadFrame;
-        const TInt outputOffset = frame * KOutputChannels;
-        aMixedSamples[outputOffset] +=
-            (static_cast<TInt>(aStream.iSamples[sourceFrame * KOutputChannels]) * volume) / 100;
-        aMixedSamples[outputOffset + 1] +=
-            (static_cast<TInt>(aStream.iSamples[sourceFrame * KOutputChannels + 1]) * volume) / 100;
-        ++aStream.iReadFrame;
+        const TInt span = Min(remaining, KStreamBufferFrames - aStream.iReadFrame);
+        const TInt16* source = &aStream.iSamples[aStream.iReadFrame * KOutputChannels];
+        TInt frame;
+        for (frame = 0; frame < span; ++frame)
+        {
+            const TInt sourceOffset = frame * KOutputChannels;
+            const TInt outputOffset = (mixedFrame + frame) * KOutputChannels;
+            aMixedSamples[outputOffset] +=
+                (static_cast<TInt>(source[sourceOffset]) * gain) >> 15;
+            aMixedSamples[outputOffset + 1] +=
+                (static_cast<TInt>(source[sourceOffset + 1]) * gain) >> 15;
+        }
+        aStream.iReadFrame += span;
         if (aStream.iReadFrame >= KStreamBufferFrames)
             aStream.iReadFrame = 0;
+        mixedFrame += span;
+        remaining -= span;
     }
     aStream.iQueuedFrames -= frames;
     return frames > 0;
 }
 
-TBool CSymbianAudioMixer::MixVoice(TVoice& aVoice,
-                                   TInt* aMixedSamples,
-                                   TInt aFrameCount)
+TBool CAudioMixer::MixVoice(TVoice& aVoice,
+                            TInt* aMixedSamples,
+                            TInt aFrameCount)
 {
     if (!VoiceIsActive(aVoice))
     {
@@ -491,7 +515,7 @@ TBool CSymbianAudioMixer::MixVoice(TVoice& aVoice,
     const TInt frames = Min(aFrameCount, remaining);
     const TUint8* source = aVoice.iClip->iPcm16->Ptr() +
                            aVoice.iPosition * KOutputChannels * 2;
-    const TInt volume = aVoice.iVolume;
+    const TInt gain = (aVoice.iVolume * 32768 + 50) / 100;
     TInt frame;
     for (frame = 0; frame < frames; ++frame)
     {
@@ -499,8 +523,8 @@ TBool CSymbianAudioMixer::MixVoice(TVoice& aVoice,
         const TInt outputOffset = frame * KOutputChannels;
         const TInt left = ReadPcm16(source + sourceOffset);
         const TInt right = ReadPcm16(source + sourceOffset + 2);
-        aMixedSamples[outputOffset] += (left * volume) / 100;
-        aMixedSamples[outputOffset + 1] += (right * volume) / 100;
+        aMixedSamples[outputOffset] += (left * gain) >> 15;
+        aMixedSamples[outputOffset + 1] += (right * gain) >> 15;
     }
     aVoice.iPosition += frames;
     if (aVoice.iPosition >= aVoice.iClip->iFrameCount)
@@ -508,29 +532,28 @@ TBool CSymbianAudioMixer::MixVoice(TVoice& aVoice,
     return frames > 0;
 }
 
-void CSymbianAudioMixer::FillOutputBuffer(TInt aBufferIndex)
+void CAudioMixer::FillOutputBuffer(TInt aBufferIndex)
 {
     TBuf8<KOutputBufferBytes>& output = iOutputBuffers[aBufferIndex];
     output.SetLength(KOutputBufferBytes);
-    TInt mixed[KOutputBufferBytes / 2];
-    Mem::FillZ(mixed, sizeof(mixed));
+    Mem::FillZ(iMixBuffer, sizeof(iMixBuffer));
     const TInt frameCount = KOutputBufferBytes / (KOutputChannels * 2);
 
     TInt bus;
     for (bus = 0; bus < EStreamBusCount; ++bus)
-        MixStream(iStreams[bus], mixed, frameCount);
+        MixStream(iStreams[bus], iMixBuffer, frameCount);
 
     TInt voice;
     for (voice = 0; voice < KMaxVoices; ++voice)
-        MixVoice(iVoices[voice], mixed, frameCount);
+        MixVoice(iVoices[voice], iMixBuffer, frameCount);
 
     TUint8* destination = const_cast<TUint8*>(output.Ptr());
     TInt sample;
     for (sample = 0; sample < KOutputBufferBytes / 2; ++sample)
-        WritePcm16(destination + sample * 2, (mixed[sample] * 3) / 4);
+        WritePcm16(destination + sample * 2, (iMixBuffer[sample] * 3) / 4);
 }
 
-TInt CSymbianAudioMixer::FreeOutputBufferIndex() const
+TInt CAudioMixer::FreeOutputBufferIndex() const
 {
     TInt i;
     for (i = 0; i < KOutputBufferCount; ++i)
@@ -541,7 +564,7 @@ TInt CSymbianAudioMixer::FreeOutputBufferIndex() const
     return -1;
 }
 
-TInt CSymbianAudioMixer::OutputBufferIndex(const TDesC8& aBuffer) const
+TInt CAudioMixer::OutputBufferIndex(const TDesC8& aBuffer) const
 {
     TInt i;
     for (i = 0; i < KOutputBufferCount; ++i)
@@ -552,7 +575,7 @@ TInt CSymbianAudioMixer::OutputBufferIndex(const TDesC8& aBuffer) const
     return -1;
 }
 
-TBool CSymbianAudioMixer::HasAudioToMix() const
+TBool CAudioMixer::HasAudioToMix() const
 {
     TInt bus;
     for (bus = 0; bus < EStreamBusCount; ++bus)
@@ -570,13 +593,26 @@ TBool CSymbianAudioMixer::HasAudioToMix() const
     return EFalse;
 }
 
-void CSymbianAudioMixer::QueueOutputBuffers()
+TBool CAudioMixer::CanFillOutputBuffer() const
+{
+    const TInt frameCount = KOutputBufferBytes / (KOutputChannels * 2);
+    TInt bus;
+    for (bus = 0; bus < EStreamBusCount; ++bus)
+    {
+        const TStreamState& stream = iStreams[bus];
+        if (stream.iActive && stream.iQueuedFrames < frameCount)
+            return EFalse;
+    }
+    return HasAudioToMix();
+}
+
+void CAudioMixer::QueueOutputBuffers()
 {
     if (!iStream || !iReady || iShuttingDown)
         return;
     while (iQueuedOutputBufferCount < KOutputQueueDepth)
     {
-        if (!HasAudioToMix())
+        if (!CanFillOutputBuffer())
             return;
         const TInt bufferIndex = FreeOutputBufferIndex();
         if (bufferIndex < 0)
@@ -611,7 +647,7 @@ void CSymbianAudioMixer::QueueOutputBuffers()
     }
 }
 
-void CSymbianAudioMixer::ResetOutputQueue()
+void CAudioMixer::ResetOutputQueue()
 {
     TInt i;
     for (i = 0; i < KOutputBufferCount; ++i)
@@ -619,7 +655,7 @@ void CSymbianAudioMixer::ResetOutputQueue()
     iQueuedOutputBufferCount = 0;
 }
 
-void CSymbianAudioMixer::ClearAll()
+void CAudioMixer::ClearAll()
 {
     StopSe();
     TInt bus;
@@ -627,12 +663,12 @@ void CSymbianAudioMixer::ClearAll()
         ClearStream(static_cast<TStreamBus>(bus));
 }
 
-TInt CSymbianAudioMixer::CachedBytes() const
+TInt CAudioMixer::CachedBytes() const
 {
     return iCachedBytes;
 }
 
-void CSymbianAudioMixer::TrimCache(TInt aByteLimit)
+void CAudioMixer::TrimCache(TInt aByteLimit)
 {
     if (aByteLimit < 0)
         aByteLimit = 0;
@@ -648,29 +684,29 @@ void CSymbianAudioMixer::TrimCache(TInt aByteLimit)
     }
 }
 
-TBool CSymbianAudioMixer::IsReady() const
+TBool CAudioMixer::IsReady() const
 {
     return iReady;
 }
 
-TInt CSymbianAudioMixer::ConsumeError()
+TInt CAudioMixer::ConsumeError()
 {
     const TInt error = iLastError;
     iLastError = KErrNone;
     return error;
 }
 
-TInt CSymbianAudioMixer::OutputSampleRate()
+TInt CAudioMixer::OutputSampleRate()
 {
     return KOutputSampleRate;
 }
 
-TInt CSymbianAudioMixer::OutputChannels()
+TInt CAudioMixer::OutputChannels()
 {
     return KOutputChannels;
 }
 
-void CSymbianAudioMixer::MaoscOpenComplete(TInt aError)
+void CAudioMixer::MaoscOpenComplete(TInt aError)
 {
     if (aError == KErrNone)
     {
@@ -694,7 +730,7 @@ void CSymbianAudioMixer::MaoscOpenComplete(TInt aError)
     }
 }
 
-void CSymbianAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
+void CAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
 {
     const TInt bufferIndex = OutputBufferIndex(aBuffer);
     if (bufferIndex >= 0 && iOutputBufferQueued[bufferIndex])
@@ -712,7 +748,7 @@ void CSymbianAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
     }
 }
 
-void CSymbianAudioMixer::MaoscPlayComplete(TInt aError)
+void CAudioMixer::MaoscPlayComplete(TInt aError)
 {
     if (iShuttingDown)
         return;

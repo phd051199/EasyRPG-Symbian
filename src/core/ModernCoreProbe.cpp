@@ -1,4 +1,4 @@
-#include "easyrpgsymbian/ModernCoreProbe.h"
+#include "ModernCoreProbe.h"
 
 extern "C" int EasyRpgModernCoreProbe(int aValue)
 {

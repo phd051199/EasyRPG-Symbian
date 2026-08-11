@@ -1,4 +1,4 @@
-#include "easyrpgsymbian/GameLocator.h"
+#include "GameLocator.h"
 
 namespace
 {
@@ -69,9 +69,7 @@ void TGameLocator::AppendGameArchivesL(RFs& aFs,
         }
 
         TBuf<KMaxFileName> displayName;
-        if (title.Length() > displayName.MaxLength() - 6)
-            title.SetLength(displayName.MaxLength() - 6);
-        displayName.Format(_L("%S [%c:]"), &title, aDirectory[0]);
+        displayName.Copy(title.Left(displayName.MaxLength()));
 
         aDisplayNames.AppendL(displayName);
         aArchivePaths.AppendL(archivePath);

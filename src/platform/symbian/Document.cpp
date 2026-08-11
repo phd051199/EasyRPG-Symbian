@@ -1,5 +1,5 @@
-#include "easyrpgsymbian/SymbianAppUi.h"
-#include "easyrpgsymbian/SymbianDocument.h"
+#include "AppUi.h"
+#include "Document.h"
 
 CEasyRpgDocument* CEasyRpgDocument::NewL(CEikApplication& aApplication)
 {

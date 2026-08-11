@@ -1,19 +1,18 @@
 #include <f32file.h>
 
-#include "easyrpgsymbian/PlayerRuntime.h"
-#include "easyrpgsymbian/DisplaySurface.h"
-#include "easyrpgsymbian/Encoding.h"
-#include "easyrpgsymbian/LcfProbe.h"
-#include "easyrpgsymbian/ModernCoreProbe.h"
-#include "easyrpgsymbian/SymbianAudioBridge.h"
-#include "easyrpgsymbian/SymbianDirentBridge.h"
-#include "easyrpgsymbian/UpstreamLcfLinkAnchor.h"
-#include "easyrpgsymbian/UpstreamPlayerBridge.h"
-#include "easyrpgsymbian/ZipVfs.h"
+#include "PlayerRuntime.h"
+#include "DisplaySurface.h"
+#include "Encoding.h"
+#include "LcfProbe.h"
+#include "ModernCoreProbe.h"
+#include "AudioBridge.h"
+#include "DirentBridge.h"
+#include "UpstreamLcfLinkAnchor.h"
+#include "UpstreamPlayerBridge.h"
+#include "ZipVfs.h"
 
 namespace
 {
-const TInt KMaxAsyncFileBytes = 16 * 1024 * 1024;
 _LIT(KProjectBasePath, "C:\\Data\\EasyRPG\\Cache\\Project\\");
 _LIT(KSaveBasePath, "C:\\Data\\EasyRPG\\Saves\\");
 CZipVfs* gResourceResolver = NULL;
@@ -126,9 +125,41 @@ void CreateVirtualProjectTreeL(RFs& aFs, const TDesC& aRoot)
     if (error != KErrNone && error != KErrAlreadyExists)
         User::Leave(error);
 }
+
+TBool ResolveUpstreamKey(TUint32 aKey, TInt& aWord, TUint32& aMask)
+{
+    switch (aKey)
+    {
+    case CPlayerRuntime::EKeyUp: aWord = 0; aMask = 1u << 13; break;
+    case CPlayerRuntime::EKeyDown: aWord = 0; aMask = 1u << 15; break;
+    case CPlayerRuntime::EKeyLeft: aWord = 0; aMask = 1u << 12; break;
+    case CPlayerRuntime::EKeyRight: aWord = 0; aMask = 1u << 14; break;
+    case CPlayerRuntime::EKeyDecision: aWord = 0; aMask = 1u << 4; break;
+    case CPlayerRuntime::EKeyCancel: aWord = 0; aMask = 1u << 6; break;
+    case CPlayerRuntime::EKeyShift: aWord = 0; aMask = 1u << 20; break;
+    case CPlayerRuntime::EKeyDebug: aWord = 2; aMask = 1u << 26; break;
+    case CPlayerRuntime::EKeyN0: aWord = 0; aMask = 1u << 28; break;
+    case CPlayerRuntime::EKeyN1: aWord = 0; aMask = 1u << 29; break;
+    case CPlayerRuntime::EKeyN2: aWord = 0; aMask = 1u << 30; break;
+    case CPlayerRuntime::EKeyN3: aWord = 0; aMask = 1u << 31; break;
+    case CPlayerRuntime::EKeyN4: aWord = 1; aMask = 1u << 0; break;
+    case CPlayerRuntime::EKeyN5: aWord = 1; aMask = 1u << 1; break;
+    case CPlayerRuntime::EKeyN6: aWord = 1; aMask = 1u << 2; break;
+    case CPlayerRuntime::EKeyN7: aWord = 1; aMask = 1u << 3; break;
+    case CPlayerRuntime::EKeyN8: aWord = 1; aMask = 1u << 4; break;
+    case CPlayerRuntime::EKeyN9: aWord = 1; aMask = 1u << 5; break;
+    case CPlayerRuntime::EKeyMultiply: aWord = 2; aMask = 1u << 13; break;
+    case CPlayerRuntime::EKeyPlus: aWord = 2; aMask = 1u << 14; break;
+    case CPlayerRuntime::EKeyMinus: aWord = 2; aMask = 1u << 15; break;
+    case CPlayerRuntime::EKeyPeriod: aWord = 2; aMask = 1u << 16; break;
+    case CPlayerRuntime::EKeyDivide: aWord = 2; aMask = 1u << 17; break;
+    default: return EFalse;
+    }
+    return ETrue;
+}
 }
 
-extern "C" int EasyRpgSymbianResolveResource(const char* aDirectory,
+extern "C" int EasyRpgResolveResource(const char* aDirectory,
                                                const char* aFile,
                                                char* aPath,
                                                unsigned int aPathCapacity)
@@ -157,7 +188,7 @@ extern "C" int EasyRpgSymbianResolveResource(const char* aDirectory,
         gResourceResolver->MaterializeFileL(archivePath,
                                             cacheName,
                                             materialized,
-                                            KMaxAsyncFileBytes);
+                                            KMaxTInt);
         TBuf8<KMaxFileName + 1> narrow;
         NarrowAsciiPathL(materialized, narrow);
         const TInt length = narrow.Length() - 1;
@@ -172,7 +203,7 @@ extern "C" int EasyRpgSymbianResolveResource(const char* aDirectory,
 
 CPlayerRuntime* CPlayerRuntime::NewL(CZipVfs* aResources,
                                      const TDesC& aGameSource,
-                                     CSymbianDisplaySurface& aDisplaySurface)
+                                     CDisplaySurface& aDisplaySurface)
 {
     CPlayerRuntime* self = new (ELeave) CPlayerRuntime(aResources, aDisplaySurface);
     CleanupStack::PushL(self);
@@ -182,10 +213,14 @@ CPlayerRuntime* CPlayerRuntime::NewL(CZipVfs* aResources,
 }
 
 CPlayerRuntime::CPlayerRuntime(CZipVfs* aResources,
-                               CSymbianDisplaySurface& aDisplaySurface)
+                               CDisplaySurface& aDisplaySurface)
     : iResources(aResources),
       iDisplaySurface(aDisplaySurface),
-      iPressedKeys(0),
+      iUpstreamKeys0(0),
+      iUpstreamKeys1(0),
+      iUpstreamKeys2(0),
+      iTickMs(16),
+      iTickRemainder(40),
       iPlayerRunning(EFalse)
 {
 }
@@ -256,7 +291,7 @@ CPlayerRuntime::~CPlayerRuntime()
     if (iPlayerRunning)
         EasyRpgUpstreamPlayerShutdown();
     iPlayerRunning = EFalse;
-    EasyRpgSymbianAudioShutdown();
+    EasyRpgAudioShutdown();
     EasyRpgClearVirtualProject();
     if (gResourceResolver == iResources)
         gResourceResolver = NULL;
@@ -264,15 +299,22 @@ CPlayerRuntime::~CPlayerRuntime()
 
 void CPlayerRuntime::SetKeyState(TUint32 aKey, TBool aPressed)
 {
+    TInt word = 0;
+    TUint32 mask = 0;
+    if (!ResolveUpstreamKey(aKey, word, mask))
+        return;
+    TUint32* state = word == 0 ? &iUpstreamKeys0 : word == 1 ? &iUpstreamKeys1 : &iUpstreamKeys2;
     if (aPressed)
-        iPressedKeys |= aKey;
+        *state |= mask;
     else
-        iPressedKeys &= ~aKey;
+        *state &= ~mask;
 }
 
 void CPlayerRuntime::ReleaseAllKeys()
 {
-    iPressedKeys = 0;
+    iUpstreamKeys0 = 0;
+    iUpstreamKeys1 = 0;
+    iUpstreamKeys2 = 0;
 }
 
 void CPlayerRuntime::Suspend()
@@ -292,26 +334,22 @@ void CPlayerRuntime::TickL(TUint32 aLogicFrame, TBool aRenderFrame)
 {
     if (!iPlayerRunning)
         return;
-
-    TUint32 upstreamKeys0 = 0;
-    TUint32 upstreamKeys1 = 0;
-    TUint32 upstreamKeys2 = 0;
-    if ((iPressedKeys & EKeyUp) != 0) upstreamKeys0 |= 1u << 13;
-    if ((iPressedKeys & EKeyDown) != 0) upstreamKeys0 |= 1u << 15;
-    if ((iPressedKeys & EKeyLeft) != 0) upstreamKeys0 |= 1u << 12;
-    if ((iPressedKeys & EKeyRight) != 0) upstreamKeys0 |= 1u << 14;
-    if ((iPressedKeys & EKeyDecision) != 0) upstreamKeys0 |= 1u << 4;
-    if ((iPressedKeys & EKeyCancel) != 0) upstreamKeys0 |= 1u << 6;
-    if ((iPressedKeys & EKeyShift) != 0) upstreamKeys0 |= 1u << 20;
-    if ((iPressedKeys & EKeyDebug) != 0) upstreamKeys2 |= 1u << 26;
+    static_cast<void>(aLogicFrame);
 
     const TInt tickResult = EasyRpgUpstreamPlayerTick(
-        static_cast<unsigned int>((aLogicFrame * 1000u) / 60u),
-        upstreamKeys0,
-        upstreamKeys1,
-        upstreamKeys2,
+        iTickMs,
+        iUpstreamKeys0,
+        iUpstreamKeys1,
+        iUpstreamKeys2,
         0,
         aRenderFrame ? 1 : 0);
+    iTickMs += 16;
+    iTickRemainder += 40;
+    if (iTickRemainder >= 60)
+    {
+        ++iTickMs;
+        iTickRemainder -= 60;
+    }
     if (tickResult < 0)
         User::Leave(KErrGeneral);
     if (tickResult > 0)

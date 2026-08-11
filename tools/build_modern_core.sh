@@ -18,6 +18,22 @@ ASSEMBLER="$CSL_BIN/arm-none-symbianelf-as.exe"
 ARCHIVER="$CSL_BIN/arm-none-symbianelf-ar.exe"
 NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
 BUILD_DIR="$PROJECT_DIR/build/modern-core/$SDK_CFG"
+LOCK_DIR="$PROJECT_DIR/build/.modern-core-$SDK_CFG.lock"
+mkdir -p "$PROJECT_DIR/build"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    existing_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
+    if [[ $existing_pid =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
+        echo "Another modern-core build is already running for $SDK_CFG (pid $existing_pid)." >&2
+        exit 75
+    fi
+    rm -rf "$LOCK_DIR"
+    mkdir "$LOCK_DIR"
+fi
+printf '%s\n' "$$" > "$LOCK_DIR/pid"
+cleanup_modern_core_lock() {
+    rm -rf "$LOCK_DIR"
+}
+trap cleanup_modern_core_lock EXIT INT TERM
 LIBRARY="$BUILD_DIR/EasyRpgModernCore.lib"
 SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
 WIN_BUILD_DIR="C:\\work\\EasyRPG\\build\\modern-core\\$SDK_CFG"
@@ -412,9 +428,12 @@ for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCor
     fi
 done
 
-cp -f "$LIBRARY" "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"
+SDK_LIBRARY="$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"
+SDK_LIBRARY_TMP="$SDK_LIBRARY_DIR/.EasyRpgModernCore.lib.$$"
+cp -f "$LIBRARY" "$SDK_LIBRARY_TMP"
+mv -f "$SDK_LIBRARY_TMP" "$SDK_LIBRARY"
 
 printf 'Modern C++11 -> CSL EABI4 core: %s (%s bytes, %s objects)\n' \
     "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
 printf 'Verified symbols: upstream LDB/LMT/LMU read path + CP932/ZIP platform adapters\n'
-printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"
+printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY"

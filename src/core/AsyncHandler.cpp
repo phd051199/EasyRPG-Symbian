@@ -8,6 +8,7 @@
 namespace {
 std::map<std::string, FileRequestAsync> gRequests;
 int gNextId = 0;
+int gImportantPending = 0;
 
 FileRequestAsync* GetRequest(const std::string& aPath) {
     std::map<std::string, FileRequestAsync>::iterator it = gRequests.find(aPath);
@@ -38,12 +39,7 @@ FileRequestAsync* RequestFile(const std::string& aFileName) {
 }
 
 bool IsImportantFilePending() {
-    for (std::map<std::string, FileRequestAsync>::iterator it = gRequests.begin();
-         it != gRequests.end(); ++it) {
-        if (!it->second.IsReady() && it->second.IsImportantFile())
-            return true;
-    }
-    return false;
+    return gImportantPending > 0;
 }
 }
 
@@ -69,6 +65,10 @@ bool FileRequestAsync::IsImportantFile() const {
 }
 
 void FileRequestAsync::SetImportantFile(bool aImportant) {
+    if (important == aImportant)
+        return;
+    if (!IsReady())
+        gImportantPending += aImportant ? 1 : -1;
     important = aImportant;
 }
 
@@ -116,8 +116,11 @@ void FileRequestAsync::CallListeners(bool aSuccess) {
 }
 
 void FileRequestAsync::DownloadDone(bool aSuccess) {
+    const bool pendingImportant = important && !IsReady();
     if (IsReady())
         aSuccess = state == State_DoneSuccess;
     state = aSuccess ? State_DoneSuccess : State_DoneFailure;
+    if (pendingImportant && gImportantPending > 0)
+        --gImportantPending;
     CallListeners(aSuccess);
 }

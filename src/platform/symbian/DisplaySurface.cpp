@@ -1,7 +1,7 @@
 #include <e32std.h>
 
-#include "easyrpgsymbian/DisplaySurface.h"
-#include "easyrpgsymbian/UpstreamPlayerBridge.h"
+#include "DisplaySurface.h"
+#include "UpstreamPlayerBridge.h"
 
 namespace
 {
@@ -198,6 +198,17 @@ void CopyRegion(const unsigned short* aSource,
                 const TRect& aRegion)
 {
     const TInt rowBytes = (aRegion.iBr.iX - aRegion.iTl.iX) * static_cast<TInt>(sizeof(unsigned short));
+    const TInt height = aRegion.iBr.iY - aRegion.iTl.iY;
+    if (aRegion.iTl.iX == 0 &&
+        rowBytes == aSourceStridePixels * static_cast<TInt>(sizeof(unsigned short)) &&
+        rowBytes == aDestinationStride)
+    {
+        Mem::Copy(aDestination + aRegion.iTl.iY * aDestinationStride,
+                  aSource + aRegion.iTl.iY * aSourceStridePixels,
+                  rowBytes * height);
+        return;
+    }
+
     for (TInt y = aRegion.iTl.iY; y < aRegion.iBr.iY; ++y)
     {
         Mem::Copy(aDestination + y * aDestinationStride +
@@ -208,16 +219,16 @@ void CopyRegion(const unsigned short* aSource,
 }
 }
 
-CSymbianDisplaySurface* CSymbianDisplaySurface::NewL(const TSize& aSize)
+CDisplaySurface* CDisplaySurface::NewL(const TSize& aSize)
 {
-    CSymbianDisplaySurface* self = new (ELeave) CSymbianDisplaySurface;
+    CDisplaySurface* self = new (ELeave) CDisplaySurface;
     CleanupStack::PushL(self);
     self->ConstructL(aSize);
     CleanupStack::Pop(self);
     return self;
 }
 
-CSymbianDisplaySurface::CSymbianDisplaySurface()
+CDisplaySurface::CDisplaySurface()
     : iBitmap(NULL),
       iSize(0, 0),
       iHasFrame(EFalse),
@@ -225,7 +236,7 @@ CSymbianDisplaySurface::CSymbianDisplaySurface()
 {
 }
 
-void CSymbianDisplaySurface::ConstructL(const TSize& aSize)
+void CDisplaySurface::ConstructL(const TSize& aSize)
 {
     if (aSize.iWidth <= 0 || aSize.iHeight <= 0)
         User::Leave(KErrArgument);
@@ -236,48 +247,48 @@ void CSymbianDisplaySurface::ConstructL(const TSize& aSize)
     ClearL();
 }
 
-CSymbianDisplaySurface::~CSymbianDisplaySurface()
+CDisplaySurface::~CDisplaySurface()
 {
     delete iBitmap;
     iBitmap = NULL;
 }
 
-const TSize& CSymbianDisplaySurface::Size() const
+const TSize& CDisplaySurface::Size() const
 {
     return iSize;
 }
 
-const CFbsBitmap& CSymbianDisplaySurface::Bitmap() const
+const CFbsBitmap& CDisplaySurface::Bitmap() const
 {
     return *iBitmap;
 }
 
-TBool CSymbianDisplaySurface::HasFrame() const
+TBool CDisplaySurface::HasFrame() const
 {
     return iHasFrame;
 }
 
-TBool CSymbianDisplaySurface::HasDirtyRegions() const
+TBool CDisplaySurface::HasDirtyRegions() const
 {
     return iDirtyRegionCount > 0;
 }
 
-TInt CSymbianDisplaySurface::DirtyRegionCount() const
+TInt CDisplaySurface::DirtyRegionCount() const
 {
     return iDirtyRegionCount;
 }
 
-const TRect& CSymbianDisplaySurface::DirtyRegion(TInt aIndex) const
+const TRect& CDisplaySurface::DirtyRegion(TInt aIndex) const
 {
     return iDirtyRegions[aIndex];
 }
 
-void CSymbianDisplaySurface::ClearDirtyRegions()
+void CDisplaySurface::ClearDirtyRegions()
 {
     iDirtyRegionCount = 0;
 }
 
-void CSymbianDisplaySurface::ClearL()
+void CDisplaySurface::ClearL()
 {
     if (!iBitmap)
         User::Leave(KErrNotReady);
@@ -296,7 +307,7 @@ void CSymbianDisplaySurface::ClearL()
     iDirtyRegionCount = 0;
 }
 
-void CSymbianDisplaySurface::PresentL()
+void CDisplaySurface::PresentL()
 {
     if (!iBitmap)
         User::Leave(KErrNotReady);
@@ -308,6 +319,13 @@ void CSymbianDisplaySurface::PresentL()
     if (!source || sourceWidth != iSize.iWidth || sourceHeight != iSize.iHeight ||
         sourceStridePixels < iSize.iWidth)
         User::Leave(KErrNotReady);
+
+    const TInt coreDirtyCount = EasyRpgUpstreamPlayerDirtyRegionCount();
+    if (iHasFrame && coreDirtyCount == 0)
+    {
+        EasyRpgUpstreamPlayerConsumeDirtyRegions();
+        return;
+    }
 
     iBitmap->LockHeap();
     TUint8* destination = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
@@ -321,7 +339,6 @@ void CSymbianDisplaySurface::PresentL()
     const TRect frameRect(TPoint(0, 0), iSize);
     TRect currentDirty[KDirtyRegionCapacity];
     TInt currentDirtyCount = 0;
-    const TInt coreDirtyCount = EasyRpgUpstreamPlayerDirtyRegionCount();
 
     if (!iHasFrame)
     {

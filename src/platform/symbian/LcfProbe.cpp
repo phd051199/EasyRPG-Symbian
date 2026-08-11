@@ -1,6 +1,6 @@
-#include "easyrpgsymbian/LcfProbe.h"
-#include "easyrpgsymbian/UpstreamLmuBridge.h"
-#include "easyrpgsymbian/ZipVfs.h"
+#include "LcfProbe.h"
+#include "UpstreamLmuBridge.h"
+#include "ZipVfs.h"
 
 namespace
 {

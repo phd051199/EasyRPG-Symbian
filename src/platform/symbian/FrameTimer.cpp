@@ -1,8 +1,8 @@
 #include <hal.h>
 #include <hal_data.h>
 
-#include "easyrpgsymbian/FrameTimer.h"
-#include "easyrpgsymbian/SymbianLogBridge.h"
+#include "FrameTimer.h"
+#include "LogBridge.h"
 
 CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 {
@@ -67,7 +67,7 @@ void CFrameTimer::Start()
 void CFrameTimer::Stop()
 {
     if (iRunning && iLogicFrame == 0)
-        EasyRpgSymbianLogDebug("frame timer stopped before first tick");
+        EasyRpgLogDebug("frame timer stopped before first tick");
     iRunning = EFalse;
     Cancel();
 }
@@ -131,7 +131,7 @@ void CFrameTimer::RunL()
         return;
 
     if (iLogicFrame == 0)
-        EasyRpgSymbianLogDebug("frame timer dispatched");
+        EasyRpgLogDebug("frame timer dispatched");
 
     if (iStatus.Int() != KErrNone)
     {
@@ -167,7 +167,7 @@ void CFrameTimer::RunL()
     {
         ++iLogicFrame;
         if (iLogicFrame == 1)
-            EasyRpgSymbianLogDebug("frame timer first tick");
+            EasyRpgLogDebug("frame timer first tick");
 
         const TBool finalTick = tick == ticksToRun - 1;
         const TBool renderFrame = finalTick &&

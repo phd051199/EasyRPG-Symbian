@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "easyrpgsymbian/UpstreamLmuBridge.h"
+#include "UpstreamLmuBridge.h"
 #include "data.h"
 #include "ldb_reader.h"
 #include "lmt_reader.h"

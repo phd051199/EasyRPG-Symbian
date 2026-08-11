@@ -12,7 +12,7 @@ class CAknDoubleStyleListBox;
 class CAsyncCallBack;
 class CPerfOverlay;
 class CPlayerRuntime;
-class CSymbianDisplaySurface;
+class CDisplaySurface;
 class CZipVfs;
 
 class CGameView : public CCoeControl,
@@ -54,7 +54,7 @@ private:
     CAknDoubleStyleListBox* iListBox;
     CDesCArrayFlat* iListItems;
     CDesCArrayFlat* iArchivePaths;
-    CSymbianDisplaySurface* iDisplaySurface;
+    CDisplaySurface* iDisplaySurface;
     CPerfOverlay* iPerfOverlay;
     CZipVfs* iResources;
     CPlayerRuntime* iRuntime;

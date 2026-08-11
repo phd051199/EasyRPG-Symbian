@@ -1,4 +1,4 @@
-#include "easyrpgsymbian/CoreZipCrypto.h"
+#include "CoreZipCrypto.h"
 
 namespace
 {

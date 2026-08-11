@@ -30,7 +30,7 @@
 #include "output.h"
 #include "player.h"
 #ifdef EASYRPG_SYMBIAN
-#include "easyrpgsymbian/RenderDamage.h"
+#include "RenderDamage.h"
 #endif
 
 namespace Graphics {
@@ -191,20 +191,34 @@ void Graphics::DrawFrame() {
 		return;
 	}
 
-	SymbianRenderDamage::BeginRecord(surface->GetWidth(), surface->GetHeight());
-	DrawFrameContents();
-	SymbianRenderDamage::EndRecord();
-
-	if (SymbianRenderDamage::NeedsPaint()) {
-		Rect dirty[4];
-		const int dirtyCount = SymbianRenderDamage::DirtyCount();
-		for (int index = 0; index < dirtyCount; ++index)
-			dirty[index] = SymbianRenderDamage::DirtyRect(index);
-		surface->SetClipRects(dirty, dirtyCount);
-		SymbianRenderDamage::BeginPaint();
-		DrawFrameContents();
-		SymbianRenderDamage::EndPaint();
+	if (SymbianRenderDamage::FullFrameRequested()) {
 		surface->ClearClipRects();
+		SymbianRenderDamage::BeginFullPaintRecord(surface->GetWidth(), surface->GetHeight());
+		DrawFrameContents();
+		SymbianRenderDamage::EndFullPaintRecord();
+	} else {
+		SymbianRenderDamage::BeginRecord(surface->GetWidth(), surface->GetHeight());
+		DrawFrameContents();
+		SymbianRenderDamage::EndRecord();
+
+		if (SymbianRenderDamage::NeedsPaint()) {
+			const int dirtyCount = SymbianRenderDamage::DirtyCount();
+			if (SymbianRenderDamage::IsFullFrameDirty()) {
+				surface->ClearClipRects();
+				SymbianRenderDamage::BeginPaint(0);
+				DrawFrameContents();
+				SymbianRenderDamage::EndPaint();
+			} else {
+				for (int index = 0; index < dirtyCount; ++index) {
+					const Rect dirty = SymbianRenderDamage::DirtyRect(index);
+					surface->SetClipRects(&dirty, 1);
+					SymbianRenderDamage::BeginPaint(index);
+					DrawFrameContents();
+					SymbianRenderDamage::EndPaint();
+				}
+				surface->ClearClipRects();
+			}
+		}
 	}
 #else
 	DrawFrameContents();

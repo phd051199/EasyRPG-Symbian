@@ -6,7 +6,6 @@
 #include "output.h"
 #include "player.h"
 #include "scene.h"
-#include "scene_gameover.h"
 
 std::shared_ptr<Scene> Scene::instance;
 std::vector<std::shared_ptr<Scene> > Scene::old_instances;
@@ -80,9 +79,6 @@ void Scene::MainFunction() {
         return;
     } else {
         Player::Update();
-        static int gameover_test_frames = 0;
-        if (type == Scene::Map && ++gameover_test_frames == 120)
-            Scene::Push(std::make_shared<Scene_Gameover>());
     }
 
     if (Scene::instance.get() != this) {

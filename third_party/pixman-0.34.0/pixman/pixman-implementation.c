@@ -385,6 +385,8 @@ static const pixman_fast_path_t empty_fast_path[] =
     { PIXMAN_OP_NONE }
 };
 
+pixman_implementation_t *_pixman_implementation_create_symbian_fast_path (pixman_implementation_t *fallback);
+
 pixman_implementation_t *
 _pixman_choose_implementation (void)
 {
@@ -399,6 +401,8 @@ _pixman_choose_implementation (void)
     imp = _pixman_arm_get_implementations (imp);
     imp = _pixman_ppc_get_implementations (imp);
     imp = _pixman_mips_get_implementations (imp);
+
+    imp = _pixman_implementation_create_symbian_fast_path (imp);
 
     imp = _pixman_implementation_create_noop (imp);
 

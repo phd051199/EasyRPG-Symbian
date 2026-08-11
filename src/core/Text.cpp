@@ -1,6 +1,5 @@
 #include <cctype>
-#include <map>
-#include <utility>
+#include <vector>
 
 #include "bitmap.h"
 #include "baseui.h"
@@ -10,20 +9,27 @@
 #include "rect.h"
 #include "text.h"
 #include "utils.h"
-#include "easyrpgsymbian/RenderDamage.h"
+#include "RenderDamage.h"
 
 namespace {
-typedef std::pair<const Font*, char32_t> TGlyphKey;
-typedef std::map<TGlyphKey, BitmapRef> TGlyphCache;
+const unsigned int KGlyphCacheSize = 512;
 
-TGlyphCache gGlyphCache;
-
-unsigned long long HashValue(unsigned long long aHash, unsigned long long aValue)
+struct TGlyphCacheEntry
 {
-    return (aHash ^ aValue) * 1099511628211ULL;
+    const Font* font;
+    char32_t code;
+    unsigned int owner;
+};
+
+TGlyphCacheEntry gGlyphCache[KGlyphCacheSize] = {};
+std::vector<BitmapRef> gGlyphOwners;
+
+unsigned int HashValue(unsigned int aHash, unsigned int aValue)
+{
+    return SymbianRenderDamage::HashValue(aHash, aValue);
 }
 
-unsigned long long HashText(unsigned long long aHash, const std::string& aText)
+unsigned int HashText(unsigned int aHash, const std::string& aText)
 {
     for (std::size_t index = 0; index < aText.size(); ++index)
         aHash = HashValue(aHash, static_cast<unsigned char>(aText[index]));
@@ -36,7 +42,7 @@ bool IsDisplayDestination(Bitmap& aDestination)
         DisplayUi->GetDisplaySurface().get() == &aDestination;
 }
 
-bool SkipTextDraw(Bitmap& aDestination, unsigned long long aSignature, const Rect& aRect)
+bool SkipTextDraw(Bitmap& aDestination, unsigned int aSignature, const Rect& aRect)
 {
     if (!IsDisplayDestination(aDestination))
         return false;
@@ -53,21 +59,28 @@ bool ClipTextPixels(Bitmap& aDestination)
     return IsDisplayDestination(aDestination) && SymbianRenderDamage::IsPainting();
 }
 
-bool TextPixelVisible(bool aClip, int aX, int aY)
-{
-    return !aClip || SymbianRenderDamage::ContainsDirtyPoint(aX, aY);
-}
-
 BitmapRef CachedGlyph(const FontRef& aFont, char32_t aCode)
 {
-    const TGlyphKey key(aFont.get(), aCode);
-    TGlyphCache::iterator found = gGlyphCache.find(key);
-    if (found != gGlyphCache.end())
-        return found->second;
+    const unsigned int fontKey = static_cast<unsigned int>(reinterpret_cast<std::size_t>(aFont.get()) >> 3);
+    const unsigned int codeKey = static_cast<unsigned int>(aCode);
+    const unsigned int index = (fontKey ^ (codeKey * 2654435761u)) & (KGlyphCacheSize - 1u);
+    TGlyphCacheEntry& entry = gGlyphCache[index];
+    if (entry.font == aFont.get() && entry.code == aCode && entry.owner < gGlyphOwners.size())
+        return gGlyphOwners[entry.owner];
 
     BitmapRef glyph = aFont->Glyph(aCode);
-    if (glyph)
-        gGlyphCache.insert(std::make_pair(key, glyph));
+    if (!glyph)
+        return glyph;
+
+    if (entry.font && entry.owner < gGlyphOwners.size())
+        gGlyphOwners[entry.owner] = glyph;
+    else
+    {
+        entry.owner = static_cast<unsigned int>(gGlyphOwners.size());
+        gGlyphOwners.push_back(glyph);
+    }
+    entry.font = aFont.get();
+    entry.code = aCode;
     return glyph;
 }
 
@@ -125,26 +138,55 @@ uint16_t PackRgb565(uint32_t aPixel)
         ((aPixel >> 3) & 31u));
 }
 
+uint32_t ExpandNative32(uint32_t aPixel)
+{
+    uint8_t red = 0;
+    uint8_t green = 0;
+    uint8_t blue = 0;
+    uint8_t alpha = 0;
+    Bitmap::pixel_format.uint32_to_rgba(aPixel, red, green, blue, alpha);
+    return (static_cast<uint32_t>(alpha) << 24) |
+        (static_cast<uint32_t>(red) << 16) |
+        (static_cast<uint32_t>(green) << 8) |
+        static_cast<uint32_t>(blue);
+}
+
+uint32_t PackNative32(uint32_t aPixel)
+{
+    const uint8_t alpha = static_cast<uint8_t>(aPixel >> 24);
+    const uint8_t red = static_cast<uint8_t>(aPixel >> 16);
+    const uint8_t green = static_cast<uint8_t>(aPixel >> 8);
+    const uint8_t blue = static_cast<uint8_t>(aPixel);
+    return Bitmap::pixel_format.rgba_to_uint32_t(red, green, blue, alpha);
+}
+
 uint32_t ReadColorPixel(const Bitmap& aBitmap, const uint8_t* aRow, int aX)
 {
     if (aBitmap.bpp() == 2)
         return ExpandRgb565(reinterpret_cast<const uint16_t*>(aRow)[aX]);
     if (aBitmap.bpp() == 4)
-        return reinterpret_cast<const uint32_t*>(aRow)[aX];
+        return ExpandNative32(reinterpret_cast<const uint32_t*>(aRow)[aX]);
     return 0;
 }
 
 void BlendColorPixel(Bitmap& aBitmap, uint8_t* aRow, int aX, uint32_t aSource)
 {
+    const uint32_t sourceAlpha = aSource >> 24;
     if (aBitmap.bpp() == 2)
     {
         uint16_t* destination = reinterpret_cast<uint16_t*>(aRow) + aX;
-        *destination = PackRgb565(OverPixel(aSource, ExpandRgb565(*destination)));
+        if (sourceAlpha == 255)
+            *destination = PackRgb565(aSource);
+        else if (sourceAlpha != 0)
+            *destination = PackRgb565(OverPixel(aSource, ExpandRgb565(*destination)));
     }
     else if (aBitmap.bpp() == 4)
     {
         uint32_t* destination = reinterpret_cast<uint32_t*>(aRow) + aX;
-        *destination = OverPixel(aSource, *destination);
+        if (sourceAlpha == 255)
+            *destination = PackNative32(aSource);
+        else if (sourceAlpha != 0)
+            *destination = PackNative32(OverPixel(aSource, ExpandNative32(*destination)));
     }
 }
 
@@ -154,7 +196,10 @@ uint8_t GlyphAlpha(const Bitmap& aGlyph, int aX, int aY)
     if (aGlyph.bpp() == 1)
         return row[aX];
     if (aGlyph.bpp() == 4)
-        return static_cast<uint8_t>(reinterpret_cast<const uint32_t*>(row)[aX] >> 24);
+    {
+        const uint32_t pixel = reinterpret_cast<const uint32_t*>(row)[aX];
+        return Bitmap::pixel_format.a.unpack(pixel);
+    }
     return 0;
 }
 
@@ -169,23 +214,40 @@ void DrawSolidGlyph(Bitmap& aDestination,
         return;
 
     const uint32_t color = PackColor(aColor);
+    int glyphLeft = aX < 0 ? -aX : 0;
+    int glyphTop = aY < 0 ? -aY : 0;
+    int glyphRight = aGlyph.GetWidth();
+    int glyphBottom = aGlyph.GetHeight();
+    if (aX + glyphRight > aDestination.GetWidth())
+        glyphRight = aDestination.GetWidth() - aX;
+    if (aY + glyphBottom > aDestination.GetHeight())
+        glyphBottom = aDestination.GetHeight() - aY;
     const bool clip = ClipTextPixels(aDestination);
-    if (clip && !SymbianRenderDamage::IntersectsDirty(
-            Rect(aX, aY, aGlyph.GetWidth(), aGlyph.GetHeight())))
+    const bool multiClip = clip && SymbianRenderDamage::DirtyCount() > 1;
+    if (clip)
+    {
+        const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+        if (dirty.x - aX > glyphLeft)
+            glyphLeft = dirty.x - aX;
+        if (dirty.y - aY > glyphTop)
+            glyphTop = dirty.y - aY;
+        if (dirty.x + dirty.width - aX < glyphRight)
+            glyphRight = dirty.x + dirty.width - aX;
+        if (dirty.y + dirty.height - aY < glyphBottom)
+            glyphBottom = dirty.y + dirty.height - aY;
+    }
+    if (glyphLeft >= glyphRight || glyphTop >= glyphBottom)
         return;
+
     uint8_t* destinationPixels = reinterpret_cast<uint8_t*>(aDestination.pixels());
-    for (int glyphY = 0; glyphY < aGlyph.GetHeight(); ++glyphY)
+    for (int glyphY = glyphTop; glyphY < glyphBottom; ++glyphY)
     {
         const int destinationY = aY + glyphY;
-        if (destinationY < 0 || destinationY >= aDestination.GetHeight())
-            continue;
         uint8_t* destination = destinationPixels + destinationY * aDestination.pitch();
-        for (int glyphX = 0; glyphX < aGlyph.GetWidth(); ++glyphX)
+        for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
         {
             const int destinationX = aX + glyphX;
-            if (destinationX < 0 || destinationX >= aDestination.GetWidth())
-                continue;
-            if (!TextPixelVisible(clip, destinationX, destinationY))
+            if (multiClip && !SymbianRenderDamage::ContainsDirtyPoint(destinationX, destinationY))
                 continue;
             const uint8_t mask = GlyphAlpha(aGlyph, glyphX, glyphY);
             if (mask == 255)
@@ -211,40 +273,58 @@ void DrawSystemGlyph(Bitmap& aDestination,
         !aDestination.pixels() || !aGlyph.pixels() || !aSystem.pixels())
         return;
 
-    const bool clip = ClipTextPixels(aDestination);
-    if (clip && !SymbianRenderDamage::IntersectsDirty(
-            Rect(aX, aY, aGlyph.GetWidth(), aGlyph.GetHeight())))
-        return;
-
     const int sourceX = aColor == Font::ColorShadow ? 16 : aColor % 10 * 16 + 2;
     const int sourceY = aColor == Font::ColorShadow
         ? 32
         : aColor / 10 * 16 + 48 + 16 - aGlyph.GetHeight();
+    int glyphLeft = aX < 0 ? -aX : 0;
+    int glyphTop = aY < 0 ? -aY : 0;
+    int glyphRight = aGlyph.GetWidth();
+    int glyphBottom = aGlyph.GetHeight();
+    if (sourceX < 0 && -sourceX > glyphLeft)
+        glyphLeft = -sourceX;
+    if (sourceY < 0 && -sourceY > glyphTop)
+        glyphTop = -sourceY;
+    if (aX + glyphRight > aDestination.GetWidth())
+        glyphRight = aDestination.GetWidth() - aX;
+    if (aY + glyphBottom > aDestination.GetHeight())
+        glyphBottom = aDestination.GetHeight() - aY;
+    if (sourceX + glyphRight > aSystem.GetWidth())
+        glyphRight = aSystem.GetWidth() - sourceX;
+    if (sourceY + glyphBottom > aSystem.GetHeight())
+        glyphBottom = aSystem.GetHeight() - sourceY;
+    const bool clip = ClipTextPixels(aDestination);
+    const bool multiClip = clip && SymbianRenderDamage::DirtyCount() > 1;
+    if (clip)
+    {
+        const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+        if (dirty.x - aX > glyphLeft)
+            glyphLeft = dirty.x - aX;
+        if (dirty.y - aY > glyphTop)
+            glyphTop = dirty.y - aY;
+        if (dirty.x + dirty.width - aX < glyphRight)
+            glyphRight = dirty.x + dirty.width - aX;
+        if (dirty.y + dirty.height - aY < glyphBottom)
+            glyphBottom = dirty.y + dirty.height - aY;
+    }
+    if (glyphLeft >= glyphRight || glyphTop >= glyphBottom)
+        return;
+
     uint8_t* destinationPixels = reinterpret_cast<uint8_t*>(aDestination.pixels());
     const uint8_t* systemPixels = reinterpret_cast<const uint8_t*>(aSystem.pixels());
-
-    for (int glyphY = 0; glyphY < aGlyph.GetHeight(); ++glyphY)
+    for (int glyphY = glyphTop; glyphY < glyphBottom; ++glyphY)
     {
         const int destinationY = aY + glyphY;
         const int systemY = sourceY + glyphY;
-        if (destinationY < 0 || destinationY >= aDestination.GetHeight() ||
-            systemY < 0 || systemY >= aSystem.GetHeight())
-            continue;
-
         uint8_t* destination = destinationPixels + destinationY * aDestination.pitch();
         const uint8_t* source = systemPixels + systemY * aSystem.pitch();
-        for (int glyphX = 0; glyphX < aGlyph.GetWidth(); ++glyphX)
+        for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
         {
             const int destinationX = aX + glyphX;
-            const int systemX = sourceX + glyphX;
-            if (destinationX < 0 || destinationX >= aDestination.GetWidth() ||
-                systemX < 0 || systemX >= aSystem.GetWidth())
+            if (multiClip && !SymbianRenderDamage::ContainsDirtyPoint(destinationX, destinationY))
                 continue;
-            if (!TextPixelVisible(clip, destinationX, destinationY))
-                continue;
-
             const uint8_t mask = GlyphAlpha(aGlyph, glyphX, glyphY);
-            const uint32_t sourcePixel = ReadColorPixel(aSystem, source, systemX);
+            const uint32_t sourcePixel = ReadColorPixel(aSystem, source, sourceX + glyphX);
             if (mask == 255)
                 BlendColorPixel(aDestination, destination, destinationX, sourcePixel);
             else if (mask != 0)
@@ -328,13 +408,17 @@ void Text::Draw(Bitmap& aDestination,
     if (!system)
         return;
 
-    unsigned long long signature = HashValue(1469598103934665603ULL, 1);
-    signature = HashValue(signature, reinterpret_cast<std::size_t>(font.get()));
-    signature = HashValue(signature, reinterpret_cast<std::size_t>(system.get()));
-    signature = HashValue(signature, system->Revision());
-    signature = HashValue(signature, static_cast<unsigned int>(aColor));
-    signature = HashValue(signature, static_cast<unsigned int>(aAlignment));
-    signature = HashText(signature, aText);
+    unsigned int signature = 0;
+    if (SymbianRenderDamage::IsRecording())
+    {
+        signature = SymbianRenderDamage::HashSeed(1);
+        signature = HashValue(signature, reinterpret_cast<std::size_t>(font.get()));
+        signature = HashValue(signature, reinterpret_cast<std::size_t>(system.get()));
+        signature = HashValue(signature, system->Revision());
+        signature = HashValue(signature, static_cast<unsigned int>(aColor));
+        signature = HashValue(signature, static_cast<unsigned int>(aAlignment));
+        signature = HashText(signature, aText);
+    }
     const Rect drawRect(lineX - 1, aY - 1, size.width + 2, size.height + 2);
     if (SkipTextDraw(aDestination, signature, drawRect))
         return;
@@ -342,7 +426,8 @@ void Text::Draw(Bitmap& aDestination,
     const std::u32string text = Utils::DecodeUTF32(aText);
     int x = lineX;
     int y = aY;
-    const int lineHeight = size.height > 0 ? size.height : 12;
+    BitmapRef baseGlyph = CachedGlyph(font, U'A');
+    const int lineHeight = baseGlyph && baseGlyph->GetHeight() > 0 ? baseGlyph->GetHeight() : 12;
 
     for (std::size_t i = 0; i < text.size(); ++i)
     {
@@ -383,13 +468,17 @@ void Text::Draw(Bitmap& aDestination,
 
     FontRef font = aDestination.GetFont();
     Rect size = MeasureText(font, aText, false);
-    unsigned long long signature = HashValue(1469598103934665603ULL, 2);
-    signature = HashValue(signature, reinterpret_cast<std::size_t>(font.get()));
-    signature = HashValue(signature, static_cast<unsigned int>(aColor.red));
-    signature = HashValue(signature, static_cast<unsigned int>(aColor.green));
-    signature = HashValue(signature, static_cast<unsigned int>(aColor.blue));
-    signature = HashValue(signature, static_cast<unsigned int>(aColor.alpha));
-    signature = HashText(signature, aText);
+    unsigned int signature = 0;
+    if (SymbianRenderDamage::IsRecording())
+    {
+        signature = SymbianRenderDamage::HashSeed(2);
+        signature = HashValue(signature, reinterpret_cast<std::size_t>(font.get()));
+        signature = HashValue(signature, static_cast<unsigned int>(aColor.red));
+        signature = HashValue(signature, static_cast<unsigned int>(aColor.green));
+        signature = HashValue(signature, static_cast<unsigned int>(aColor.blue));
+        signature = HashValue(signature, static_cast<unsigned int>(aColor.alpha));
+        signature = HashText(signature, aText);
+    }
     const Rect drawRect(aX - 1, aY - 1, size.width + 2, size.height + 2);
     if (SkipTextDraw(aDestination, signature, drawRect))
         return;

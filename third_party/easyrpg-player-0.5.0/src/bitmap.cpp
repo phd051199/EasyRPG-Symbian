@@ -38,7 +38,7 @@
 #include "bitmap_hslrgb.h"
 #ifdef EASYRPG_SYMBIAN
 #include "baseui.h"
-#include "easyrpgsymbian/RenderDamage.h"
+#include "RenderDamage.h"
 #endif
 
 #ifdef EASYRPG_SYMBIAN
@@ -65,53 +65,66 @@ enum TSymbianDrawOp {
 	ESymbianBlit2x
 };
 
-unsigned long long SymbianHash(unsigned long long aHash, unsigned long long aValue) {
-	return (aHash ^ aValue) * 1099511628211ULL;
+unsigned int SymbianHash(unsigned int aHash, unsigned int aValue) {
+	return aHash ? SymbianRenderDamage::HashValue(aHash, aValue) : 0;
 }
 
-unsigned long long SymbianHashInt(unsigned long long aHash, int aValue) {
-	return SymbianHash(aHash, static_cast<unsigned int>(aValue));
+unsigned int SymbianHashInt(unsigned int aHash, int aValue) {
+	return aHash ? SymbianHash(aHash, static_cast<unsigned int>(aValue)) : 0;
 }
 
-unsigned long long SymbianHashRect(unsigned long long aHash, const Rect& aRect) {
+unsigned int SymbianHashRect(unsigned int aHash, const Rect& aRect) {
+	if (!aHash)
+		return 0;
 	aHash = SymbianHashInt(aHash, aRect.x);
 	aHash = SymbianHashInt(aHash, aRect.y);
 	aHash = SymbianHashInt(aHash, aRect.width);
 	return SymbianHashInt(aHash, aRect.height);
 }
 
-unsigned long long SymbianHashDouble(unsigned long long aHash, double aValue) {
+unsigned int SymbianHashDouble(unsigned int aHash, double aValue) {
+	if (!aHash)
+		return 0;
 	unsigned long long bits = 0;
 	std::memcpy(&bits, &aValue, sizeof(bits));
-	return SymbianHash(aHash, bits);
+	aHash = SymbianHash(aHash, static_cast<unsigned int>(bits));
+	return SymbianHash(aHash, static_cast<unsigned int>(bits >> 32));
 }
 
-unsigned long long SymbianHashBitmap(unsigned long long aHash, const Bitmap& aBitmap) {
-	aHash = SymbianHash(aHash, static_cast<unsigned long long>(reinterpret_cast<size_t>(&aBitmap)));
+unsigned int SymbianHashBitmap(unsigned int aHash, const Bitmap& aBitmap) {
+	if (!aHash)
+		return 0;
+	aHash = SymbianHash(aHash, static_cast<unsigned int>(reinterpret_cast<size_t>(&aBitmap)));
 	return SymbianHash(aHash, aBitmap.Revision());
 }
 
-unsigned long long SymbianHashOpacity(unsigned long long aHash, const Opacity& aOpacity) {
+unsigned int SymbianHashOpacity(unsigned int aHash, const Opacity& aOpacity) {
+	if (!aHash)
+		return 0;
 	aHash = SymbianHashInt(aHash, aOpacity.top);
 	aHash = SymbianHashInt(aHash, aOpacity.bottom);
 	return SymbianHashInt(aHash, aOpacity.split);
 }
 
-unsigned long long SymbianHashColor(unsigned long long aHash, const Color& aColor) {
+unsigned int SymbianHashColor(unsigned int aHash, const Color& aColor) {
+	if (!aHash)
+		return 0;
 	aHash = SymbianHashInt(aHash, aColor.red);
 	aHash = SymbianHashInt(aHash, aColor.green);
 	aHash = SymbianHashInt(aHash, aColor.blue);
 	return SymbianHashInt(aHash, aColor.alpha);
 }
 
-unsigned long long SymbianHashTone(unsigned long long aHash, const Tone& aTone) {
+unsigned int SymbianHashTone(unsigned int aHash, const Tone& aTone) {
+	if (!aHash)
+		return 0;
 	aHash = SymbianHashInt(aHash, aTone.red);
 	aHash = SymbianHashInt(aHash, aTone.green);
 	aHash = SymbianHashInt(aHash, aTone.blue);
 	return SymbianHashInt(aHash, aTone.gray);
 }
 
-bool SymbianRecordDraw(Bitmap* aDestination, unsigned long long aSignature, const Rect& aRect) {
+bool SymbianRecordDraw(Bitmap* aDestination, unsigned int aSignature, const Rect& aRect) {
 	if (!DisplayUi || !DisplayUi->GetDisplaySurface() || DisplayUi->GetDisplaySurface().get() != aDestination)
 		return false;
 	if (SymbianRenderDamage::IsRecording()) {
@@ -123,8 +136,60 @@ bool SymbianRecordDraw(Bitmap* aDestination, unsigned long long aSignature, cons
 	return false;
 }
 
-unsigned long long SymbianDrawSignature(int aOperation) {
-	return SymbianHash(1469598103934665603ULL, static_cast<unsigned int>(aOperation));
+unsigned int SymbianDrawSignature(int aOperation) {
+	return SymbianRenderDamage::IsRecording()
+		? SymbianRenderDamage::HashSeed(static_cast<unsigned int>(aOperation))
+		: 0;
+}
+
+uint16_t SymbianColor565(const Color& aColor) {
+	return static_cast<uint16_t>(
+		((static_cast<unsigned int>(aColor.red) >> 3) << 11) |
+		((static_cast<unsigned int>(aColor.green) >> 2) << 5) |
+		(static_cast<unsigned int>(aColor.blue) >> 3));
+}
+
+bool SymbianUseA1555(const void* aPixels, int aWidth, int aHeight, uint32_t aFlags) {
+	if (!aPixels || aWidth <= 0 || aHeight <= 0 || (aFlags & Bitmap::Flag_System))
+		return false;
+	const uint8_t* pixels = static_cast<const uint8_t*>(aPixels);
+	const size_t count = static_cast<size_t>(aWidth) * static_cast<size_t>(aHeight);
+	for (size_t index = 0; index < count; ++index) {
+		const uint8_t alpha = pixels[index * 4 + 3];
+		if (alpha != 0 && alpha != 255)
+			return false;
+	}
+	return true;
+}
+
+DynamicFormat SymbianA1555Format() {
+	return DynamicFormat(16, 5, 10, 5, 5, 5, 0, 1, 15, PF::Alpha);
+}
+
+void SymbianFill565Rect(Bitmap& aBitmap, const Rect& aRect, uint16_t aColor) {
+	if (aRect.IsEmpty())
+		return;
+	uint8_t* base = static_cast<uint8_t*>(aBitmap.pixels());
+	if (aColor == 0) {
+		for (int y = aRect.y; y < aRect.y + aRect.height; ++y)
+			std::memset(base + y * aBitmap.pitch() + aRect.x * 2, 0, static_cast<size_t>(aRect.width) * 2);
+		return;
+	}
+	for (int y = aRect.y; y < aRect.y + aRect.height; ++y) {
+		uint16_t* row = reinterpret_cast<uint16_t*>(base + y * aBitmap.pitch()) + aRect.x;
+		for (int x = 0; x < aRect.width; ++x)
+			row[x] = aColor;
+	}
+}
+
+void SymbianFill565(Bitmap& aBitmap, const Rect& aInput, uint16_t aColor) {
+	Rect rect = aInput;
+	rect.Adjust(aBitmap.GetRect());
+	if (rect.IsEmpty())
+		return;
+	if (SymbianRenderDamage::IsPainting())
+		rect.Adjust(SymbianRenderDamage::CurrentPaintRect());
+	SymbianFill565Rect(aBitmap, rect, aColor);
 }
 
 }
@@ -226,41 +291,55 @@ void Bitmap::SetTransparentColor(Color /* color */) {
 }
 
 Bitmap::TileOpacity Bitmap::CheckOpacity(const Rect& rect) {
+	if (!bitmap || !pixels())
+		return Bitmap::Transparent;
+	if (format.alpha_type != PF::Alpha || format.a.mask == 0)
+		return Bitmap::Opaque;
+
+	Rect clipped = rect;
+	clipped.Adjust(GetRect());
+	if (clipped.IsEmpty())
+		return Bitmap::Transparent;
+
 	bool all = true;
 	bool any = false;
-
-	DynamicFormat format(32,8,24,8,16,8,8,8,0,PF::Alpha);
-	std::vector<uint32_t> pixels;
-	pixels.resize(rect.width * rect.height);
-	Bitmap bmp(reinterpret_cast<void*>(&pixels.front()), rect.width, rect.height, rect.width*4, format);
-	bmp.Blit(0, 0, *this, rect, Opacity::opaque);
-
-	for (std::vector<uint32_t>::const_iterator p = pixels.begin(); p != pixels.end(); ++p) {
-		if ((*p & 0xFF) != 0)
-			any = true;
-		else
-			all = false;
-		if (any && !all)
-			break;
+	const uint8_t* base = static_cast<const uint8_t*>(pixels());
+	for (int y = clipped.y; y < clipped.y + clipped.height; ++y) {
+		const uint8_t* row = base + y * pitch();
+		for (int x = clipped.x; x < clipped.x + clipped.width; ++x) {
+			uint32_t value = 0;
+			if (format.bytes == 4)
+				value = reinterpret_cast<const uint32_t*>(row)[x];
+			else if (format.bytes == 2)
+				value = reinterpret_cast<const uint16_t*>(row)[x];
+			else if (format.bytes == 1)
+				value = row[x];
+			else
+				return Bitmap::Partial;
+			if ((value & format.a.mask) != 0)
+				any = true;
+			else
+				all = false;
+			if (any && !all)
+				return Bitmap::Partial;
+		}
 	}
 
-	return
-		all ? Bitmap::Opaque :
-		any ? Bitmap::Partial :
-		Bitmap::Transparent;
+	return all ? Bitmap::Opaque : any ? Bitmap::Partial : Bitmap::Transparent;
 }
 
 void Bitmap::CheckPixels(uint32_t flags) {
-	if (flags & Flag_System) {
-		DynamicFormat format(32,8,24,8,16,8,8,8,0,PF::Alpha);
-		uint32_t pixel;
-		Bitmap bmp(reinterpret_cast<void*>(&pixel), 1, 1, 4, format);
-		pixman_image_composite32(PIXMAN_OP_SRC, bitmap, (pixman_image_t*) NULL, bmp.bitmap,
-								 0, 32,  0, 0,  0, 0,  1, 1);
-		bg_color = Color((int)(pixel>>24)&0xFF, (int)(pixel>>16)&0xFF, (int)(pixel>>8)&0xFF, (int)pixel&0xFF);
-		pixman_image_composite32(PIXMAN_OP_SRC, bitmap, (pixman_image_t*) NULL, bmp.bitmap,
-								 16, 32,  0, 0,  0, 0,  1, 1);
-		sh_color = Color((int)(pixel>>24)&0xFF, (int)(pixel>>16)&0xFF, (int)(pixel>>8)&0xFF, (int)pixel&0xFF);
+	if ((flags & Flag_System) && bpp() == 4 && width() > 16 && height() > 32) {
+		const uint8_t* base = static_cast<const uint8_t*>(pixels());
+		const uint32_t* row = reinterpret_cast<const uint32_t*>(base + 32 * pitch());
+		uint8_t r = 0;
+		uint8_t g = 0;
+		uint8_t b = 0;
+		uint8_t a = 0;
+		format.uint32_to_rgba(row[0], r, g, b, a);
+		bg_color = Color(r, g, b, a);
+		format.uint32_to_rgba(row[16], r, g, b, a);
+		sh_color = Color(r, g, b, a);
 	}
 
 	if (flags & Flag_Chipset) {
@@ -612,15 +691,22 @@ void Bitmap::Init(int width, int height, void* data, int pitch, bool destroy) {
 void Bitmap::ConvertImage(int& width, int& height, void*& pixels, bool transparent) {
 	const DynamicFormat& img_format = transparent ? image_format : opaque_image_format;
 
-	// premultiply alpha
-	for (int y = 0; y < height; y++) {
-		uint8_t* dst = (uint8_t*) pixels + y * width * 4;
-		for (int x = 0; x < width; x++) {
-			uint8_t &r = *dst++;
-			uint8_t &g = *dst++;
-			uint8_t &b = *dst++;
-			uint8_t &a = *dst++;
-			MultiplyAlpha(r, g, b, a);
+	if (transparent) {
+		const bool binary_alpha = format.bits == 16 && format.a.bits == 1;
+		for (int y = 0; y < height; y++) {
+			uint8_t* dst = (uint8_t*) pixels + y * width * 4;
+			for (int x = 0; x < width; x++) {
+				uint8_t &r = *dst++;
+				uint8_t &g = *dst++;
+				uint8_t &b = *dst++;
+				uint8_t &a = *dst++;
+				if (binary_alpha) {
+					if (a == 0)
+						r = g = b = 0;
+				} else {
+					MultiplyAlpha(r, g, b, a);
+				}
+			}
 		}
 	}
 
@@ -695,6 +781,12 @@ Bitmap::Bitmap(const std::string& filename, bool transparent, uint32_t flags) {
 		return;
 	}
 
+#ifdef EASYRPG_SYMBIAN
+	if (transparent && SymbianUseA1555(pixels, w, h, flags)) {
+		format = SymbianA1555Format();
+		pixman_format = find_format(format);
+	}
+#endif
 	Init(w, h, (void *) NULL);
 
 	ConvertImage(w, h, pixels, transparent);
@@ -738,6 +830,12 @@ Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t f
 		return;
 	}
 
+#ifdef EASYRPG_SYMBIAN
+	if (transparent && SymbianUseA1555(pixels, w, h, flags)) {
+		format = SymbianA1555Format();
+		pixman_format = find_format(format);
+	}
+#endif
 	Init(w, h, (void *) NULL);
 
 	ConvertImage(w, h, pixels, transparent);
@@ -799,11 +897,16 @@ void Bitmap::SetClipRects(const Rect* aRects, int aCount) {
 	}
 
 	pixman_region32_t region;
-	pixman_region32_init(&region);
-	for (int index = 0; index < aCount; ++index) {
-		const Rect& rect = aRects[index];
-		if (!rect.IsEmpty())
-			pixman_region32_union_rect(&region, &region, rect.x, rect.y, rect.width, rect.height);
+	if (aCount == 1) {
+		const Rect& rect = aRects[0];
+		pixman_region32_init_rect(&region, rect.x, rect.y, rect.width, rect.height);
+	} else {
+		pixman_region32_init(&region);
+		for (int index = 0; index < aCount; ++index) {
+			const Rect& rect = aRects[index];
+			if (!rect.IsEmpty())
+				pixman_region32_union_rect(&region, &region, rect.x, rect.y, rect.width, rect.height);
+		}
 	}
 	pixman_image_set_clip_region32(bitmap, &region);
 	pixman_region32_fini(&region);
@@ -837,8 +940,13 @@ namespace {
 			return (pixman_image_t*) NULL;
 
 		if (!opacity.IsSplit()) {
-			pixman_color_t tcolor = {0, 0, 0, static_cast<uint16_t>(opacity.Value() << 8)};
-			return pixman_image_create_solid_fill(&tcolor);
+			static pixman_image_t* masks[256] = {};
+			const int value = std::max(0, std::min(255, opacity.Value()));
+			if (!masks[value]) {
+				pixman_color_t tcolor = {0, 0, 0, static_cast<uint16_t>(value << 8)};
+				masks[value] = pixman_image_create_solid_fill(&tcolor);
+			}
+			return masks[value] ? pixman_image_ref(masks[value]) : NULL;
 		}
 
 		pixman_image_t *mask = pixman_image_create_bits(PIXMAN_a8, 1, 2, (uint32_t*) NULL, 4);
@@ -869,12 +977,22 @@ void Bitmap::Blit(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity
 	if (opacity.IsTransparent())
 		return;
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashOpacity(signature, opacity);
 	if (SymbianRecordDraw(this, signature, Rect(x, y, src_rect.width, src_rect.height)))
 		return;
+	if (opacity.IsSplit()) {
+		const int split = std::max(0, std::min(src_rect.height, opacity.split));
+		if (split > 0 && opacity.top > 0)
+			Blit(x, y, src, Rect(src_rect.x, src_rect.y, src_rect.width, split), Opacity(opacity.top));
+		if (split < src_rect.height && opacity.bottom > 0)
+			Blit(x, y + split, src,
+				Rect(src_rect.x, src_rect.y + split, src_rect.width, src_rect.height - split),
+				Opacity(opacity.bottom));
+		return;
+	}
 #endif
 
 	pixman_image_t* mask = CreateMask(opacity, src_rect);
@@ -897,7 +1015,7 @@ void Bitmap::BlitFast(int x, int y, Bitmap const & src, Rect const & src_rect, O
 	if (opacity.IsTransparent())
 		return;
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianBlitFast);
+	unsigned int signature = SymbianDrawSignature(ESymbianBlitFast);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashOpacity(signature, opacity);
@@ -934,7 +1052,7 @@ void Bitmap::TiledBlit(int ox, int oy, Rect const& src_rect, Bitmap const& src, 
 	if (opacity.IsTransparent())
 		return;
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianTiledBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianTiledBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashRect(signature, dst_rect);
@@ -986,7 +1104,7 @@ void Bitmap::StretchBlit(Rect const& dst_rect, Bitmap const& src, Rect const& sr
 	if (opacity.IsTransparent())
 		return;
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianStretchBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianStretchBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashRect(signature, dst_rect);
@@ -1030,7 +1148,7 @@ void Bitmap::TransformBlit(Rect const& dst_rect, Bitmap const& src, Rect const& 
 	if (opacity.IsTransparent())
 		return;
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianTransformBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianTransformBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashRect(signature, dst_rect);
@@ -1078,7 +1196,7 @@ void Bitmap::WaverBlit(int x, int y, double zoom_x, double zoom_y, Bitmap const&
 	const int outputWidth = static_cast<int>(std::floor(src_rect.width * zoom_x));
 	const int outputHeight = static_cast<int>(std::floor(src_rect.height * zoom_y));
 	const int margin = static_cast<int>(std::ceil(std::fabs(2.0 * zoom_x * depth)));
-	unsigned long long signature = SymbianDrawSignature(ESymbianWaverBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianWaverBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashDouble(signature, zoom_x);
@@ -1138,10 +1256,17 @@ static pixman_color_t PixmanColor(const Color &color) {
 
 void Bitmap::Fill(const Color &color) {
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianFill);
+	unsigned int signature = SymbianDrawSignature(ESymbianFill);
 	signature = SymbianHashColor(signature, color);
 	if (SymbianRecordDraw(this, signature, GetRect()))
 		return;
+#endif
+#ifdef EASYRPG_SYMBIAN
+	if (bpp() == 2 && color.alpha >= 255) {
+		SymbianFill565(*this, GetRect(), SymbianColor565(color));
+		RefreshCallback();
+		return;
+	}
 #endif
 	pixman_color_t pcolor = PixmanColor(color);
 	Rect src_rect(0, 0, static_cast<uint16_t>(width()), static_cast<uint16_t>(height()));
@@ -1162,11 +1287,18 @@ void Bitmap::Fill(const Color &color) {
 
 void Bitmap::FillRect(Rect const& dst_rect, const Color &color) {
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianFillRect);
+	unsigned int signature = SymbianDrawSignature(ESymbianFillRect);
 	signature = SymbianHashRect(signature, dst_rect);
 	signature = SymbianHashColor(signature, color);
 	if (SymbianRecordDraw(this, signature, dst_rect))
 		return;
+#endif
+#ifdef EASYRPG_SYMBIAN
+	if (bpp() == 2 && color.alpha >= 255) {
+		SymbianFill565(*this, dst_rect, SymbianColor565(color));
+		RefreshCallback();
+		return;
+	}
 #endif
 	pixman_color_t pcolor = PixmanColor(color);
 	pixman_rectangle16_t rect = {
@@ -1182,9 +1314,14 @@ void Bitmap::FillRect(Rect const& dst_rect, const Color &color) {
 
 void Bitmap::Clear() {
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianClear);
+	unsigned int signature = SymbianDrawSignature(ESymbianClear);
 	if (SymbianRecordDraw(this, signature, GetRect())) {
 		SymbianRenderDamage::RequireFullPaint();
+		return;
+	}
+	if (bpp() == 2) {
+		SymbianFill565(*this, GetRect(), 0);
+		RefreshCallback();
 		return;
 	}
 #endif
@@ -1195,10 +1332,15 @@ void Bitmap::Clear() {
 
 void Bitmap::ClearRect(Rect const& dst_rect) {
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianClearRect);
+	unsigned int signature = SymbianDrawSignature(ESymbianClearRect);
 	signature = SymbianHashRect(signature, dst_rect);
 	if (SymbianRecordDraw(this, signature, dst_rect))
 		return;
+	if (bpp() == 2) {
+		SymbianFill565(*this, dst_rect, 0);
+		RefreshCallback();
+		return;
+	}
 #endif
 	pixman_color_t pcolor = {0, 0, 0, 0};
 	pixman_rectangle16_t rect = {
@@ -1213,20 +1355,15 @@ void Bitmap::ClearRect(Rect const& dst_rect) {
 	RefreshCallback();
 }
 
-// Hard light lookup table mapping source color to destination color
-static uint8_t hard_light_lookup[256][256];
-
-static void make_hard_light_lookup() {
-	for (int i = 0; i < 256; ++i) {
-		for (int j = 0; j < 256; ++j) {
-			int res = 0;
-			if (i <= 128)
-				res = (2 * i * j) / 255;
-			else
-				res = 255 - 2 * (255 - i) * (255 - j) / 255;
-			hard_light_lookup[i][j] = res > 255 ? 255 : res < 0 ? 0 : res;
-		}
-	}
+static uint8_t HardLightValue(int aSource, int aDestination) {
+	int result = aSource <= 128
+		? (2 * aSource * aDestination) / 255
+		: 255 - (2 * (255 - aSource) * (255 - aDestination)) / 255;
+	if (result < 0)
+		result = 0;
+	else if (result > 255)
+		result = 255;
+	return static_cast<uint8_t>(result);
 }
 
 void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, const Tone &tone, Opacity const& opacity) {
@@ -1237,7 +1374,7 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 		return;
 	}
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianToneBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianToneBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashTone(signature, tone);
@@ -1257,6 +1394,25 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 		x, y,
 		src_rect.width, src_rect.height);
 
+	const bool apply_color = tone.red != 128 || tone.green != 128 || tone.blue != 128;
+	static uint8_t red_lookup[256];
+	static uint8_t green_lookup[256];
+	static uint8_t blue_lookup[256];
+	static int cached_red = -1;
+	static int cached_green = -1;
+	static int cached_blue = -1;
+	if (apply_color &&
+		(cached_red != tone.red || cached_green != tone.green || cached_blue != tone.blue)) {
+		for (int value = 0; value < 256; ++value) {
+			red_lookup[value] = HardLightValue(tone.red, value);
+			green_lookup[value] = HardLightValue(tone.green, value);
+			blue_lookup[value] = HardLightValue(tone.blue, value);
+		}
+		cached_red = tone.red;
+		cached_green = tone.green;
+		cached_blue = tone.blue;
+	}
+
 #ifdef EASYRPG_SYMBIAN
 	if (bpp() == 2) {
 		int sat = 1024;
@@ -1265,28 +1421,17 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 		else if (tone.gray < 128)
 			sat = tone.gray * 8;
 
-		const bool apply_color = tone.red != 128 || tone.green != 128 || tone.blue != 128;
-		if (apply_color) {
-			static bool index_made_565 = false;
-			if (!index_made_565) {
-				make_hard_light_lookup();
-				index_made_565 = true;
-			}
-		}
-
+		Rect effect_rect(x, y, src_rect.width, src_rect.height);
+		effect_rect.Adjust(GetRect());
+		const bool multi_paint = SymbianRenderDamage::IsPainting() && SymbianRenderDamage::DirtyCount() > 1;
+		if (SymbianRenderDamage::IsPainting())
+			effect_rect.Adjust(SymbianRenderDamage::CurrentPaintRect());
 		uint8_t* base = static_cast<uint8_t*>(pixels());
-		for (int i = 0; i < src_rect.height; ++i) {
-			const int py = y + i;
-			if (py < 0 || py >= height())
-				continue;
+		for (int py = effect_rect.y; py < effect_rect.y + effect_rect.height; ++py) {
 			uint16_t* row = reinterpret_cast<uint16_t*>(base + py * pitch());
-			for (int j = 0; j < src_rect.width; ++j) {
-				const int px = x + j;
-				if (px < 0 || px >= width())
+			for (int px = effect_rect.x; px < effect_rect.x + effect_rect.width; ++px) {
+				if (multi_paint && !SymbianRenderDamage::ContainsDirtyPoint(px, py))
 					continue;
-				if (SymbianRenderDamage::IsPainting() && !SymbianRenderDamage::ContainsDirtyPoint(px, py))
-					continue;
-
 				const uint16_t pixel = row[px];
 				int red = (pixel >> 11) & 31;
 				int green = (pixel >> 5) & 63;
@@ -1306,9 +1451,9 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 				}
 
 				if (apply_color) {
-					red = hard_light_lookup[tone.red][red];
-					green = hard_light_lookup[tone.green][green];
-					blue = hard_light_lookup[tone.blue][blue];
+					red = red_lookup[red];
+					green = green_lookup[green];
+					blue = blue_lookup[blue];
 				}
 
 				row[px] = static_cast<uint16_t>(((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3));
@@ -1370,13 +1515,7 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 		}
 	}
 
-	if (tone.red != 128 || tone.green != 128 || tone.blue != 128) {
-		static bool index_made = false;
-		if (!index_made) {
-			make_hard_light_lookup();
-			index_made = true;
-		}
-
+	if (apply_color) {
 		int as = pixel_format.a.shift;
 		int rs = pixel_format.r.shift;
 		int gs = pixel_format.g.shift;
@@ -1400,9 +1539,9 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 				uint8_t g = (pixel >> gs) & 0xFF;
 				uint8_t b = (pixel >> bs) & 0xFF;
 
-				int red = hard_light_lookup[tone.red][r];
-				int green = hard_light_lookup[tone.green][g];
-				int blue = hard_light_lookup[tone.blue][b];
+				int red = red_lookup[r];
+				int green = green_lookup[g];
+				int blue = blue_lookup[b];
 				pixels[j] = ((uint32_t) red << rs) | ((uint32_t) green << gs) | ((uint32_t) blue << bs) |
 							((uint32_t) a << as);
 			}
@@ -1419,7 +1558,7 @@ void Bitmap::BlendBlit(int x, int y, Bitmap const& src, Rect const& src_rect, co
 		return;
 	}
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianBlendBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianBlendBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashColor(signature, color);
@@ -1460,7 +1599,7 @@ void Bitmap::FlipBlit(int x, int y, Bitmap const& src, Rect const& src_rect, boo
 		return;
 	}
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianFlipBlit);
+	unsigned int signature = SymbianDrawSignature(ESymbianFlipBlit);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashInt(signature, horizontal ? 1 : 0);
@@ -1515,7 +1654,7 @@ void Bitmap::Flip(const Rect& dst_rect, bool horizontal, bool vertical) {
 
 void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my, Color const& color) {
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianMaskedColor);
+	unsigned int signature = SymbianDrawSignature(ESymbianMaskedColor);
 	signature = SymbianHashBitmap(signature, mask);
 	signature = SymbianHashRect(signature, dst_rect);
 	signature = SymbianHashInt(signature, mx);
@@ -1546,7 +1685,7 @@ void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my
 
 void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my, Bitmap const& src, int sx, int sy) {
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianMaskedBitmap);
+	unsigned int signature = SymbianDrawSignature(ESymbianMaskedBitmap);
 	signature = SymbianHashBitmap(signature, mask);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, dst_rect);
@@ -1569,7 +1708,7 @@ void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my
 
 void Bitmap::Blit2x(Rect const& dst_rect, Bitmap const& src, Rect const& src_rect) {
 #ifdef EASYRPG_SYMBIAN
-	unsigned long long signature = SymbianDrawSignature(ESymbianBlit2x);
+	unsigned int signature = SymbianDrawSignature(ESymbianBlit2x);
 	signature = SymbianHashBitmap(signature, src);
 	signature = SymbianHashRect(signature, src_rect);
 	signature = SymbianHashRect(signature, dst_rect);

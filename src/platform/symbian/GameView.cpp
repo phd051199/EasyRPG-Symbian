@@ -10,21 +10,24 @@
 #include <gdi.h>
 #include <w32std.h>
 
-#include "easyrpgsymbian/DisplaySurface.h"
-#include "easyrpgsymbian/GameLocator.h"
-#include "easyrpgsymbian/GameView.h"
-#include "easyrpgsymbian/PerfOverlay.h"
-#include "easyrpgsymbian/PlayerRuntime.h"
-#include "easyrpgsymbian/SymbianAppUi.h"
-#include "easyrpgsymbian/SymbianLogBridge.h"
-#include "easyrpgsymbian/ZipVfs.h"
+#include "DisplaySurface.h"
+#include "GameLocator.h"
+#include "GameView.h"
+#include "PerfOverlay.h"
+#include "PlayerRuntime.h"
+#include "AppUi.h"
+#include "LogBridge.h"
+#include "ZipVfs.h"
 
 namespace
 {
 const TInt KGameWidth = 320;
 const TInt KGameHeight = 240;
-_LIT(KSingleListItemFormat, "\t%S");
+const TInt KMaxMetadataLdbSize = 4 * 1024 * 1024;
+_LIT(KDoubleListItemFormat, "\t%S\t%S");
 _LIT(KNoGamesFound, "No games found");
+_LIT(KEmptyListSubtitle, "");
+_LIT8(KLcfDatabaseHeader, "LcfDataBase");
 _LIT8(KTargetArchivePassword, "nbhzvn");
 
 void CopyListText(const TDesC& aSource, TDes& aTarget)
@@ -38,6 +41,163 @@ void CopyListText(const TDesC& aSource, TDes& aTarget)
             aTarget[index] = ' ';
         }
     }
+}
+
+TBool ReadLcfInt(const TDesC8& aBytes,
+                 TInt& aPosition,
+                 TInt aEnd,
+                 TInt& aValue)
+{
+    aValue = 0;
+    TInt count = 0;
+    while (aPosition < aEnd && count < 5)
+    {
+        const TUint8 value = aBytes[aPosition++];
+        if (aValue > (KMaxTInt >> 7))
+            return EFalse;
+        aValue = (aValue << 7) | (value & 0x7f);
+        ++count;
+        if ((value & 0x80) == 0)
+            return ETrue;
+    }
+    return EFalse;
+}
+
+TInt DetectSystemEngine(const TDesC8& aBytes, TInt aStart, TInt aEnd)
+{
+    TInt position = aStart;
+    while (position < aEnd)
+    {
+        TInt fieldId = 0;
+        if (!ReadLcfInt(aBytes, position, aEnd, fieldId))
+            return 0;
+        if (fieldId == 0)
+            return 2000;
+
+        TInt fieldLength = 0;
+        if (!ReadLcfInt(aBytes, position, aEnd, fieldLength) ||
+            fieldLength < 0 || position > aEnd - fieldLength)
+            return 0;
+
+        const TInt fieldEnd = position + fieldLength;
+        if (fieldId == 0x0a)
+        {
+            TInt ldbId = 0;
+            if (!ReadLcfInt(aBytes, position, fieldEnd, ldbId))
+                return 0;
+            return ldbId == 2003 ? 2003 : 2000;
+        }
+        position = fieldEnd;
+    }
+    return 2000;
+}
+
+TInt DetectRpgMakerVersionL(CZipVfs& aResources)
+{
+    HBufC8* data = aResources.ReadFileLC(_L("RPG_RT.ldb"),
+                                          KMaxMetadataLdbSize);
+    const TPtrC8 bytes(*data);
+
+    TInt position = 0;
+    TInt headerLength = 0;
+    TInt version = 0;
+    if (ReadLcfInt(bytes, position, bytes.Length(), headerLength) &&
+        headerLength == KLcfDatabaseHeader().Length() &&
+        position <= bytes.Length() - headerLength &&
+        bytes.Mid(position, headerLength).Compare(KLcfDatabaseHeader) == 0)
+    {
+        position += headerLength;
+        while (position < bytes.Length())
+        {
+            TInt fieldId = 0;
+            if (!ReadLcfInt(bytes, position, bytes.Length(), fieldId))
+                break;
+            if (fieldId == 0)
+                break;
+
+            TInt fieldLength = 0;
+            if (!ReadLcfInt(bytes, position, bytes.Length(), fieldLength) ||
+                fieldLength < 0 || position > bytes.Length() - fieldLength)
+                break;
+
+            const TInt fieldEnd = position + fieldLength;
+            if (fieldId == 0x16)
+            {
+                version = DetectSystemEngine(bytes, position, fieldEnd);
+                break;
+            }
+            position = fieldEnd;
+        }
+    }
+
+    CleanupStack::PopAndDestroy(data);
+    return version;
+}
+
+void ReadGameTitleL(CZipVfs& aResources, TDes& aTitle)
+{
+    HBufC8* data = aResources.ReadFileLC(_L("RPG_RT.ini"), 4096);
+    const TPtrC8 bytes(*data);
+    _LIT8(KGameTitleKey, "GameTitle=");
+    const TInt keyPosition = bytes.Find(KGameTitleKey);
+    if (keyPosition != KErrNotFound)
+    {
+        TBuf<KMaxFileName> title;
+        TInt position = keyPosition + KGameTitleKey().Length();
+        while (position < bytes.Length() && title.Length() < title.MaxLength())
+        {
+            const TUint8 value = bytes[position++];
+            if (value == '\r' || value == '\n')
+                break;
+            if (value < 0x20 || value > 0x7e)
+            {
+                title.Zero();
+                break;
+            }
+            title.Append(static_cast<TUint16>(value));
+        }
+        if (title.Length() > 0)
+            CopyListText(title, aTitle);
+    }
+    CleanupStack::PopAndDestroy(data);
+}
+
+void ReadGameMetadataL(RFs& aFs,
+                       const TDesC& aArchivePath,
+                       TDes& aTitle,
+                       TInt& aVersion)
+{
+    CZipVfs* resources = CZipVfs::OpenL(aFs,
+                                        aArchivePath,
+                                        KTargetArchivePassword);
+    CleanupStack::PushL(resources);
+    TRAP_IGNORE(ReadGameTitleL(*resources, aTitle));
+    TRAP_IGNORE(aVersion = DetectRpgMakerVersionL(*resources));
+    CleanupStack::PopAndDestroy(resources);
+}
+
+void FormatGameSubtitle(RFs& aFs,
+                        const TDesC& aArchivePath,
+                        TInt aVersion,
+                        TDes& aSubtitle)
+{
+    TEntry entry;
+    TInt64 bytes = 0;
+    if (aFs.Entry(aArchivePath, entry) == KErrNone && !entry.IsDir())
+        bytes = entry.iSize;
+
+    const TInt64 tenths = (bytes * 10 + 524288) / 1048576;
+    const TInt whole = static_cast<TInt>(tenths / 10);
+    const TInt fraction = static_cast<TInt>(tenths % 10);
+    if (aVersion == 2000 || aVersion == 2003)
+        aSubtitle.Format(_L("%d.%d MB (RPG Maker %d)"),
+                         whole,
+                         fraction,
+                         aVersion);
+    else
+        aSubtitle.Format(_L("%d.%d MB (RPG Maker 2000/2003)"),
+                         whole,
+                         fraction);
 }
 }
 
@@ -75,7 +235,7 @@ void CGameView::ConstructL(const TRect& aRect)
         TCallBack(&CGameView::StartGameCallback, this),
         CActive::EPriorityHigh);
 
-    iListBox = new (ELeave) CAknSingleStyleListBox;
+    iListBox = new (ELeave) CAknDoubleStyleListBox;
     iListBox->SetContainerWindowL(*this);
     iListBox->ConstructL(this, EAknListBoxSelectionList);
     iListBox->SetListBoxObserver(this);
@@ -148,15 +308,27 @@ void CGameView::BuildGameListL()
         TBuf<KMaxFileName> title;
         CopyListText((*displayNames)[index], title);
 
-        TBuf<KMaxFileName + 8> item;
-        item.Format(KSingleListItemFormat, &title);
+        TInt version = 0;
+        TRAP_IGNORE(ReadGameMetadataL(iFs,
+                                      (*iArchivePaths)[index],
+                                      title,
+                                      version));
+
+        TBuf<64> subtitle;
+        FormatGameSubtitle(iFs,
+                           (*iArchivePaths)[index],
+                           version,
+                           subtitle);
+
+        TBuf<KMaxFileName + 80> item;
+        item.Format(KDoubleListItemFormat, &title, &subtitle);
         iListItems->AppendL(item);
     }
 
     if (iListItems->Count() == 0)
     {
         TBuf<64> item;
-        item.Format(KSingleListItemFormat, &KNoGamesFound);
+        item.Format(KDoubleListItemFormat, &KNoGamesFound, &KEmptyListSubtitle);
         iListItems->AppendL(item);
     }
 
@@ -178,20 +350,24 @@ void CGameView::StartSelectedGameL()
     TFileName selectedArchive;
     selectedArchive.Copy((*iArchivePaths)[index]);
 
-    CSymbianDisplaySurface* displaySurface =
-        CSymbianDisplaySurface::NewL(TSize(KGameWidth, KGameHeight));
+    CDisplaySurface* displaySurface =
+        CDisplaySurface::NewL(TSize(KGameWidth, KGameHeight));
     CleanupStack::PushL(displaySurface);
 
+    EasyRpgLogDebug("zip open begin");
     CZipVfs* resources = CZipVfs::OpenL(iFs,
                                         selectedArchive,
                                         KTargetArchivePassword);
+    EasyRpgLogDebug("zip open done");
     CleanupStack::PushL(resources);
 
+    EasyRpgLogDebug("runtime create begin");
     CPlayerRuntime* runtime = CPlayerRuntime::NewL(resources,
                                                    selectedArchive,
                                                    *displaySurface);
+    EasyRpgLogDebug("runtime create done");
     CleanupStack::PushL(runtime);
-    EasyRpgSymbianLogDebug("game runtime ready");
+    EasyRpgLogDebug("game runtime ready");
 
     if (iListBox->ScrollBarFrame())
     {
@@ -223,9 +399,9 @@ void CGameView::StartSelectedGameL()
 
     if (iForeground) {
         iFrameTimer->Start();
-        EasyRpgSymbianLogDebug("frame timer started");
+        EasyRpgLogDebug("frame timer started");
     }
-    EasyRpgSymbianLogDebug("game start returned");
+    EasyRpgLogDebug("game start returned");
 }
 
 void CGameView::StopGame()
@@ -271,7 +447,7 @@ void CGameView::ShowLoadErrorL(TInt aError)
 
 void CGameView::SetForeground(TBool aForeground)
 {
-    EasyRpgSymbianLogDebug(aForeground ? "foreground on" : "foreground off");
+    EasyRpgLogDebug(aForeground ? "foreground on" : "foreground off");
     iForeground = aForeground;
 
     if (!iRuntime || !iFrameTimer)
@@ -382,7 +558,12 @@ void CGameView::Draw(const TRect& aRect) const
                       &iDisplaySurface->Bitmap(),
                       overlayRect);
         }
-        gc.BitBlt(destination + overlayPosition, &iPerfOverlay->Bitmap());
+        const TSize overlaySize = iPerfOverlay->Bitmap().SizeInPixels();
+        gc.BitBltMasked(destination + overlayPosition,
+                        &iPerfOverlay->Bitmap(),
+                        TRect(TPoint(0, 0), overlaySize),
+                        &iPerfOverlay->MaskBitmap(),
+                        EFalse);
         iPerfOverlay->ClearDirty();
     }
 }
@@ -471,7 +652,7 @@ void CGameView::HandleListBoxEventL(CEikListBox*, TListBoxEvent aEventType)
          aEventType == EEventItemClicked) &&
         !iStartGameCallback->IsActive())
     {
-        EasyRpgSymbianLogDebug("game start deferred");
+        EasyRpgLogDebug("game start deferred");
         iStartGameCallback->CallBack();
     }
 }
@@ -482,14 +663,14 @@ TInt CGameView::StartGameCallback(TAny* aPtr)
     if (!self || self->iRuntime)
         return KErrNone;
 
-    EasyRpgSymbianLogDebug("game start callback");
+    EasyRpgLogDebug("game start callback");
     TRAPD(error, self->StartSelectedGameL());
     if (error != KErrNone)
     {
         self->iGameRoot.Zero();
         TRAP_IGNORE(self->ShowLoadErrorL(error));
     }
-    EasyRpgSymbianLogDebug("game start callback returned");
+    EasyRpgLogDebug("game start callback returned");
     return KErrNone;
 }
 
@@ -572,7 +753,37 @@ TUint32 CGameView::MapPlayerKey(const TKeyEvent& aKeyEvent) const
     case 'a':
     case 'A':
         return CPlayerRuntime::EKeyShift;
+    case '0':
+        return CPlayerRuntime::EKeyN0;
     case '1':
+        return CPlayerRuntime::EKeyN1;
+    case '2':
+        return CPlayerRuntime::EKeyN2;
+    case '3':
+        return CPlayerRuntime::EKeyN3;
+    case '4':
+        return CPlayerRuntime::EKeyN4;
+    case '5':
+        return CPlayerRuntime::EKeyN5;
+    case '6':
+        return CPlayerRuntime::EKeyN6;
+    case '7':
+        return CPlayerRuntime::EKeyN7;
+    case '8':
+        return CPlayerRuntime::EKeyN8;
+    case '9':
+        return CPlayerRuntime::EKeyN9;
+    case '+':
+        return CPlayerRuntime::EKeyPlus;
+    case '-':
+        return CPlayerRuntime::EKeyMinus;
+    case '*':
+        return CPlayerRuntime::EKeyMultiply;
+    case '/':
+        return CPlayerRuntime::EKeyDivide;
+    case '.':
+        return CPlayerRuntime::EKeyPeriod;
+    case '#':
         return CPlayerRuntime::EKeyDebug;
     default:
         break;

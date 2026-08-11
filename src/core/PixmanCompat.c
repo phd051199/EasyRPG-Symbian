@@ -79,6 +79,30 @@ static uint32_t ReadPixel32(bits_image_t* image, int x, int y) {
         b = (b << 3) | (b >> 2);
         return SymbianPremultiplyRgb(r, g, b, SymbianReadAlpha(image, x, y));
     }
+    case PIXMAN_a1r5g5b5:
+    case PIXMAN_x1r5g5b5: {
+        uint16_t p = ((uint16_t*)row)[x];
+        uint8_t a = image->format == PIXMAN_a1r5g5b5 && !(p & 0x8000u) ? 0 : 255;
+        uint32_t r = (p >> 10) & 31u;
+        uint32_t g = (p >> 5) & 31u;
+        uint32_t b = p & 31u;
+        r = (r << 3) | (r >> 2);
+        g = (g << 3) | (g >> 2);
+        b = (b << 3) | (b >> 2);
+        return SymbianPremultiplyRgb(r, g, b, a);
+    }
+    case PIXMAN_a1b5g5r5:
+    case PIXMAN_x1b5g5r5: {
+        uint16_t p = ((uint16_t*)row)[x];
+        uint8_t a = image->format == PIXMAN_a1b5g5r5 && !(p & 0x8000u) ? 0 : 255;
+        uint32_t b = (p >> 10) & 31u;
+        uint32_t g = (p >> 5) & 31u;
+        uint32_t r = p & 31u;
+        r = (r << 3) | (r >> 2);
+        g = (g << 3) | (g >> 2);
+        b = (b << 3) | (b >> 2);
+        return SymbianPremultiplyRgb(r, g, b, a);
+    }
     default:
         return 0;
     }
@@ -137,6 +161,24 @@ static void WritePixel32(bits_image_t* image, int x, int y, uint32_t p) {
         uint16_t g = (uint16_t)((p >> 10) & 63);
         uint16_t b = (uint16_t)((p >> 3) & 31);
         ((uint16_t*)row)[x] = (uint16_t)((b << 11) | (g << 5) | r);
+        break;
+    }
+    case PIXMAN_a1r5g5b5:
+    case PIXMAN_x1r5g5b5: {
+        uint16_t r = (uint16_t)((p >> 19) & 31u);
+        uint16_t g = (uint16_t)((p >> 11) & 31u);
+        uint16_t b = (uint16_t)((p >> 3) & 31u);
+        uint16_t a = image->format == PIXMAN_x1r5g5b5 || (p >> 24) >= 128u ? 0x8000u : 0;
+        ((uint16_t*)row)[x] = (uint16_t)(a | (r << 10) | (g << 5) | b);
+        break;
+    }
+    case PIXMAN_a1b5g5r5:
+    case PIXMAN_x1b5g5r5: {
+        uint16_t r = (uint16_t)((p >> 19) & 31u);
+        uint16_t g = (uint16_t)((p >> 11) & 31u);
+        uint16_t b = (uint16_t)((p >> 3) & 31u);
+        uint16_t a = image->format == PIXMAN_x1b5g5r5 || (p >> 24) >= 128u ? 0x8000u : 0;
+        ((uint16_t*)row)[x] = (uint16_t)(a | (b << 10) | (g << 5) | r);
         break;
     }
     default:
@@ -232,6 +274,28 @@ static force_inline uint16_t SymbianPack565(uint32_t value) {
     return (uint16_t)((((value >> 19) & 31u) << 11) |
                       (((value >> 10) & 63u) << 5) |
                       ((value >> 3) & 31u));
+}
+
+static force_inline uint16_t SymbianA1555To565(uint16_t value) {
+    uint16_t r = (uint16_t)((value >> 10) & 31u);
+    uint16_t g = (uint16_t)((value >> 5) & 31u);
+    uint16_t b = (uint16_t)(value & 31u);
+    return (uint16_t)((r << 11) | (((g << 1) | (g >> 4)) << 5) | b);
+}
+
+static force_inline uint32_t SymbianExpandA1555(uint16_t value) {
+    uint32_t r;
+    uint32_t g;
+    uint32_t b;
+    if ((value & 0x8000u) == 0)
+        return 0;
+    r = (value >> 10) & 31u;
+    g = (value >> 5) & 31u;
+    b = value & 31u;
+    r = (r << 3) | (r >> 2);
+    g = (g << 3) | (g >> 2);
+    b = (b << 3) | (b >> 2);
+    return 0xff000000u | (r << 16) | (g << 8) | b;
 }
 
 static force_inline uint16_t SymbianOver565(uint32_t src, uint16_t dest) {
@@ -492,6 +556,102 @@ static void SymbianFastOver8888SolidTo565(pixman_implementation_t* imp, pixman_c
     }
 }
 
+static void SymbianFastOverA1555To565(pixman_implementation_t* imp, pixman_composite_info_t* info) {
+    PIXMAN_COMPOSITE_ARGS(info);
+    uint16_t* dstLine;
+    uint16_t* srcLine;
+    int dstStride;
+    int srcStride;
+    (void)imp;
+    dstStride = dest_image->bits.rowstride * 2;
+    srcStride = src_image->bits.rowstride * 2;
+    dstLine = SymbianLine16(&dest_image->bits, dest_x, dest_y);
+    srcLine = SymbianLine16(&src_image->bits, src_x, src_y);
+    while (height-- > 0) {
+        uint16_t* dst = dstLine;
+        uint16_t* src = srcLine;
+        int32_t w = width;
+        dstLine += dstStride;
+        srcLine += srcStride;
+        while (w-- > 0) {
+            uint16_t s = *src++;
+            if (s & 0x8000u)
+                *dst = SymbianA1555To565(s);
+            ++dst;
+        }
+    }
+}
+
+static void SymbianFastOverA1555A8To565(pixman_implementation_t* imp, pixman_composite_info_t* info) {
+    PIXMAN_COMPOSITE_ARGS(info);
+    uint16_t* dstLine;
+    uint16_t* srcLine;
+    uint8_t* maskLine;
+    int dstStride;
+    int srcStride;
+    int maskStride;
+    (void)imp;
+    dstStride = dest_image->bits.rowstride * 2;
+    srcStride = src_image->bits.rowstride * 2;
+    maskStride = mask_image->bits.rowstride * 4;
+    dstLine = SymbianLine16(&dest_image->bits, dest_x, dest_y);
+    srcLine = SymbianLine16(&src_image->bits, src_x, src_y);
+    maskLine = SymbianLine8(&mask_image->bits, mask_x, mask_y);
+    while (height-- > 0) {
+        uint16_t* dst = dstLine;
+        uint16_t* src = srcLine;
+        uint8_t* mask = maskLine;
+        int32_t w = width;
+        dstLine += dstStride;
+        srcLine += srcStride;
+        maskLine += maskStride;
+        while (w-- > 0) {
+            uint16_t s = *src++;
+            uint8_t m = *mask++;
+            if ((s & 0x8000u) && m != 0) {
+                if (m == 255)
+                    *dst = SymbianA1555To565(s);
+                else
+                    *dst = SymbianOver565(SymbianIn(SymbianExpandA1555(s), m), *dst);
+            }
+            ++dst;
+        }
+    }
+}
+
+static void SymbianFastOverA1555SolidTo565(pixman_implementation_t* imp, pixman_composite_info_t* info) {
+    PIXMAN_COMPOSITE_ARGS(info);
+    uint32_t mask = _pixman_image_get_solid(imp, mask_image, PIXMAN_a8r8g8b8);
+    uint8_t maskAlpha = (uint8_t)(mask >> 24);
+    uint16_t* dstLine;
+    uint16_t* srcLine;
+    int dstStride;
+    int srcStride;
+    if (maskAlpha == 0)
+        return;
+    dstStride = dest_image->bits.rowstride * 2;
+    srcStride = src_image->bits.rowstride * 2;
+    dstLine = SymbianLine16(&dest_image->bits, dest_x, dest_y);
+    srcLine = SymbianLine16(&src_image->bits, src_x, src_y);
+    while (height-- > 0) {
+        uint16_t* dst = dstLine;
+        uint16_t* src = srcLine;
+        int32_t w = width;
+        dstLine += dstStride;
+        srcLine += srcStride;
+        while (w-- > 0) {
+            uint16_t s = *src++;
+            if (s & 0x8000u) {
+                if (maskAlpha == 255)
+                    *dst = SymbianA1555To565(s);
+                else
+                    *dst = SymbianOver565(SymbianIn(SymbianExpandA1555(s), maskAlpha), *dst);
+            }
+            ++dst;
+        }
+    }
+}
+
 static void SymbianFastOver565To565(pixman_implementation_t* imp, pixman_composite_info_t* info) {
     PIXMAN_COMPOSITE_ARGS(info);
     uint16_t* dstLine;
@@ -671,6 +831,34 @@ static void SymbianFastSolidFill(pixman_implementation_t* imp, pixman_composite_
                 width,
                 height,
                 src);
+}
+
+static const pixman_fast_path_t SymbianFastPaths[] = {
+    PIXMAN_STD_FAST_PATH(OVER, a8r8g8b8, null, a8r8g8b8, SymbianFastOver8888),
+    PIXMAN_STD_FAST_PATH(OVER, a8r8g8b8, a8, a8r8g8b8, SymbianFastOver8888A8),
+    PIXMAN_STD_FAST_PATH(OVER, a8r8g8b8, solid, a8r8g8b8, SymbianFastOver8888Solid),
+    PIXMAN_STD_FAST_PATH(OVER, solid, null, a8r8g8b8, SymbianFastOverSolid),
+    PIXMAN_STD_FAST_PATH(OVER, solid, a8, a8r8g8b8, SymbianFastOverSolidA8),
+    PIXMAN_STD_FAST_PATH(OVER, a8r8g8b8, null, r5g6b5, SymbianFastOver8888To565),
+    PIXMAN_STD_FAST_PATH(OVER, a8r8g8b8, a8, r5g6b5, SymbianFastOver8888A8To565),
+    PIXMAN_STD_FAST_PATH(OVER, a8r8g8b8, solid, r5g6b5, SymbianFastOver8888SolidTo565),
+    PIXMAN_STD_FAST_PATH(OVER, a1r5g5b5, null, r5g6b5, SymbianFastOverA1555To565),
+    PIXMAN_STD_FAST_PATH(OVER, a1r5g5b5, a8, r5g6b5, SymbianFastOverA1555A8To565),
+    PIXMAN_STD_FAST_PATH(OVER, a1r5g5b5, solid, r5g6b5, SymbianFastOverA1555SolidTo565),
+    PIXMAN_STD_FAST_PATH(OVER, r5g6b5, null, r5g6b5, SymbianFastOver565To565),
+    PIXMAN_STD_FAST_PATH(OVER, r5g6b5, a8, r5g6b5, SymbianFastOver565A8To565),
+    PIXMAN_STD_FAST_PATH(OVER, r5g6b5, solid, r5g6b5, SymbianFastOver565SolidTo565),
+    PIXMAN_STD_FAST_PATH(OVER, solid, null, r5g6b5, SymbianFastOverSolidTo565),
+    PIXMAN_STD_FAST_PATH(OVER, solid, a8, r5g6b5, SymbianFastOverSolidA8To565),
+    PIXMAN_STD_FAST_PATH(SRC, solid, null, r5g6b5, SymbianFastSrcSolidTo565),
+    PIXMAN_STD_FAST_PATH(SRC, r5g6b5, null, r5g6b5, SymbianFastSrcMemcpy),
+    PIXMAN_STD_FAST_PATH(SRC, a8r8g8b8, null, a8r8g8b8, SymbianFastSrcMemcpy),
+    PIXMAN_STD_FAST_PATH(SRC, solid, null, a8r8g8b8, SymbianFastSolidFill),
+    { PIXMAN_OP_NONE }
+};
+
+pixman_implementation_t* _pixman_implementation_create_symbian_fast_path(pixman_implementation_t* fallback) {
+    return _pixman_implementation_create(fallback, SymbianFastPaths);
 }
 
 void _pixman_setup_combiner_functions_float(pixman_implementation_t* imp) {

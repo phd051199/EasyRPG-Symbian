@@ -1,4 +1,4 @@
-#include "easyrpgsymbian/GohuFont.h"
+#include "GohuFont.h"
 
 namespace {
 const unsigned char KGohuGlyphRows[] =

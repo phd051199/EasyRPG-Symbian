@@ -7,20 +7,37 @@
 
 namespace {
 bool gLogStarted = false;
+FILE* gLog = NULL;
+
+FILE* LogFile() {
+    if (gLog)
+        return gLog;
+    gLog = std::fopen("C:\\Data\\EasyRPG\\easyrpg.log", gLogStarted ? "a" : "w");
+    if (gLog)
+        gLogStarted = true;
+    return gLog;
+}
+
+void CloseLog() {
+    if (!gLog)
+        return;
+    std::fflush(gLog);
+    std::fclose(gLog);
+    gLog = NULL;
+}
 
 void WriteLine(const char* prefix, const char* message) {
     if (prefix)
         std::fprintf(stderr, "%s", prefix);
     std::fprintf(stderr, "%s\n", message);
 
-    FILE* log = std::fopen("C:\\Data\\EasyRPG\\easyrpg.log", gLogStarted ? "a" : "w");
+    FILE* log = LogFile();
     if (!log)
         return;
     if (prefix)
         std::fprintf(log, "%s", prefix);
     std::fprintf(log, "%s\n", message);
-    std::fclose(log);
-    gLogStarted = true;
+    std::fflush(log);
 }
 
 void PrintLine(const char* prefix, const char* fmt, va_list ap) {
@@ -32,13 +49,13 @@ void PrintLine(const char* prefix, const char* fmt, va_list ap) {
 }
 }
 
-extern "C" void EasyRpgSymbianLogDebug(const char* message) {
+extern "C" void EasyRpgLogDebug(const char* message) {
     if (message)
-        WriteLine("symbian: ", message);
+        WriteLine("easyrpg: ", message);
 }
 
 namespace Output {
-void Quit() {}
+void Quit() { CloseLog(); }
 bool TakeScreenshot() { return false; }
 bool TakeScreenshot(std::string const&) { return false; }
 bool TakeScreenshot(std::ostream&) { return false; }

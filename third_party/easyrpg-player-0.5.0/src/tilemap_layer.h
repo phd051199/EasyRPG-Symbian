@@ -159,7 +159,7 @@ private:
 	bool symbian_has_animated_ab = false;
 	bool symbian_has_animated_c = false;
 	void SymbianTouch();
-	unsigned long long SymbianSignature(int z_order) const;
+	unsigned int SymbianSignature(int z_order) const;
 #endif
 };
 

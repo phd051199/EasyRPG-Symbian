@@ -1,5 +1,5 @@
-#include "easyrpgsymbian/SymbianApplication.h"
-#include "easyrpgsymbian/SymbianDocument.h"
+#include "Application.h"
+#include "Document.h"
 
 CApaDocument* CEasyRpgApplication::CreateDocumentL()
 {
@@ -8,5 +8,5 @@ CApaDocument* CEasyRpgApplication::CreateDocumentL()
 
 TUid CEasyRpgApplication::AppDllUid() const
 {
-    return KUidEasyRpgSymbian;
+    return KUidEasyRpg;
 }

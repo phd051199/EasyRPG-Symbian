@@ -1,8 +1,9 @@
 #include <zlib.h>
 
-#include "easyrpgsymbian/CoreZipCrypto.h"
-#include "easyrpgsymbian/Encoding.h"
-#include "easyrpgsymbian/ZipVfs.h"
+#include "CoreZipCrypto.h"
+#include "Encoding.h"
+#include "LogBridge.h"
+#include "ZipVfs.h"
 
 namespace
 {
@@ -92,9 +93,27 @@ void DecodeArchiveNameL(const TDesC8& aRawName,
     if (!usedUnicodeExtra)
     {
         if (aFlags & KFlagUtf8)
+        {
             TEncoding::Utf8ToUnicodeL(aRawName, aDestination);
+        }
         else
-            TEncoding::ShiftJisToUnicodeL(aRawName, aDestination);
+        {
+            TBool hasNonAscii = EFalse;
+            for (TInt index = 0; index < aRawName.Length(); ++index)
+            {
+                if (aRawName[index] >= 0x80)
+                {
+                    hasNonAscii = ETrue;
+                    break;
+                }
+            }
+
+            TInt utf8Error = KErrCorrupt;
+            if (hasNonAscii)
+                TRAP(utf8Error, TEncoding::Utf8ToUnicodeL(aRawName, aDestination));
+            if (!hasNonAscii || utf8Error != KErrNone)
+                TEncoding::ShiftJisToUnicodeL(aRawName, aDestination);
+        }
     }
 }
 
@@ -152,6 +171,12 @@ void InflateRawL(const TDesC8& aSource, TDes8& aDestination)
         User::Leave(KErrCorrupt);
 
     aDestination.SetLength(aDestination.MaxLength());
+}
+
+void CleanupInflate(TAny* aPointer)
+{
+    if (aPointer)
+        inflateEnd(static_cast<z_stream*>(aPointer));
 }
 }
 
@@ -231,8 +256,12 @@ void CZipVfs::ConstructL(const TDesC& aArchivePath, const TDesC8& aPassword)
                                      iArchivePath,
                                      EFileRead | EFileShareReadersOnly));
 
+    EasyRpgLogDebug("zip index begin");
     BuildIndexL();
+    EasyRpgLogDebug("zip index done");
+    EasyRpgLogDebug("zip root begin");
     ResolveProjectRootL();
+    EasyRpgLogDebug("zip root done");
 }
 
 CZipVfs::~CZipVfs()
@@ -309,8 +338,22 @@ void CZipVfs::BuildIndexL()
 
     TInt cursor = 0;
     TInt entryNumber = 0;
+    EasyRpgLogDebug("zip central ready");
     for (entryNumber = 0; entryNumber < totalEntries; ++entryNumber)
     {
+        if (entryNumber == 64) EasyRpgLogDebug("zip index 64");
+        if (entryNumber == 128) EasyRpgLogDebug("zip index 128");
+        if (entryNumber == 192) EasyRpgLogDebug("zip index 192");
+        if (entryNumber == 256) EasyRpgLogDebug("zip index 256");
+        if (entryNumber == 320) EasyRpgLogDebug("zip index 320");
+        if (entryNumber == 384) EasyRpgLogDebug("zip index 384");
+        if (entryNumber == 448) EasyRpgLogDebug("zip index 448");
+        if (entryNumber == 512) EasyRpgLogDebug("zip index 512");
+        if (entryNumber == 1024) EasyRpgLogDebug("zip index 1024");
+        if (entryNumber == 1536) EasyRpgLogDebug("zip index 1536");
+        if (entryNumber == 2048) EasyRpgLogDebug("zip index 2048");
+        if (entryNumber == 2560) EasyRpgLogDebug("zip index 2560");
+        if (entryNumber == 3072) EasyRpgLogDebug("zip index 3072");
         if (cursor > centralSize - 46)
             User::Leave(KErrCorrupt);
         const TUint8* header = centralBytes.Ptr() + cursor;
@@ -526,6 +569,140 @@ HBufC8* CZipVfs::ReadFileLC(const TDesC& aRelativePath, TInt aMaxBytes) const
     return DecodeEntryLC(*entry, aMaxBytes);
 }
 
+TInt CZipVfs::EntryDataOffsetL(const CZipVfsEntry& aEntry) const
+{
+    TBuf8<30> localHeader;
+    User::LeaveIfError(iArchive.Read(static_cast<TInt>(aEntry.iLocalHeaderOffset),
+                                    localHeader,
+                                    localHeader.MaxLength()));
+    if (localHeader.Length() != localHeader.MaxLength() ||
+        Read32(localHeader.Ptr()) != KLocalHeaderSignature)
+        User::Leave(KErrCorrupt);
+
+    const TUint16 localNameLength = Read16(localHeader.Ptr() + 26);
+    const TUint16 localExtraLength = Read16(localHeader.Ptr() + 28);
+    const TUint32 dataOffset32 = aEntry.iLocalHeaderOffset + 30u +
+                                 localNameLength + localExtraLength;
+
+    TInt archiveSize = 0;
+    User::LeaveIfError(iArchive.Size(archiveSize));
+    if (dataOffset32 > static_cast<TUint32>(archiveSize) ||
+        aEntry.iCompressedSize > static_cast<TUint32>(archiveSize) - dataOffset32)
+        User::Leave(KErrCorrupt);
+    return static_cast<TInt>(dataOffset32);
+}
+
+void CZipVfs::MaterializeEntryL(const CZipVfsEntry& aEntry,
+                                RFile& aOutput,
+                                TInt aMaxBytes) const
+{
+    if (aEntry.iUncompressedSize > static_cast<TUint32>(aMaxBytes) ||
+        aEntry.iUncompressedSize > static_cast<TUint32>(KMaxTInt) ||
+        aEntry.iCompressedSize > static_cast<TUint32>(KMaxTInt))
+        User::Leave(KErrTooBig);
+
+    if (aEntry.iFlags & KFlagEncrypted)
+    {
+        HBufC8* data = DecodeEntryLC(aEntry, aMaxBytes);
+        User::LeaveIfError(aOutput.Write(*data));
+        CleanupStack::PopAndDestroy(data);
+        return;
+    }
+
+    const TInt dataOffset = EntryDataOffsetL(aEntry);
+    const TInt inputCapacity = 16 * 1024;
+    const TInt outputCapacity = 16 * 1024;
+    HBufC8* input = HBufC8::NewLC(inputCapacity);
+    HBufC8* output = HBufC8::NewLC(outputCapacity);
+    TPtr8 inputBytes = input->Des();
+    TPtr8 outputBytes = output->Des();
+
+    if (aEntry.iMethod == KMethodStored)
+    {
+        if (aEntry.iCompressedSize != aEntry.iUncompressedSize)
+            User::Leave(KErrCorrupt);
+        TInt remaining = static_cast<TInt>(aEntry.iCompressedSize);
+        TInt position = dataOffset;
+        while (remaining > 0)
+        {
+            const TInt count = Min(remaining, inputCapacity);
+            inputBytes.Zero();
+            User::LeaveIfError(iArchive.Read(position, inputBytes, count));
+            if (inputBytes.Length() != count)
+                User::Leave(KErrEof);
+            User::LeaveIfError(aOutput.Write(inputBytes));
+            position += count;
+            remaining -= count;
+        }
+    }
+    else if (aEntry.iMethod == KMethodDeflate)
+    {
+        z_stream stream;
+        Mem::FillZ(&stream, sizeof(stream));
+        const TInt initResult = inflateInit2(&stream, -MAX_WBITS);
+        if (initResult != Z_OK)
+            User::Leave(initResult == Z_MEM_ERROR ? KErrNoMemory : KErrCorrupt);
+        CleanupStack::PushL(TCleanupItem(&CleanupInflate, &stream));
+
+        TInt remaining = static_cast<TInt>(aEntry.iCompressedSize);
+        TInt position = dataOffset;
+        TBool finished = EFalse;
+        while (!finished)
+        {
+            if (stream.avail_in == 0 && remaining > 0)
+            {
+                const TInt count = Min(remaining, inputCapacity);
+                inputBytes.Zero();
+                User::LeaveIfError(iArchive.Read(position, inputBytes, count));
+                if (inputBytes.Length() != count)
+                    User::Leave(KErrEof);
+                stream.next_in = const_cast<Bytef*>(
+                    reinterpret_cast<const Bytef*>(inputBytes.Ptr()));
+                stream.avail_in = static_cast<uInt>(inputBytes.Length());
+                position += count;
+                remaining -= count;
+            }
+
+            outputBytes.SetLength(outputCapacity);
+            stream.next_out = reinterpret_cast<Bytef*>(
+                const_cast<TUint8*>(outputBytes.Ptr()));
+            stream.avail_out = static_cast<uInt>(outputCapacity);
+            const TInt inflateResult = inflate(&stream, Z_NO_FLUSH);
+            const TInt produced = outputCapacity - static_cast<TInt>(stream.avail_out);
+            if (produced > 0)
+            {
+                outputBytes.SetLength(produced);
+                User::LeaveIfError(aOutput.Write(outputBytes));
+            }
+
+            if (inflateResult == Z_STREAM_END)
+            {
+                finished = ETrue;
+            }
+            else if (inflateResult != Z_OK)
+            {
+                User::Leave(KErrCorrupt);
+            }
+            else if (remaining == 0 && stream.avail_in == 0 && produced == 0)
+            {
+                User::Leave(KErrCorrupt);
+            }
+        }
+
+        if (stream.total_out != static_cast<uLong>(aEntry.iUncompressedSize) ||
+            remaining != 0 || stream.avail_in != 0)
+            User::Leave(KErrCorrupt);
+        CleanupStack::PopAndDestroy();
+    }
+    else
+    {
+        User::Leave(KErrNotSupported);
+    }
+
+    CleanupStack::PopAndDestroy(output);
+    CleanupStack::PopAndDestroy(input);
+}
+
 void CZipVfs::MaterializeFileL(const TDesC& aRelativePath,
                                const TDesC& aCacheFileName,
                                TDes& aMaterializedPath,
@@ -561,24 +738,33 @@ void CZipVfs::MaterializeFileL(const TDesC& aRelativePath,
         User::Leave(mkdirError);
 
     TEntry existing;
+    TEntry archiveEntry;
     if (iFs.Entry(destination, existing) == KErrNone &&
+        iFs.Entry(iArchivePath, archiveEntry) == KErrNone &&
         !existing.IsDir() &&
-        existing.iSize == static_cast<TInt>(entry->iUncompressedSize))
+        existing.iSize == static_cast<TInt>(entry->iUncompressedSize) &&
+        existing.iModified.Int64() >= archiveEntry.iModified.Int64())
     {
         aMaterializedPath.Copy(destination);
         return;
     }
 
-    HBufC8* data = DecodeEntryLC(*entry, aMaxBytes);
     RFile output;
     User::LeaveIfError(output.Replace(iFs,
                                       destination,
                                       EFileWrite | EFileShareExclusive));
     CleanupClosePushL(output);
-    User::LeaveIfError(output.Write(*data));
-    User::LeaveIfError(output.Flush());
+    TRAPD(writeError,
+    {
+        MaterializeEntryL(*entry, output, aMaxBytes);
+        User::LeaveIfError(output.Flush());
+    });
     CleanupStack::PopAndDestroy(&output);
-    CleanupStack::PopAndDestroy(data);
+    if (writeError != KErrNone)
+    {
+        iFs.Delete(destination);
+        User::Leave(writeError);
+    }
 
     aMaterializedPath.Copy(destination);
 }
@@ -590,31 +776,13 @@ HBufC8* CZipVfs::DecodeEntryLC(const CZipVfsEntry& aEntry, TInt aMaxBytes) const
         aEntry.iCompressedSize > static_cast<TUint32>(KMaxTInt))
         User::Leave(KErrTooBig);
 
-    TBuf8<30> localHeader;
-    User::LeaveIfError(iArchive.Read(static_cast<TInt>(aEntry.iLocalHeaderOffset),
-                                    localHeader,
-                                    localHeader.MaxLength()));
-    if (localHeader.Length() != localHeader.MaxLength() ||
-        Read32(localHeader.Ptr()) != KLocalHeaderSignature)
-        User::Leave(KErrCorrupt);
-
-    const TUint16 localNameLength = Read16(localHeader.Ptr() + 26);
-    const TUint16 localExtraLength = Read16(localHeader.Ptr() + 28);
-    const TUint32 dataOffset32 = aEntry.iLocalHeaderOffset + 30u +
-                                 localNameLength + localExtraLength;
-
-    TInt archiveSize = 0;
-    User::LeaveIfError(iArchive.Size(archiveSize));
-    if (dataOffset32 > static_cast<TUint32>(archiveSize) ||
-        aEntry.iCompressedSize > static_cast<TUint32>(archiveSize) - dataOffset32)
-        User::Leave(KErrCorrupt);
-
+    const TInt dataOffset = EntryDataOffsetL(aEntry);
     const TInt compressedSize = static_cast<TInt>(aEntry.iCompressedSize);
     HBufC8* compressed = HBufC8::NewLC(compressedSize);
     TPtr8 compressedBytes = compressed->Des();
     if (compressedSize > 0)
     {
-        User::LeaveIfError(iArchive.Read(static_cast<TInt>(dataOffset32),
+        User::LeaveIfError(iArchive.Read(dataOffset,
                                         compressedBytes,
                                         compressedSize));
         if (compressedBytes.Length() != compressedSize)

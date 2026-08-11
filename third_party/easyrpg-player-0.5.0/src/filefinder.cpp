@@ -70,7 +70,7 @@
 #include "main_data.h"
 
 #ifdef EASYRPG_SYMBIAN
-extern "C" int EasyRpgSymbianResolveResource(const char* directory,
+extern "C" int EasyRpgResolveResource(const char* directory,
                                               const char* file,
                                               char* path,
                                               unsigned int path_capacity);
@@ -95,7 +95,7 @@ namespace {
 	std::string ResolveSymbianResource(const std::string& dir, const std::string& name) {
 		char path[1024];
 		path[0] = 0;
-		if (EasyRpgSymbianResolveResource(dir.c_str(), name.c_str(), path, sizeof(path)) != 0)
+		if (EasyRpgResolveResource(dir.c_str(), name.c_str(), path, sizeof(path)) != 0)
 			return std::string();
 		return std::string(path);
 	}

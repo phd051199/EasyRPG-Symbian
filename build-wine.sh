@@ -25,6 +25,22 @@ case "$PROFILE" in
 esac
 
 PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+BUILD_LOCK="$PROJECT_DIR/build/.build.lock"
+mkdir -p "$PROJECT_DIR/build"
+if ! mkdir "$BUILD_LOCK" 2>/dev/null; then
+    existing_pid=$(cat "$BUILD_LOCK/pid" 2>/dev/null || true)
+    if [[ $existing_pid =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
+        echo "Another EasyRPG build is already running (pid $existing_pid)." >&2
+        exit 75
+    fi
+    rm -rf "$BUILD_LOCK"
+    mkdir "$BUILD_LOCK"
+fi
+printf '%s\n' "$$" > "$BUILD_LOCK/pid"
+cleanup_build_lock() {
+    rm -rf "$BUILD_LOCK"
+}
+trap cleanup_build_lock EXIT INT TERM
 WINE_PREFIX=${EASYRPG_WINE_PREFIX:-"$HOME/.wine-symbian"}
 SDK_HOST_ROOT=${EASYRPG_SYMBIAN_SDK_ROOT:-"$WINE_PREFIX/drive_c/S60/devices/S60_3rd_FP2_SDK_v1.1"}
 SDK_WINDOWS_ROOT=${EASYRPG_SYMBIAN_SDK_WINDOWS_ROOT:-'C:\S60\devices\S60_3rd_FP2_SDK_v1.1'}

@@ -6,11 +6,11 @@
 
 class CUpstreamPlayer;
 
-class CSymbianDisplaySurface : public CBase
+class CDisplaySurface : public CBase
 {
 public:
-    static CSymbianDisplaySurface* NewL(const TSize& aSize);
-    ~CSymbianDisplaySurface();
+    static CDisplaySurface* NewL(const TSize& aSize);
+    ~CDisplaySurface();
 
     void ClearL();
     void PresentL();
@@ -23,7 +23,7 @@ public:
     void ClearDirtyRegions();
 
 private:
-    CSymbianDisplaySurface();
+    CDisplaySurface();
     void ConstructL(const TSize& aSize);
 
 private:

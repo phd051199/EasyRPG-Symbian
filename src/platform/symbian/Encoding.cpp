@@ -1,5 +1,5 @@
-#include "easyrpgsymbian/CoreEncoding.h"
-#include "easyrpgsymbian/Encoding.h"
+#include "CoreEncoding.h"
+#include "Encoding.h"
 
 namespace
 {

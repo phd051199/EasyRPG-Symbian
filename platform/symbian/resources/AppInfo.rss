@@ -1,0 +1,14 @@
+#include <appinfo.rh>
+#include "Strings.rls"
+
+RESOURCE LOCALISABLE_APP_INFO r_localisable_app_info
+{
+    short_caption = qtn_caption_string;
+    caption_and_icon =
+        CAPTION_AND_ICON_INFO
+        {
+            caption = qtn_caption_string;
+            number_of_icons = 0;
+            icon_file = "";
+        };
+}

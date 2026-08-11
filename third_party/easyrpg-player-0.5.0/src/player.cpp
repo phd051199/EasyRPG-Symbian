@@ -289,9 +289,11 @@ void Player::Resume() {
 }
 
 void Player::Update(bool update_scene) {
+#ifndef EASYRPG_SYMBIAN
 	// available ms per frame, game logic expects 60 fps
 	static const double framerate_interval = 1000.0 / Graphics::GetDefaultFps();
 	next_frame = start_time + framerate_interval;
+#endif
 
 #ifdef EASYRPG_SYMBIAN
 	Graphics::Update(EasyRpgUpstreamPlayerShouldRender() != 0);
@@ -347,11 +349,14 @@ void Player::Update(bool update_scene) {
 		Scene::instance->Update();
 	}
 
+#ifndef EASYRPG_SYMBIAN
 	start_time = next_frame;
+#endif
 	++frames;
 }
 
 void Player::FrameReset() {
+#ifndef EASYRPG_SYMBIAN
 	// When update started
 	start_time = (double)DisplayUi->GetTicks();
 
@@ -360,6 +365,7 @@ void Player::FrameReset() {
 
 	// When next frame is expected
 	next_frame = start_time + framerate_interval;
+#endif
 
 	Graphics::FrameReset();
 }

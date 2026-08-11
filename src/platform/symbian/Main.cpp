@@ -1,8 +1,8 @@
 #include <eikstart.h>
 #include <stdio.h>
 
-#include "easyrpgsymbian/SymbianApplication.h"
-#include "easyrpgsymbian/SymbianLogBridge.h"
+#include "Application.h"
+#include "LogBridge.h"
 
 namespace
 {
@@ -10,7 +10,7 @@ void ExceptionHandler(TExcType aType)
 {
     char message[64];
     snprintf(message, sizeof(message), "fatal exception type=%d", static_cast<int>(aType));
-    EasyRpgSymbianLogDebug(message);
+    EasyRpgLogDebug(message);
 }
 }
 

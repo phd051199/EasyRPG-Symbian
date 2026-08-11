@@ -34,6 +34,38 @@
 namespace {
 	FileRequestBinding music_request_id;
 	std::map<std::string, FileRequestBinding> se_request_ids;
+	std::map<std::pair<std::string, int>, FileRequestBinding> se_preload_request_ids;
+
+	void PreloadSeReady(FileRequestResult* result, int tempo) {
+		se_preload_request_ids.erase(std::make_pair(result->file, tempo));
+		if (!result->success) {
+			return;
+		}
+		std::string const path = FileFinder::FindSound(result->file);
+		if (!path.empty()) {
+			Audio().SE_Preload(path, tempo);
+		}
+	}
+
+	void PreloadSystemSe(const RPG::Sound& se) {
+		if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)" || se.volume == 0) {
+			return;
+		}
+		if (se.name.length() >= 7 && se.name.compare(se.name.length() - 7, 7, ".script") == 0) {
+			return;
+		}
+		int tempo = se.tempo;
+		if (tempo < 50 || tempo > 200) {
+			tempo = 100;
+		}
+		std::pair<std::string, int> const key = std::make_pair(se.name, tempo);
+		if (se_preload_request_ids.find(key) != se_preload_request_ids.end()) {
+			return;
+		}
+		FileRequestAsync* request = AsyncHandler::RequestFile("Sound", se.name);
+		se_preload_request_ids[key] = request->Bind(std::bind(&PreloadSeReady, std::placeholders::_1, tempo));
+		request->Start();
+	}
 }
 
 static RPG::SaveSystem& data = Main_Data::game_data.system;
@@ -42,6 +74,19 @@ bool bgm_pending = false;
 
 void Game_System::Init() {
 	data.Setup();
+	se_preload_request_ids.clear();
+	PreloadSystemSe(data.cursor_se);
+	PreloadSystemSe(data.decision_se);
+	PreloadSystemSe(data.cancel_se);
+	PreloadSystemSe(data.buzzer_se);
+	PreloadSystemSe(data.battle_se);
+	PreloadSystemSe(data.escape_se);
+	PreloadSystemSe(data.enemy_attack_se);
+	PreloadSystemSe(data.enemy_damaged_se);
+	PreloadSystemSe(data.actor_damaged_se);
+	PreloadSystemSe(data.dodge_se);
+	PreloadSystemSe(data.enemy_death_se);
+	PreloadSystemSe(data.item_se);
 }
 
 int Game_System::GetSaveCount() {
@@ -200,6 +245,7 @@ RPG::Sound& Game_System::GetSystemSE(int which) {
 
 void Game_System::SetSystemSE(int which, const RPG::Sound& sfx) {
 	GetSystemSE(which) = sfx;
+	PreloadSystemSe(sfx);
 }
 
 void Game_System::SetAllowTeleport(bool allow) {

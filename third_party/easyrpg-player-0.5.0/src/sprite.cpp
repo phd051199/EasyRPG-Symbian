@@ -16,12 +16,16 @@
  */
 
 // Headers
+#include <cstddef>
 #include <string>
 #include "sprite.h"
 #include "player.h"
 #include "graphics.h"
 #include "util_macro.h"
 #include "bitmap.h"
+#ifdef EASYRPG_SYMBIAN
+#include "RenderDamage.h"
+#endif
 
 // Constructor
 Sprite::Sprite() :
@@ -72,6 +76,46 @@ void Sprite::Draw() {
 	if (!visible) return;
 	if (GetWidth() <= 0 || GetHeight() <= 0) return;
 
+#ifdef EASYRPG_SYMBIAN
+	if (bitmap && zoom_x_effect == 1.0 && zoom_y_effect == 1.0 &&
+		angle_effect == 0.0 && waver_effect_depth == 0) {
+		Rect rect = src_rect_effect.GetSubRect(src_rect);
+		rect.Adjust(bitmap->GetWidth(), bitmap->GetHeight());
+		if (rect.IsEmpty())
+			return;
+		const Rect draw_rect(x - ox, y - oy, rect.width, rect.height);
+		if (SymbianRenderDamage::IsPainting() && !SymbianRenderDamage::IntersectsDirty(draw_rect))
+			return;
+		if (!SymbianRenderDamage::IsRecording())
+			goto draw_sprite;
+
+		unsigned int signature = SymbianRenderDamage::HashSeed(0x53505254u);
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(reinterpret_cast<std::size_t>(this)));
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(reinterpret_cast<std::size_t>(bitmap.get())));
+		signature = SymbianRenderDamage::HashValue(signature, bitmap->Revision());
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(rect.x));
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(rect.y));
+		signature = SymbianRenderDamage::HashValue(signature,
+			(static_cast<unsigned int>(opacity_top_effect) & 0xffu) |
+			((static_cast<unsigned int>(opacity_bottom_effect) & 0xffu) << 8) |
+			((static_cast<unsigned int>(bush_effect) & 0xffffu) << 16));
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.red));
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.green));
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.blue));
+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.gray));
+		signature = SymbianRenderDamage::HashValue(signature,
+			(static_cast<unsigned int>(flash_effect.red) & 0xffu) |
+			((static_cast<unsigned int>(flash_effect.green) & 0xffu) << 8) |
+			((static_cast<unsigned int>(flash_effect.blue) & 0xffu) << 16) |
+			((static_cast<unsigned int>(flash_effect.alpha) & 0xffu) << 24));
+		signature = SymbianRenderDamage::HashValue(signature,
+			(flipx_effect ? 1u : 0u) | (flipy_effect ? 2u : 0u));
+		SymbianRenderDamage::Record(signature, draw_rect);
+		return;
+	}
+#endif
+
+draw_sprite:
 	BlitScreen();
 }
 
@@ -94,13 +138,18 @@ void Sprite::BlitScreen() {
 void Sprite::BlitScreenIntern(Bitmap const& draw_bitmap,
 								Rect const& src_rect, int opacity_split) const {
 	BitmapRef dst = DisplayUi->GetDisplaySurface();
+	const Opacity opacity(opacity_top_effect, opacity_bottom_effect, opacity_split);
 
-	double zoom_x = zoom_x_effect;
-	double zoom_y = zoom_y_effect;
+	if (zoom_x_effect == 1.0 && zoom_y_effect == 1.0 &&
+		angle_effect == 0.0 && waver_effect_depth == 0) {
+		dst->Blit(x - ox, y - oy, draw_bitmap, src_rect, opacity);
+		return;
+	}
 
 	dst->EffectsBlit(x, y, ox, oy, draw_bitmap, src_rect,
-					 Opacity(opacity_top_effect, opacity_bottom_effect, opacity_split),
-					 zoom_x, zoom_y, angle_effect != 0.0 ? angle_effect * 3.14159 / 180 : 0.0,
+					 opacity,
+					 zoom_x_effect, zoom_y_effect,
+					 angle_effect != 0.0 ? angle_effect * 3.14159 / 180 : 0.0,
 					 waver_effect_depth, waver_effect_phase);
 }
 
@@ -119,6 +168,9 @@ BitmapRef Sprite::Refresh(Rect& rect) {
 	bool no_flash = flash_effect.alpha == 0;
 	bool no_flip = !flipx_effect && !flipy_effect;
 	bool no_effects = no_tone && no_flash && no_flip;
+	if (no_effects)
+		return bitmap;
+
 	bool effects_changed = tone_effect != current_tone ||
 		flash_effect != current_flash ||
 		flipx_effect != current_flip_x ||
@@ -128,9 +180,6 @@ BitmapRef Sprite::Refresh(Rect& rect) {
 	if (effects_changed || effects_rect_changed || bitmap_changed) {
 		bitmap_effects_valid = false;
 	}
-
-	if (no_effects)
-		return bitmap;
 
 	if (bitmap_effects && bitmap_effects_valid)
 		return bitmap_effects;

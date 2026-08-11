@@ -16,13 +16,17 @@ function parseArgs(argv) {
         chrome: process.env.EKA2L1_CHROME || defaultChrome,
         rom: path.join(rootDir, '.games', 'E5 (S60v3)', 'E5.rom'),
         rpkg: path.join(rootDir, '.games', 'E5 (S60v3)', 'SYM.RPKG'),
-        sis: path.join(rootDir, 'sis', 'EasyRPG_S60_3_X_v_0_1_0.sis'),
+        sis: path.join(rootDir, 'sis', 'EasyRPG.sis'),
         game: path.join(rootDir, '.games', 'NobihazaVH.zip'),
         profile: path.join(rootDir, 'build', 'eka2l1-headless-profile'),
         output: path.join(rootDir, 'build', 'eka2l1-headless'),
         uid: 0xE31EA5A1,
         duration: 15,
         launchTimeout: 120,
+        keySequence: '',
+        keyDelay: 250,
+        keyWait: 1000,
+        keysAfterScene: '',
         noStartGame: false,
         enterGame: false,
         resetProfile: false
@@ -45,6 +49,10 @@ function parseArgs(argv) {
         else if (arg === '--uid') out.uid = Number(take());
         else if (arg === '--duration') out.duration = Number(take());
         else if (arg === '--launch-timeout') out.launchTimeout = Number(take());
+        else if (arg === '--keys') out.keySequence = take();
+        else if (arg === '--key-delay') out.keyDelay = Number(take());
+        else if (arg === '--keys-wait') out.keyWait = Number(take());
+        else if (arg === '--keys-after-scene') out.keysAfterScene = take();
         else if (arg === '--no-start-game') out.noStartGame = true;
         else if (arg === '--enter-game') out.enterGame = true;
         else if (arg === '--reset-profile') out.resetProfile = true;
@@ -70,6 +78,10 @@ function usage() {
         '  --uid NUMBER',
         '  --duration SECONDS',
         '  --launch-timeout SECONDS',
+        '  --keys NAME[,NAME...] or NAME*COUNT',
+        '  --key-delay MILLISECONDS',
+        '  --keys-wait MILLISECONDS',
+        '  --keys-after-scene NAME',
         '  --no-start-game',
         '  --enter-game',
         '  --reset-profile',
@@ -500,8 +512,7 @@ async function main() {
                 } catch (e) {}
             }
             await EKA2L1.writeFileToVFS(file, target);
-            if (EKA2L1.savePaths) await EKA2L1.savePaths([target]);
-            else await EKA2L1.save();
+            await EKA2L1.save();
             const st = EKA2L1.module.FS.stat(target);
             return { size: st.size, target };
         })()`, true);
@@ -524,7 +535,7 @@ async function main() {
         let launchState = null;
         while (Date.now() < launchDeadline) {
             launchState = await evaluate(`(() => {
-                if (!window.EKA2L1) return { ready: false, redraw: 0, exit: null };
+                if (!window.EKA2L1 || !EKA2L1.module) return { ready: false, redraw: 0, exit: null };
                 return {
                     ready: !!EKA2L1.ready,
                     redraw: EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0,
@@ -575,13 +586,53 @@ async function main() {
             await sleep(1000);
         }
 
+        if (options.keySequence) {
+            if (options.keysAfterScene) {
+                const sceneNeedle = `scene ${options.keysAfterScene}`;
+                await waitEval(`(() => {
+                    try {
+                        const log = EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/easyrpg.log', { encoding: 'utf8' });
+                        return log.includes(${JSON.stringify(sceneNeedle)});
+                    } catch (e) {
+                        return false;
+                    }
+                })()`, Math.max(10000, options.launchTimeout * 1000), sceneNeedle);
+            }
+            await sleep(options.keyWait);
+            const sequence = [];
+            for (const rawToken of options.keySequence.split(',')) {
+                const token = rawToken.trim();
+                if (!token) continue;
+                const match = /^([A-Za-z0-9_]+)(?:\*(\d+))?$/.exec(token);
+                if (!match) throw new Error(`Invalid key token: ${token}`);
+                const count = match[2] ? Number(match[2]) : 1;
+                if (!Number.isInteger(count) || count < 1 || count > 100) {
+                    throw new Error(`Invalid key repeat count: ${token}`);
+                }
+                for (let repeat = 0; repeat < count; ++repeat) sequence.push(match[1].toUpperCase());
+            }
+            for (const name of sequence) {
+                await evaluate(`(async () => {
+                    const name = ${JSON.stringify(name)};
+                    const code = EKA2L1.keys[name];
+                    if (code === undefined) throw new Error('Unknown EKA2L1 key: ' + name);
+                    EKA2L1.sendKey(code, 1);
+                    await new Promise(resolve => setTimeout(resolve, 90));
+                    EKA2L1.sendKey(code, 0);
+                    return true;
+                })()`, true);
+                pushLog(`app: sent key ${name}`);
+                await sleep(options.keyDelay);
+            }
+        }
+
         const sampleStart = Date.now();
-        const redrawStart = await evaluate('EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0');
+        const redrawStart = await evaluate('EKA2L1.module && EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0');
         const testDeadline = sampleStart + options.duration * 1000;
         while (Date.now() < testDeadline) {
             const state = await evaluate(`({
-                redraw: EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0,
-                exit: EKA2L1.lastAppExit ? EKA2L1.lastAppExit() : null
+                redraw: EKA2L1.module && EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0,
+                exit: EKA2L1.module && EKA2L1.lastAppExit ? EKA2L1.lastAppExit() : null
             })`);
             if (state.exit) {
                 result.appExit = state.exit;

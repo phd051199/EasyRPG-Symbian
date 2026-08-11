@@ -2,14 +2,13 @@
 #include <e32hal.h>
 #include <f32file.h>
 #include <mdaaudiosampleplayer.h>
-#include <midiclientutility.h>
 
-#include "easyrpgsymbian/SymbianAudioBridge.h"
-#include "easyrpgsymbian/SymbianAudioMixer.h"
+#include "AudioBridge.h"
+#include "AudioMixer.h"
 
 namespace
 {
-CSymbianAudioMixer* gMixer = NULL;
+CAudioMixer* gMixer = NULL;
 HBufC8* gBgmPcm = NULL;
 TInt gBgmFrameCount = 0;
 TInt gBgmSampleRate = 0;
@@ -62,19 +61,17 @@ void AsciiPathL(const char* aPath, TDes& aDestination)
 void EnsureMixerL()
 {
     if (!gMixer)
-        gMixer = CSymbianAudioMixer::NewL();
+        gMixer = CAudioMixer::NewL();
 }
 
 class CNativeBgmPlayer : public CBase,
-                         public MMdaAudioPlayerCallback,
-                         public MMidiClientUtilityObserver
+                         public MMdaAudioPlayerCallback
 {
 public:
     enum TType
     {
         ENone,
-        ESampled,
-        EMidi
+        ESampled
     };
 
     static CNativeBgmPlayer* NewL()
@@ -87,34 +84,21 @@ public:
         Stop();
         delete iAudio;
         iAudio = NULL;
-        delete iMidi;
-        iMidi = NULL;
     }
 
     void PlaySampledL(const TDesC& aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
     {
         Stop();
         if (!iAudio)
-            iAudio = CMdaAudioPlayerUtility::NewL(*this);
+            iAudio = CMdaAudioPlayerUtility::NewL(*this,
+                                                  EMdaPriorityNormal,
+                                                  EMdaPriorityPreferenceTime);
         iType = ESampled;
         iVolume = ClampVolume(aVolume);
         iPitch = aPitch;
         iFadeIn = aFadeIn;
         iPending = ETrue;
         iAudio->OpenFileL(aPath);
-    }
-
-    void PlayMidiL(const TDesC& aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
-    {
-        Stop();
-        if (!iMidi)
-            iMidi = CMidiClientUtility::NewL(*this);
-        iType = EMidi;
-        iVolume = ClampVolume(aVolume);
-        iPitch = aPitch;
-        iFadeIn = aFadeIn;
-        iPending = ETrue;
-        iMidi->OpenFile(aPath);
     }
 
     void Stop()
@@ -124,79 +108,38 @@ public:
             iAudio->Stop();
             iAudio->Close();
         }
-        if (iMidi && iType == EMidi)
-        {
-            TRAP_IGNORE(iMidi->Stop(TTimeIntervalMicroSeconds(0)));
-            iMidi->Close();
-        }
         iType = ENone;
         iPending = EFalse;
         iPlaying = EFalse;
         iPaused = EFalse;
-        iMidiPosition = 0;
-        iBaseTempo = 0;
     }
 
     void Pause()
     {
         if (!iPlaying || iPaused)
             return;
-        if (iType == ESampled && iAudio)
-        {
-            if (iAudio->Pause() == KErrNone)
-                iPaused = ETrue;
-        }
-        else if (iType == EMidi && iMidi)
-        {
-            TRAPD(error,
-                iMidiPosition = iMidi->PositionMicroSecondsL().Int64();
-                iMidi->Stop(TTimeIntervalMicroSeconds(0));
-            );
-            if (error == KErrNone)
-                iPaused = ETrue;
-            else
-                gAudioAsyncError = error;
-        }
+        if (iAudio && iAudio->Pause() == KErrNone)
+            iPaused = ETrue;
     }
 
     void Resume()
     {
         if (!iPlaying || !iPaused)
             return;
-        if (iType == ESampled && iAudio)
+        if (iAudio)
         {
             iAudio->Play();
             iPaused = EFalse;
-        }
-        else if (iType == EMidi && iMidi)
-        {
-            TRAPD(error,
-                iMidi->SetPositionMicroSecondsL(TTimeIntervalMicroSeconds(iMidiPosition));
-                iMidi->Play();
-            );
-            if (error == KErrNone)
-                iPaused = EFalse;
-            else
-                gAudioAsyncError = error;
         }
     }
 
     void SetVolume(TInt aVolume)
     {
         iVolume = ClampVolume(aVolume);
-        if (iType == ESampled && iAudio)
+        if (iAudio)
         {
             const TInt maxVolume = iAudio->MaxVolume();
             const TInt error = iAudio->SetVolume(maxVolume * iVolume * KMasterVolumePercent / 10000);
-            if (error != KErrNone)
-                gAudioAsyncError = error;
-        }
-        else if (iType == EMidi && iMidi)
-        {
-            TRAPD(error,
-                const TInt maxVolume = iMidi->MaxVolumeL();
-                iMidi->SetVolumeL(maxVolume * iVolume * KMasterVolumePercent / 10000);
-            );
             if (error != KErrNone)
                 gAudioAsyncError = error;
         }
@@ -207,14 +150,6 @@ public:
         if (aPitch < 50 || aPitch > 200)
             return;
         iPitch = aPitch;
-        if (iType == EMidi && iMidi && iBaseTempo > 0)
-        {
-            TRAPD(error,
-                iMidi->SetTempoL(static_cast<TInt>(static_cast<TInt64>(iBaseTempo) * iPitch / 100));
-            );
-            if (error != KErrNone)
-                gAudioAsyncError = error;
-        }
     }
 
     TBool IsPlaying() const
@@ -225,18 +160,12 @@ public:
     TUint32 Ticks() const
     {
         TInt64 microseconds = 0;
-        if (iType == ESampled && iAudio)
+        if (iAudio)
         {
             TTimeIntervalMicroSeconds position;
             if (iAudio->GetPosition(position) != KErrNone)
                 return 0;
             microseconds = position.Int64();
-        }
-        else if (iType == EMidi && iMidi)
-        {
-            TRAPD(error, microseconds = iMidi->PositionMicroSecondsL().Int64());
-            if (error != KErrNone)
-                return 0;
         }
         if (microseconds <= 0)
             return 0;
@@ -252,13 +181,10 @@ public:
 private:
     CNativeBgmPlayer()
         : iAudio(NULL),
-          iMidi(NULL),
           iType(ENone),
           iVolume(100),
           iPitch(100),
           iFadeIn(0),
-          iBaseTempo(0),
-          iMidiPosition(0),
           iPending(EFalse),
           iPlaying(EFalse),
           iPaused(EFalse)
@@ -301,79 +227,152 @@ private:
             iPlaying = EFalse;
     }
 
-    void MmcuoStateChanged(TMidiState, TMidiState aNewState,
-                           const TTimeIntervalMicroSeconds&, TInt aError)
-    {
-        if (aError != KErrNone)
-        {
-            gAudioAsyncError = aError;
-            iPending = EFalse;
-            iPlaying = EFalse;
-            return;
-        }
-        if (iType != EMidi || !iMidi)
-            return;
-        if (iPending && aNewState == EOpenDisengaged)
-        {
-            iPending = EFalse;
-            TRAPD(error,
-                iMidi->SetRepeatsL(KMdaRepeatForever, TTimeIntervalMicroSeconds(0));
-                iBaseTempo = iMidi->TempoMicroBeatsPerMinuteL();
-                SetVolume(iVolume);
-                SetPitch(iPitch);
-                if (iFadeIn > 0)
-                    iMidi->SetVolumeRampL(TTimeIntervalMicroSeconds(static_cast<TInt64>(iFadeIn) * 1000));
-                iMidi->Play();
-            );
-            if (error != KErrNone)
-            {
-                gAudioAsyncError = error;
-                iPlaying = EFalse;
-            }
-            else
-            {
-                iPlaying = ETrue;
-            }
-        }
-        else if (aNewState == EOpenPlaying)
-        {
-            iPlaying = ETrue;
-        }
-        else if (aNewState == EClosedDisengaged && !iPaused)
-        {
-            iPlaying = EFalse;
-        }
-    }
-
-    void MmcuoTempoChanged(TInt) {}
-    void MmcuoVolumeChanged(TInt, TReal32) {}
-    void MmcuoMuteChanged(TInt, TBool) {}
-    void MmcuoSyncUpdate(const TTimeIntervalMicroSeconds&, TInt64) {}
-    void MmcuoMetaDataEntryFound(const TInt, const TTimeIntervalMicroSeconds&) {}
-    void MmcuoMipMessageReceived(const RArray<TMipMessageEntry>&) {}
-    void MmcuoPolyphonyChanged(TInt) {}
-    void MmcuoInstrumentChanged(TInt, TInt, TInt) {}
-
 private:
     CMdaAudioPlayerUtility* iAudio;
-    CMidiClientUtility* iMidi;
     TType iType;
     TInt iVolume;
     TInt iPitch;
     TInt iFadeIn;
-    TInt iBaseTempo;
-    TInt64 iMidiPosition;
     TBool iPending;
     TBool iPlaying;
     TBool iPaused;
 };
 
+const TInt KNativeSeVoiceCount = 4;
+
+class CNativeSeVoice : public CBase,
+                       public MMdaAudioPlayerCallback
+{
+public:
+    static CNativeSeVoice* NewL()
+    {
+        CNativeSeVoice* self = new (ELeave) CNativeSeVoice;
+        CleanupStack::PushL(self);
+        self->iAudio = CMdaAudioPlayerUtility::NewL(*self,
+                                                    EMdaPriorityNormal,
+                                                    EMdaPriorityPreferenceTime);
+        CleanupStack::Pop(self);
+        return self;
+    }
+
+    ~CNativeSeVoice()
+    {
+        Stop();
+        delete iAudio;
+        iAudio = NULL;
+    }
+
+    void PlayL(const TDesC& aPath, TInt aVolume)
+    {
+        Stop();
+        iVolume = ClampVolume(aVolume);
+        iPending = ETrue;
+        iAudio->OpenFileL(aPath);
+    }
+
+    void Stop()
+    {
+        if (iAudio)
+        {
+            iAudio->Stop();
+            iAudio->Close();
+        }
+        iPending = EFalse;
+        iPlaying = EFalse;
+    }
+
+    TBool IsBusy() const
+    {
+        return iPending || iPlaying;
+    }
+
+private:
+    CNativeSeVoice()
+        : iAudio(NULL),
+          iVolume(100),
+          iPending(EFalse),
+          iPlaying(EFalse)
+    {
+    }
+
+    static TInt ClampVolume(TInt aVolume)
+    {
+        if (aVolume < 0)
+            return 0;
+        if (aVolume > 100)
+            return 100;
+        return aVolume;
+    }
+
+    void MapcInitComplete(TInt aError, const TTimeIntervalMicroSeconds&)
+    {
+        if (!iPending)
+            return;
+        iPending = EFalse;
+        if (aError != KErrNone)
+        {
+            gAudioAsyncError = aError;
+            return;
+        }
+        const TInt maxVolume = iAudio->MaxVolume();
+        const TInt volumeError = iAudio->SetVolume(maxVolume * iVolume * KMasterVolumePercent / 10000);
+        if (volumeError != KErrNone)
+        {
+            gAudioAsyncError = volumeError;
+            return;
+        }
+        iAudio->Play();
+        iPlaying = ETrue;
+    }
+
+    void MapcPlayComplete(TInt aError)
+    {
+        if (aError != KErrNone && aError != KErrAbort)
+            gAudioAsyncError = aError;
+        iPlaying = EFalse;
+    }
+
+private:
+    CMdaAudioPlayerUtility* iAudio;
+    TInt iVolume;
+    TBool iPending;
+    TBool iPlaying;
+};
+
 CNativeBgmPlayer* gNativeBgm = NULL;
+CNativeSeVoice* gNativeSeVoices[KNativeSeVoiceCount] = {NULL, NULL, NULL, NULL};
+TInt gNativeSeCursor = 0;
 
 void EnsureNativeBgmL()
 {
     if (!gNativeBgm)
         gNativeBgm = CNativeBgmPlayer::NewL();
+}
+
+void PlayNativeSeL(const TDesC& aPath, TInt aVolume)
+{
+    TInt selected = -1;
+    for (TInt index = 0; index < KNativeSeVoiceCount; ++index)
+    {
+        if (!gNativeSeVoices[index] || !gNativeSeVoices[index]->IsBusy())
+        {
+            selected = index;
+            break;
+        }
+    }
+    if (selected < 0)
+        selected = gNativeSeCursor;
+    if (!gNativeSeVoices[selected])
+        gNativeSeVoices[selected] = CNativeSeVoice::NewL();
+    gNativeSeVoices[selected]->PlayL(aPath, aVolume);
+    gNativeSeCursor = (selected + 1) % KNativeSeVoiceCount;
+}
+
+void StopNativeSe()
+{
+    for (TInt index = 0; index < KNativeSeVoiceCount; ++index)
+        if (gNativeSeVoices[index])
+            gNativeSeVoices[index]->Stop();
 }
 
 TBool HasExtension(const TDesC& aPath, const TDesC& aExtension)
@@ -731,7 +730,7 @@ TUint32 NowMilliseconds()
 void StopBgmNow()
 {
     if (gMixer)
-        gMixer->ClearStream(CSymbianAudioMixer::EStreamBgm);
+        gMixer->ClearStream(CAudioMixer::EStreamBgm);
     if (gNativeBgm)
         gNativeBgm->Stop();
     delete gBgmPcm;
@@ -753,23 +752,28 @@ TInt BgmSample(TInt aFrame, TInt aChannel)
     return samples[aFrame * gBgmChannels + sourceChannel];
 }
 
-void PumpBgm()
+void PumpBgm(TInt aMaxFrames)
 {
     if (!gMixer || !gBgmPcm || !gBgmPlaying || gBgmPaused ||
-        gBgmFrameCount <= 0 || gBgmSampleRate <= 0)
+        gBgmFrameCount <= 0 || gBgmSampleRate <= 0 || aMaxFrames <= 0)
         return;
 
     TInt64 step = static_cast<TInt64>(gBgmSampleRate) * gBgmPitch;
-    step = (step << 16) / (CSymbianAudioMixer::OutputSampleRate() * 100);
+    step = (step << 16) / (CAudioMixer::OutputSampleRate() * 100);
     if (step <= 0)
         step = 1;
     const TInt64 totalPhase = static_cast<TInt64>(gBgmFrameCount) << 16;
-
-    TInt freeFrames = gMixer->StreamFreeFrames(CSymbianAudioMixer::EStreamBgm);
+    const TInt targetFrames = 3072;
+    const TInt queuedFrames = gMixer->StreamQueuedFrames(CAudioMixer::EStreamBgm);
+    TInt freeFrames = gMixer->StreamFreeFrames(CAudioMixer::EStreamBgm);
+    TInt framesToWrite = Min(aMaxFrames, targetFrames - queuedFrames);
+    if (framesToWrite <= 0)
+        return;
+    freeFrames = Min(freeFrames, framesToWrite);
     while (freeFrames > 0)
     {
-        const TInt batch = Min(freeFrames, 256);
-        TInt16 output[256 * 2];
+        const TInt batch = Min(freeFrames, 512);
+        TInt16 output[512 * 2];
         TInt frame = 0;
         for (frame = 0; frame < batch; ++frame)
         {
@@ -779,7 +783,7 @@ void PumpBgm()
             TInt nextFrame = sourceFrame + 1;
             if (nextFrame >= gBgmFrameCount)
                 nextFrame = 0;
-            const TInt fraction = static_cast<TInt>(gBgmPhase & 0xffff);
+            const TInt fraction = static_cast<TInt>((gBgmPhase & 0xffff) >> 1);
 
             TInt channel = 0;
             for (channel = 0; channel < 2; ++channel)
@@ -787,7 +791,7 @@ void PumpBgm()
                 const TInt first = BgmSample(sourceFrame, channel);
                 const TInt second = BgmSample(nextFrame, channel);
                 output[frame * 2 + channel] = static_cast<TInt16>(
-                    first + static_cast<TInt>((static_cast<TInt64>(second - first) * fraction) >> 16));
+                    first + (((second - first) * fraction) >> 15));
             }
 
             gBgmPhase += step;
@@ -795,7 +799,7 @@ void PumpBgm()
                 gBgmPhase -= totalPhase;
         }
 
-        const TInt written = gMixer->WriteStreamPcm16(CSymbianAudioMixer::EStreamBgm,
+        const TInt written = gMixer->WriteStreamPcm16(CAudioMixer::EStreamBgm,
                                                        output,
                                                        batch);
         if (written <= 0)
@@ -821,15 +825,7 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
 
     TFileName path;
     AsciiPathL(aPath, path);
-    _LIT(KMid, ".mid");
-    _LIT(KMidi, ".midi");
     _LIT(KWav, ".wav");
-    if (HasExtension(path, KMid) || HasExtension(path, KMidi))
-    {
-        EnsureNativeBgmL();
-        gNativeBgm->PlayMidiL(path, aVolume, aPitch, aFadeIn);
-        return;
-    }
     if (!HasExtension(path, KWav))
     {
         EnsureNativeBgmL();
@@ -855,24 +851,22 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
     gBgmFramesQueued = 0;
     gBgmPlaying = ETrue;
     gBgmPaused = EFalse;
-    gMixer->SetStreamVolume(CSymbianAudioMixer::EStreamBgm, aVolume);
-    PumpBgm();
+    gMixer->SetStreamVolume(CAudioMixer::EStreamBgm, aVolume);
+    PumpBgm(3072);
 }
 
-void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
+void CacheSeL(const TDesC& aPath, TInt aPitch, TBool aPinned)
 {
-    if (aPitch < 50 || aPitch > 200)
-        User::Leave(KErrArgument);
-    EnsureMixerL();
-
-    TFileName path;
-    AsciiPathL(aPath, path);
     TBuf<160> cacheKey;
-    BuildCacheKeyL(path, aPitch, cacheKey);
-    if (gMixer->PlaySe(cacheKey, aVolume))
+    BuildCacheKeyL(aPath, aPitch, cacheKey);
+    if (gMixer->IsCached(cacheKey))
+    {
+        if (aPinned)
+            gMixer->SetCachedPinned(cacheKey, ETrue);
         return;
+    }
 
-    HBufC8* file = ReadFileLC(path);
+    HBufC8* file = ReadFileLC(aPath);
     HBufC8* pcm = NULL;
     TInt frameCount = 0;
     TInt sampleRate = 0;
@@ -887,39 +881,81 @@ void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
                         reinterpret_cast<const TInt16*>(pcm->Ptr()),
                         frameCount,
                         static_cast<TInt>(adjustedRate64),
-                        channels);
-    if (!gMixer->PlaySe(cacheKey, aVolume))
-        User::Leave(KErrNotReady);
+                        channels,
+                        aPinned);
 
     CleanupStack::PopAndDestroy(pcm);
     CleanupStack::PopAndDestroy(file);
 }
+
+void PreloadSeL(const char* aPath, TInt aPitch)
+{
+    if (aPitch < 50 || aPitch > 200)
+        User::Leave(KErrArgument);
+    EnsureMixerL();
+
+    TFileName path;
+    AsciiPathL(aPath, path);
+    _LIT(KWav, ".wav");
+    if (!HasExtension(path, KWav))
+        return;
+    CacheSeL(path, aPitch, ETrue);
 }
 
-extern "C" int EasyRpgSymbianAudioPlaySe(const char* aPath, int aVolume, int aPitch)
+void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
+{
+    if (aPitch < 50 || aPitch > 200)
+        User::Leave(KErrArgument);
+    EnsureMixerL();
+
+    TFileName path;
+    AsciiPathL(aPath, path);
+    _LIT(KWav, ".wav");
+    if (!HasExtension(path, KWav))
+    {
+        PlayNativeSeL(path, aVolume);
+        return;
+    }
+    TBuf<160> cacheKey;
+    BuildCacheKeyL(path, aPitch, cacheKey);
+    if (!gMixer->IsCached(cacheKey))
+        CacheSeL(path, aPitch, EFalse);
+    if (!gMixer->PlaySe(cacheKey, aVolume))
+        User::Leave(KErrNotReady);
+}
+}
+
+extern "C" int EasyRpgAudioPreloadSe(const char* aPath, int aPitch)
+{
+    TRAPD(error, PreloadSeL(aPath, aPitch));
+    return error;
+}
+
+extern "C" int EasyRpgAudioPlaySe(const char* aPath, int aVolume, int aPitch)
 {
     TRAPD(error, PlaySeL(aPath, aVolume, aPitch));
     return error;
 }
 
-extern "C" void EasyRpgSymbianAudioStopSe(void)
+extern "C" void EasyRpgAudioStopSe(void)
 {
     if (gMixer)
         gMixer->StopSe();
+    StopNativeSe();
 }
 
-extern "C" int EasyRpgSymbianAudioPlayBgm(const char* aPath, int aVolume, int aPitch, int aFadeIn)
+extern "C" int EasyRpgAudioPlayBgm(const char* aPath, int aVolume, int aPitch, int aFadeIn)
 {
     TRAPD(error, PlayBgmL(aPath, aVolume, aPitch, aFadeIn));
     return error;
 }
 
-extern "C" void EasyRpgSymbianAudioStopBgm(void)
+extern "C" void EasyRpgAudioStopBgm(void)
 {
     StopBgmNow();
 }
 
-extern "C" void EasyRpgSymbianAudioPauseBgm(void)
+extern "C" void EasyRpgAudioPauseBgm(void)
 {
     if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
     {
@@ -930,10 +966,10 @@ extern "C" void EasyRpgSymbianAudioPauseBgm(void)
         return;
     gBgmPaused = ETrue;
     if (gMixer)
-        gMixer->ClearStream(CSymbianAudioMixer::EStreamBgm);
+        gMixer->ClearStream(CAudioMixer::EStreamBgm);
 }
 
-extern "C" void EasyRpgSymbianAudioResumeBgm(void)
+extern "C" void EasyRpgAudioResumeBgm(void)
 {
     if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
     {
@@ -943,19 +979,19 @@ extern "C" void EasyRpgSymbianAudioResumeBgm(void)
     if (!gBgmPlaying || !gBgmPaused)
         return;
     gBgmPaused = EFalse;
-    PumpBgm();
+    PumpBgm(3072);
 }
 
-extern "C" void EasyRpgSymbianAudioSetBgmVolume(int aVolume)
+extern "C" void EasyRpgAudioSetBgmVolume(int aVolume)
 {
     gBgmVolume = aVolume;
     if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
         gNativeBgm->SetVolume(aVolume);
     if (gMixer)
-        gMixer->SetStreamVolume(CSymbianAudioMixer::EStreamBgm, aVolume);
+        gMixer->SetStreamVolume(CAudioMixer::EStreamBgm, aVolume);
 }
 
-extern "C" void EasyRpgSymbianAudioSetBgmPitch(int aPitch)
+extern "C" void EasyRpgAudioSetBgmPitch(int aPitch)
 {
     if (aPitch >= 50 && aPitch <= 200)
     {
@@ -965,7 +1001,7 @@ extern "C" void EasyRpgSymbianAudioSetBgmPitch(int aPitch)
     }
 }
 
-extern "C" void EasyRpgSymbianAudioFadeBgm(int aFade)
+extern "C" void EasyRpgAudioFadeBgm(int aFade)
 {
     if (!gBgmPlaying && (!gNativeBgm || gNativeBgm->Type() == CNativeBgmPlayer::ENone))
         return;
@@ -979,25 +1015,25 @@ extern "C" void EasyRpgSymbianAudioFadeBgm(int aFade)
     gFadeStartVolume = gBgmVolume;
 }
 
-extern "C" int EasyRpgSymbianAudioIsBgmPlaying(void)
+extern "C" int EasyRpgAudioIsBgmPlaying(void)
 {
     if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
         return gNativeBgm->IsPlaying() ? 1 : 0;
     return gBgmPlaying ? 1 : 0;
 }
 
-extern "C" unsigned int EasyRpgSymbianAudioBgmTicks(void)
+extern "C" unsigned int EasyRpgAudioBgmTicks(void)
 {
     if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
         return gNativeBgm->Ticks();
     if (!gBgmPlaying)
         return 0;
     const TUint64 ticks = gBgmFramesQueued * 1000u /
-                          static_cast<TUint64>(CSymbianAudioMixer::OutputSampleRate());
+                          static_cast<TUint64>(CAudioMixer::OutputSampleRate());
     return ticks > 0xffffffffu ? 0xffffffffu : static_cast<unsigned int>(ticks);
 }
 
-extern "C" void EasyRpgSymbianAudioUpdate(void)
+extern "C" void EasyRpgAudioUpdate(void)
 {
     if (gMixer)
     {
@@ -1021,21 +1057,27 @@ extern "C" void EasyRpgSymbianAudioUpdate(void)
         if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
             gNativeBgm->SetVolume(volume);
         if (gMixer)
-            gMixer->SetStreamVolume(CSymbianAudioMixer::EStreamBgm, volume);
+            gMixer->SetStreamVolume(CAudioMixer::EStreamBgm, volume);
     }
-    PumpBgm();
+    PumpBgm(1024);
 }
 
-extern "C" int EasyRpgSymbianAudioConsumeError(void)
+extern "C" int EasyRpgAudioConsumeError(void)
 {
     const TInt error = gAudioAsyncError;
     gAudioAsyncError = KErrNone;
     return error;
 }
 
-extern "C" void EasyRpgSymbianAudioShutdown(void)
+extern "C" void EasyRpgAudioShutdown(void)
 {
     StopBgmNow();
+    StopNativeSe();
+    for (TInt index = 0; index < KNativeSeVoiceCount; ++index)
+    {
+        delete gNativeSeVoices[index];
+        gNativeSeVoices[index] = NULL;
+    }
     delete gNativeBgm;
     gNativeBgm = NULL;
     delete gMixer;

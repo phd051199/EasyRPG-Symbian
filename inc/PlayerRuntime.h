@@ -3,7 +3,7 @@
 
 #include <e32base.h>
 
-class CSymbianDisplaySurface;
+class CDisplaySurface;
 class CZipVfs;
 
 class CPlayerRuntime : public CBase
@@ -38,7 +38,7 @@ public:
 
     static CPlayerRuntime* NewL(CZipVfs* aResources,
                                 const TDesC& aGameSource,
-                                CSymbianDisplaySurface& aDisplaySurface);
+                                CDisplaySurface& aDisplaySurface);
     ~CPlayerRuntime();
 
     void SetKeyState(TUint32 aKey, TBool aPressed);
@@ -49,14 +49,18 @@ public:
     TBool IsRunning() const;
 
 private:
-    CPlayerRuntime(CZipVfs* aResources, CSymbianDisplaySurface& aDisplaySurface);
+    CPlayerRuntime(CZipVfs* aResources, CDisplaySurface& aDisplaySurface);
     void ConstructL(const TDesC& aGameSource);
     void PrepareProjectRootL(const TDesC& aGameSource, TDes8& aProjectPath, TDes8& aSavePath);
 
 private:
     CZipVfs* iResources;
-    CSymbianDisplaySurface& iDisplaySurface;
-    TUint32 iPressedKeys;
+    CDisplaySurface& iDisplaySurface;
+    TUint32 iUpstreamKeys0;
+    TUint32 iUpstreamKeys1;
+    TUint32 iUpstreamKeys2;
+    TUint32 iTickMs;
+    TInt iTickRemainder;
     TBool iPlayerRunning;
 };
 
