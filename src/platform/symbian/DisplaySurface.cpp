@@ -6,7 +6,7 @@
 namespace
 {
 const TInt KDirtyRegionCapacity = 16;
-const TInt KMaximumPresentRegions = 4;
+const TInt KMaximumPresentRegions = 1;
 const TInt KDirtyRegionFixedCostDivisor = 12;
 const TInt KFullRedrawAreaPercent = 88;
 
@@ -33,13 +33,6 @@ TBool RectsEqual(const TRect& aFirst, const TRect& aSecond)
         aFirst.iBr.iY == aSecond.iBr.iY;
 }
 
-void RemoveDirtyRegion(TRect* aRegions, TInt& aRegionCount, TInt aIndex)
-{
-    for (TInt index = aIndex + 1; index < aRegionCount; ++index)
-        aRegions[index - 1] = aRegions[index];
-    --aRegionCount;
-}
-
 TInt DirtyRegionArea(const TRect* aRegions, TInt aRegionCount)
 {
     TInt area = 0;
@@ -53,28 +46,13 @@ void OptimizeDirtyRegions(TRect* aRegions, TInt& aRegionCount, const TRect& aFra
     if (aRegionCount <= 0)
         return;
 
-    while (aRegionCount > KMaximumPresentRegions)
+    if (aRegionCount > KMaximumPresentRegions)
     {
-        TInt selectedFirst = 0;
-        TInt selectedSecond = 1;
-        TInt selectedIncrease = 0x7fffffff;
-        for (TInt first = 0; first < aRegionCount - 1; ++first)
-        {
-            for (TInt second = first + 1; second < aRegionCount; ++second)
-            {
-                const TRect merged = UnionRects(aRegions[first], aRegions[second]);
-                const TInt increase = RectArea(merged) -
-                    RectArea(aRegions[first]) - RectArea(aRegions[second]);
-                if (increase < selectedIncrease)
-                {
-                    selectedFirst = first;
-                    selectedSecond = second;
-                    selectedIncrease = increase;
-                }
-            }
-        }
-        aRegions[selectedFirst] = UnionRects(aRegions[selectedFirst], aRegions[selectedSecond]);
-        RemoveDirtyRegion(aRegions, aRegionCount, selectedSecond);
+        TRect merged = aRegions[0];
+        for (TInt index = 1; index < aRegionCount; ++index)
+            merged = UnionRects(merged, aRegions[index]);
+        aRegions[0] = merged;
+        aRegionCount = 1;
     }
 
     TRect combined = aRegions[0];

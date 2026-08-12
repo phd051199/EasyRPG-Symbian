@@ -21,6 +21,7 @@ private:
     CPerfOverlay();
     void ConstructL();
     TUint32 ReadCounter() const;
+    void ReadRam();
     void RebuildBitmap();
     static TUint8 GlyphRow(TUint8 aCharacter, TInt aRow);
     static void DrawText(TUint8* aPixels,
@@ -36,11 +37,17 @@ private:
 private:
     CFbsBitmap* iBitmap;
     CFbsBitmap* iMaskBitmap;
+    RThread iThread;
     TInt iCounterPeriodUs;
     TBool iUseNanoCounter;
+    TBool iCpuAvailable;
     TUint32 iLastCounter;
+    TInt64 iLastCpuTime;
     TUint32 iFramesSinceSample;
     TInt iFps;
+    TInt iCpuPercent;
+    TInt iRamUsedTenthsMb;
+    TInt iRamTotalTenthsMb;
     TBool iDirty;
 };
 

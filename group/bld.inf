@@ -2,5 +2,4 @@ PRJ_PLATFORMS
 WINSCW ARMV5 GCCE
 
 PRJ_MMPFILES
-gnumakefile icons_scalable_dc.mk
 EasyRPG.mmp

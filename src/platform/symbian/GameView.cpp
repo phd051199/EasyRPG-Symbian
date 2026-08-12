@@ -412,6 +412,7 @@ void CGameView::ConstructL(const TRect& aRect)
     iMasterVolume = LoadMasterVolume(iFs);
     EasyRpgAudioSetMasterVolume(iMasterVolume);
     iFrameTimer = CFrameTimer::NewL(*this);
+    iPerfOverlay = CPerfOverlay::NewL();
     iStartGameCallback = new (ELeave) CAsyncCallBack(
         TCallBack(&CGameView::StartGameCallback, this),
         CActive::EPriorityHigh);
@@ -575,8 +576,8 @@ void CGameView::StartSelectedGameL()
     iVolumeOverlayTicks = 0;
     iVolumeOverlayErasePending = EFalse;
     iFrameDrawPending = EFalse;
-    delete iPerfOverlay;
-    iPerfOverlay = NULL;
+    if (iPerfOverlay)
+        iPerfOverlay->Reset();
     DrawNow();
 
     if (iForeground)
@@ -601,8 +602,6 @@ void CGameView::StopGame()
     iResources = NULL;
     delete iDisplaySurface;
     iDisplaySurface = NULL;
-    delete iPerfOverlay;
-    iPerfOverlay = NULL;
     iGameRoot.Zero();
 
     CEasyRpgAppUi* appUi = static_cast<CEasyRpgAppUi*>(CEikonEnv::Static()->EikAppUi());
@@ -870,8 +869,13 @@ void CGameView::Draw(const TRect& aRect) const
     CWindowGc& gc = SystemGc();
     TBool overlayNeedsDraw = iPerfOverlay && iPerfOverlay->IsDirty();
     TRect overlayRect;
+    TPoint overlayPosition;
     if (iPerfOverlay)
-        overlayRect = TRect(TPoint(2, 2), iPerfOverlay->Bitmap().SizeInPixels());
+    {
+        const TSize overlaySize = iPerfOverlay->Bitmap().SizeInPixels();
+        overlayPosition = TPoint(2, KGameHeight - overlaySize.iHeight - 2);
+        overlayRect = TRect(overlayPosition, overlaySize);
+    }
 
     if (frameDraw)
     {
@@ -919,7 +923,6 @@ void CGameView::Draw(const TRect& aRect) const
 
     if (iPerfOverlay && overlayNeedsDraw)
     {
-        const TPoint overlayPosition(2, 2);
         const TSize overlaySize = iPerfOverlay->Bitmap().SizeInPixels();
         if (iPerfOverlay->IsDirty())
         {

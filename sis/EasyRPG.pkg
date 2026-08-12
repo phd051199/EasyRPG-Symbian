@@ -9,5 +9,4 @@
 
 "stage\EasyRPG.exe" - "!:\sys\bin\EasyRPG.exe"
 "stage\EasyRPG.rsc" - "!:\resource\apps\EasyRPG.rsc"
-"stage\EasyRPG_0xE31EA5A1.mif" - "!:\resource\apps\EasyRPG_0xE31EA5A1.mif"
 "stage\EasyRPG_reg.rsc" - "!:\private\10003a3f\import\apps\EasyRPG_reg.rsc"

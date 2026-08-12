@@ -27,7 +27,6 @@ set "SIS_DIR=%PROJECT_DIR%\sis"
 set "PACKAGE_DEF=%SIS_DIR%\EasyRPG.pkg"
 set "STAGE_DIR=%SIS_DIR%\stage"
 set "DEVICE_EXE=EasyRPG.exe"
-set "APP_ICON_RESOURCE=%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG_0xE31EA5A1.mif"
 
 if /I "%BUILD_PROFILE%"=="debug" (
     set "EASYRPG_BUILD_TARGET=udeb"
@@ -41,10 +40,6 @@ where bldmake >nul 2>&1
 if errorlevel 1 goto bldmake_error
 where makesis >nul 2>&1
 if errorlevel 1 goto makesis_error
-where mifconv >nul 2>&1
-if errorlevel 1 goto mifconv_error
-where perl >nul 2>&1
-if errorlevel 1 goto perl_error
 where arm-none-symbianelf-g++.exe >nul 2>&1
 if errorlevel 1 goto gcce_error
 
@@ -74,29 +69,16 @@ echo ABLD returned %RESULT%
 popd
 if not "%RESULT%"=="0" goto build_error
 
-if exist "%APP_ICON_RESOURCE%" del /q "%APP_ICON_RESOURCE%" >nul 2>&1
-if exist "%APP_ICON_RESOURCE%" goto icon_resource_cleanup_error
-pushd "%GROUP_DIR%" >nul 2>&1
-if errorlevel 1 goto group_error
-call abld -v resource gcce %EASYRPG_BUILD_TARGET% icons_scalable_dc
-set "RESULT=%ERRORLEVEL%"
-popd
-if not "%RESULT%"=="0" goto build_error
-
 if not exist "%GCCE_EXE%" goto exe_error
-if not exist "%APP_ICON_RESOURCE%" goto icon_resource_error
 if not exist "%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.rsc" goto resource_error
 if not exist "%SDK_ROOT%\epoc32\data\z\private\10003a3f\apps\EasyRPG_reg.rsc" goto registration_error
 if not exist "%PACKAGE_DEF%" goto package_error
 
 if not exist "%STAGE_DIR%" mkdir "%STAGE_DIR%"
 if errorlevel 1 goto stage_error
-for %%F in (EasyRPG.mbm EasyRPG.mif EasyRPG_icon.bmp EasyRPG_mask.bmp) do if exist "%STAGE_DIR%\%%F" del /q "%STAGE_DIR%\%%F" >nul 2>&1
 copy /b /y "%GCCE_EXE%" "%STAGE_DIR%\%DEVICE_EXE%" >nul
 if errorlevel 1 goto stage_error
 copy /b /y "%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.rsc" "%STAGE_DIR%\EasyRPG.rsc" >nul
-if errorlevel 1 goto stage_error
-copy /b /y "%APP_ICON_RESOURCE%" "%STAGE_DIR%\EasyRPG_0xE31EA5A1.mif" >nul
 if errorlevel 1 goto stage_error
 copy /b /y "%SDK_ROOT%\epoc32\data\z\private\10003a3f\apps\EasyRPG_reg.rsc" "%STAGE_DIR%\EasyRPG_reg.rsc" >nul
 if errorlevel 1 goto stage_error
@@ -139,12 +121,6 @@ exit /b 1
 :makesis_error
 echo makesis not found. >&2
 exit /b 1
-:mifconv_error
-echo mifconv not found. >&2
-exit /b 1
-:perl_error
-echo perl not found. >&2
-exit /b 1
 :gcce_error
 echo GCCE compiler not found. >&2
 exit /b 1
@@ -168,12 +144,6 @@ echo Registration resource was not produced. >&2
 exit /b 1
 :package_error
 echo Package definition missing. >&2
-exit /b 1
-:icon_resource_cleanup_error
-echo Cannot remove stale EasyRPG application icon resource: %APP_ICON_RESOURCE% >&2
-exit /b 1
-:icon_resource_error
-echo EasyRPG application icon resource was not produced: %APP_ICON_RESOURCE% >&2
 exit /b 1
 :stage_error
 echo Cannot stage GCCE executable/resources for makesis. >&2

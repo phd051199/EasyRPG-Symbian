@@ -11,7 +11,7 @@ enum TPhase {
 
 const int KCommandCapacity = 2048;
 const int KDirtyCapacity = 16;
-const int KMaximumDirtyRegions = 4;
+const int KMaximumDirtyRegions = 1;
 const int KFullRedrawAreaPercent = 88;
 const int KDirtyRegionFixedCostDivisor = 12;
 const int KCommandResyncLookahead = 8;
@@ -78,6 +78,16 @@ void ForceFull() {
     gDirtyCount = 1;
 }
 
+bool DamageComplete() {
+    if (gDirtyCount <= 0)
+        return false;
+    if (gFullDependency) {
+        ForceFull();
+        return true;
+    }
+    return gDirtyCount == 1 && SameRect(gDirty[0], gFrameRect);
+}
+
 void RemoveDirty(int aIndex) {
     for (int index = aIndex + 1; index < gDirtyCount; ++index)
         gDirty[index - 1] = gDirty[index];
@@ -123,23 +133,12 @@ void OptimizeDirty() {
     if (gDirtyCount <= 0)
         return;
 
-    while (gDirtyCount > KMaximumDirtyRegions) {
-        int selectedFirst = 0;
-        int selectedSecond = 1;
-        int selectedIncrease = 0x7fffffff;
-        for (int first = 0; first < gDirtyCount - 1; ++first) {
-            for (int second = first + 1; second < gDirtyCount; ++second) {
-                const Rect merged = UnionRect(gDirty[first], gDirty[second]);
-                const int increase = Area(merged) - Area(gDirty[first]) - Area(gDirty[second]);
-                if (increase < selectedIncrease) {
-                    selectedFirst = first;
-                    selectedSecond = second;
-                    selectedIncrease = increase;
-                }
-            }
-        }
-        gDirty[selectedFirst] = UnionRect(gDirty[selectedFirst], gDirty[selectedSecond]);
-        RemoveDirty(selectedSecond);
+    if (gDirtyCount > KMaximumDirtyRegions) {
+        Rect merged = gDirty[0];
+        for (int index = 1; index < gDirtyCount; ++index)
+            merged = UnionRect(merged, gDirty[index]);
+        gDirty[0] = merged;
+        gDirtyCount = 1;
     }
 
     Rect combined = gDirty[0];
@@ -287,6 +286,17 @@ void EndRecord() {
                 continue;
             }
 
+            if (SameRect(gPrevious[previousIndex].rect, gCurrent[currentIndex].rect)) {
+                AddDirty(gCurrent[currentIndex].rect);
+                ++previousIndex;
+                ++currentIndex;
+                if (DamageComplete()) {
+                    previousIndex = gPreviousCount;
+                    currentIndex = gCurrentCount;
+                }
+                continue;
+            }
+
             int previousMatch = -1;
             int currentMatch = -1;
             for (int offset = 1; offset <= KCommandResyncLookahead; ++offset) {
@@ -304,6 +314,10 @@ void EndRecord() {
                 for (int offset = 0; offset < previousMatch; ++offset)
                     AddDirty(gPrevious[previousIndex + offset].rect);
                 previousIndex += previousMatch;
+                if (DamageComplete()) {
+                    previousIndex = gPreviousCount;
+                    currentIndex = gCurrentCount;
+                }
                 continue;
             }
 
@@ -311,6 +325,10 @@ void EndRecord() {
                 for (int offset = 0; offset < currentMatch; ++offset)
                     AddDirty(gCurrent[currentIndex + offset].rect);
                 currentIndex += currentMatch;
+                if (DamageComplete()) {
+                    previousIndex = gPreviousCount;
+                    currentIndex = gCurrentCount;
+                }
                 continue;
             }
 
@@ -318,6 +336,10 @@ void EndRecord() {
             AddDirty(gCurrent[currentIndex].rect);
             ++previousIndex;
             ++currentIndex;
+            if (DamageComplete()) {
+                previousIndex = gPreviousCount;
+                currentIndex = gCurrentCount;
+            }
         }
 
         while (previousIndex < gPreviousCount)

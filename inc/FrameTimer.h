@@ -25,8 +25,8 @@ private:
     {
         KLogicFps = 60,
         KRenderFps = 30,
-        KLogicTicksPerRender = 2,
-        KMaxTimerDelayMicroseconds = 33334
+        KLogicTicksPerRender = KLogicFps / KRenderFps,
+        KMaxTimerDelayMicroseconds = 16667
     };
 
     explicit CFrameTimer(MFrameTimerObserver& aObserver);
