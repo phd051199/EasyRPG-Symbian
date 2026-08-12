@@ -8,7 +8,7 @@
  #include "system.h"
  #include "graphics.h"
  #include "player.h"
-@@ -24,7 +25,28 @@
+@@ -24,7 +25,24 @@
  #include "util_macro.h"
  #include "window.h"
  #include "bitmap.h"
@@ -27,17 +27,13 @@
 +	return SymbianRenderDamage::HashValue(aHash, aBitmap->Revision());
 +}
 +
-+unsigned int SymbianWindowHashBitmapIdentity(unsigned int aHash, const BitmapRef& aBitmap) {
-+	return SymbianRenderDamage::HashValue(aHash,
-+		static_cast<unsigned int>(reinterpret_cast<std::size_t>(aBitmap.get())));
-+}
 +}
 +#endif
 +
  Window::Window():
  	type(TypeWindow),
  	stretch(true),
-@@ -98,6 +120,98 @@
+@@ -98,6 +115,92 @@
  	if (x < -width || x > DisplayUi->GetWidth() || y < -height || y > DisplayUi->GetHeight()) return;
  
  	BitmapRef dst = DisplayUi->GetDisplaySurface();
@@ -96,19 +92,11 @@
 +			const int draw_x = max(x + border_x, x + border_x - ox);
 +			const int draw_y = max(y + border_y, y + border_y - oy);
 +			unsigned int signature = SymbianRenderDamage::HashSeed(0x57540004u);
-+			signature = SymbianWindowHashBitmapIdentity(signature, contents);
++			signature = SymbianWindowHashBitmap(signature, contents);
 +			signature = SymbianWindowHashInt(signature, src_rect.x);
 +			signature = SymbianWindowHashInt(signature, src_rect.y);
 +			signature = SymbianWindowHashInt(signature, contents_opacity);
 +			SymbianRenderDamage::Record(signature, Rect(draw_x, draw_y, src_rect.width, src_rect.height));
-+			if (contents->HasDamage()) {
-+				Rect damage = contents->DamageRect();
-+				damage.Adjust(src_rect);
-+				if (!damage.IsEmpty())
-+					SymbianRenderDamage::MarkDirty(Rect(draw_x + damage.x - src_rect.x,
-+						draw_y + damage.y - src_rect.y, damage.width, damage.height));
-+				contents->ClearDamage();
-+			}
 +		}
 +
 +		if (windowskin && pause && pause_frame > 16 && animation_frames <= 0) {
@@ -129,8 +117,10 @@
 +		return;
 +	}
 +
-+	if (SymbianRenderDamage::IsPainting() &&
-+		!SymbianRenderDamage::IntersectsDirty(Rect(x, y, width, height)))
++	const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
++	if (paint_clip &&
++		(x >= paint_clip->x + paint_clip->width || paint_clip->x >= x + width ||
++		 y >= paint_clip->y + paint_clip->height || paint_clip->y >= y + height))
 +		return;
 +#endif
  

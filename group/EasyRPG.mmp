@@ -16,6 +16,7 @@ SOURCE            DisplaySurface.cpp
 SOURCE            PerfOverlay.cpp
 SOURCE            AudioMixer.cpp
 SOURCE            AudioBridge.cpp
+SOURCE            MovieBridge.cpp
 SOURCE            GameLocator.cpp
 SOURCE            ZipVfs.cpp
 SOURCE            LcfProbe.cpp
@@ -60,6 +61,9 @@ LIBRARY           libm.lib
 LIBRARY           libz.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
+LIBRARY           midiclient.lib
+LIBRARY           mediaclientvideo.lib
+LIBRARY           ws32.lib
 STATICLIBRARY     EasyRpgModernCore.lib
 
 LANG              SC

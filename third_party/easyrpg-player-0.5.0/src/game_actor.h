@@ -681,6 +681,7 @@ public:
 	 * @return all Rpg2k3 battle commands.
 	 */
 	const std::vector<const RPG::BattleCommand*> GetBattleCommands() const;
+	bool HasRowCommand() const;
 
 	/**
 	 * Gets battle row for Rpg2k3 battles.

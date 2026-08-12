@@ -60,7 +60,7 @@ public:
 	void Update();
 
 	BitmapRef const& GetChipset() const;
-	void SetChipset(BitmapRef const& nchipset);
+	void SetChipset(BitmapRef const& nchipset, BitmapRef const& nopaque = BitmapRef());
 	std::vector<short> GetMapData() const;
 	void SetMapData(const std::vector<short>& nmap_data);
 	std::vector<unsigned char> GetPassable() const;
@@ -93,6 +93,9 @@ public:
 
 private:
 	BitmapRef chipset;
+#ifdef EASYRPG_SYMBIAN
+	BitmapRef chipset_opaque;
+#endif
 	BitmapRef chipset_effect;
 	std::vector<uint8_t> chipset_tone_tiles;
 
@@ -132,9 +135,15 @@ private:
 	TileXY GetCachedAutotileAB(short ID, short animID);
 	TileXY GetCachedAutotileD(short ID);
 	BitmapRef autotiles_ab_screen;
+#ifdef EASYRPG_SYMBIAN
+	BitmapRef autotiles_ab_screen_opaque;
+#endif
 	BitmapRef autotiles_ab_screen_effect;
 	std::vector<uint8_t> autotiles_ab_screen_tone_tiles;
 	BitmapRef autotiles_d_screen;
+#ifdef EASYRPG_SYMBIAN
+	BitmapRef autotiles_d_screen_opaque;
+#endif
 	BitmapRef autotiles_d_screen_effect;
 	std::vector<uint8_t> autotiles_d_screen_tone_tiles;
 

@@ -857,6 +857,7 @@ void Game_Character::SetGraphic(const std::string& name, int index) {
 
 void Game_Character::Flash(Color color, int duration) {
 	SetFlashColor(color);
+	SetFlashLevel(color.alpha);
 	SetFlashTimeLeft(duration * DEFAULT_FPS / 10);
 }
 

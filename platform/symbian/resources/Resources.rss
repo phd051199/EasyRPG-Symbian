@@ -1,9 +1,11 @@
 NAME ERPG
 
 #include <eikon.rh>
+#include <eikon.hrh>
 #include <avkon.rsg>
 #include <avkon.rh>
 #include <appinfo.rh>
+#include "App.hrh"
 #include "Strings.rls"
 
 RESOURCE RSS_SIGNATURE
@@ -33,6 +35,34 @@ RESOURCE MENU_PANE r_menu
 {
     items =
     {
+        MENU_ITEM
+        {
+            command = EEasyRpgCmdLauncherPlay;
+            txt = qtn_play;
+        },
+        MENU_ITEM
+        {
+            command = EEasyRpgCmdLauncherDelete;
+            flags = EEikMenuItemDimmed;
+            txt = qtn_delete;
+        },
+        MENU_ITEM
+        {
+            command = EEasyRpgCmdLauncherActivate;
+            flags = EEikMenuItemDimmed;
+            txt = qtn_activate;
+        },
+        MENU_ITEM
+        {
+            command = EEasyRpgCmdLauncherAbout;
+            txt = qtn_about;
+        },
+        MENU_ITEM
+        {
+            command = EEasyRpgCmdLauncherHomepage;
+            flags = EEikMenuItemDimmed;
+            txt = qtn_homepage;
+        },
         MENU_ITEM
         {
             command = EAknSoftkeyExit;

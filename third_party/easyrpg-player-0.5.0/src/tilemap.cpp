@@ -34,8 +34,14 @@ BitmapRef const& Tilemap::GetChipset() const {
 	return layer_down.GetChipset();
 }
 void Tilemap::SetChipset(BitmapRef const& chipset) {
+#ifdef EASYRPG_SYMBIAN
+	BitmapRef opaque = chipset ? Bitmap::Create(*chipset, chipset->GetRect(), false) : BitmapRef();
+	layer_down.SetChipset(chipset, opaque);
+	layer_up.SetChipset(chipset, opaque);
+#else
 	layer_down.SetChipset(chipset);
 	layer_up.SetChipset(chipset);
+#endif
 }
 
 std::vector<short> Tilemap::GetMapDataDown() const {

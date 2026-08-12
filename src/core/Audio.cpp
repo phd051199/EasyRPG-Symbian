@@ -29,7 +29,7 @@ public:
     }
 
     bool BGM_PlayedOnce() const override {
-        return EasyRpgAudioBgmTicks() > 5000;
+        return EasyRpgAudioBgmPlayedOnce() != 0;
     }
 
     bool BGM_IsPlaying() const override {

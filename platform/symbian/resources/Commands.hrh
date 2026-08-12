@@ -1,0 +1,8 @@
+#ifndef EASYRPG_COMMANDS_HRH
+#define EASYRPG_COMMANDS_HRH
+
+#define EEasyRpgCmdPlay 0x7001
+#define EEasyRpgCmdDelete 0x7002
+#define EEasyRpgCmdAbout 0x7003
+
+#endif

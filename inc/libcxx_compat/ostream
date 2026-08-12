@@ -1,6 +1,40 @@
 #ifndef EASYRPG_SYMBIAN_LIBCXX_COMPAT_OSTREAM
 #define EASYRPG_SYMBIAN_LIBCXX_COMPAT_OSTREAM
 
-#include <iosfwd>
+#include <__config>
+#include <ios>
+#include <streambuf>
+
+_LIBCPP_BEGIN_NAMESPACE_STD
+
+template<class CharT, class Traits>
+class basic_ostream : public basic_ios<CharT, Traits> {
+public:
+    basic_ostream() : state_(ios_base::goodbit) {}
+    explicit basic_ostream(FILE* file) : buffer_(file), state_(file ? ios_base::goodbit : ios_base::badbit) {}
+    basic_streambuf<CharT, Traits>* rdbuf() { return &buffer_; }
+    const basic_streambuf<CharT, Traits>* rdbuf() const { return &buffer_; }
+    void setstate(ios_base::iostate state) { state_ |= state; }
+    void attach(FILE* file) {
+        buffer_.attach(file);
+        state_ = file ? ios_base::goodbit : ios_base::badbit;
+    }
+    basic_ostream& write(const CharT* data, long count) {
+        if (!data || count < 0 || buffer_.sputn(data, count) != count)
+            state_ |= ios_base::badbit;
+        return *this;
+    }
+    basic_ostream& flush() {
+        if (!buffer_.flush())
+            state_ |= ios_base::badbit;
+        return *this;
+    }
+    operator bool() const { return state_ == ios_base::goodbit; }
+private:
+    basic_streambuf<CharT, Traits> buffer_;
+    ios_base::iostate state_;
+};
+
+_LIBCPP_END_NAMESPACE_STD
 
 #endif

@@ -24,7 +24,8 @@ CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
       iElapsedCounter(0),
       iNextDeadlineCounter(0),
       iLogicFrame(0),
-      iRunning(EFalse)
+      iRunning(EFalse),
+      iFrameSkipEnabled(ETrue)
 {
 }
 
@@ -71,6 +72,16 @@ void CFrameTimer::Stop()
 TBool CFrameTimer::Running() const
 {
     return iRunning;
+}
+
+void CFrameTimer::SetFrameSkipEnabled(TBool aEnabled)
+{
+    iFrameSkipEnabled = aEnabled;
+}
+
+TBool CFrameTimer::FrameSkipEnabled() const
+{
+    return iFrameSkipEnabled;
 }
 
 void CFrameTimer::AdvanceDeadline()
@@ -142,25 +153,34 @@ void CFrameTimer::RunL()
         return;
     }
 
-    AdvanceDeadline();
-    if (iElapsedCounter >= iNextDeadlineCounter)
+    TInt dueTicks = 0;
+    while (iElapsedCounter >= iNextDeadlineCounter && dueTicks < KMaxLogicCatchUpTicks)
     {
-        iNextDeadlineCounter = iElapsedCounter;
-        iFrameRemainderAccumulator = 0;
         AdvanceDeadline();
+        ++dueTicks;
     }
 
-    ++iLogicFrame;
-    const TBool renderFrame = (iLogicFrame % KLogicTicksPerRender) == 0;
-    TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
-    if (error != KErrNone)
+    const TBool stillBehind = iElapsedCounter >= iNextDeadlineCounter;
+    TBool renderDue = EFalse;
+    for (TInt tick = 0; tick < dueTicks; ++tick)
     {
-        Stop();
-        iObserver.FrameError(error);
-        return;
+        ++iLogicFrame;
+        const TBool scheduledRender = (iLogicFrame % KLogicTicksPerRender) == 0;
+        if (scheduledRender)
+            renderDue = ETrue;
+        const TBool renderFrame = iFrameSkipEnabled
+            ? (!stillBehind && renderDue && tick == dueTicks - 1)
+            : scheduledRender;
+        TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
+        if (error != KErrNone)
+        {
+            Stop();
+            iObserver.FrameError(error);
+            return;
+        }
+        if (!iRunning)
+            return;
     }
-    if (!iRunning)
-        return;
 
     UpdateElapsedCounter(User::FastCounter());
     QueueToDeadline();

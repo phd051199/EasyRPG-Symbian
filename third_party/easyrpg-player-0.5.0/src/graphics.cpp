@@ -46,6 +46,7 @@ namespace Graphics {
 
 	BitmapRef frozen_screen;
 	BitmapRef black_screen;
+	BitmapRef transition_buffer;
 	BitmapRef screen1;
 	BitmapRef screen2;
 	bool frozen;
@@ -84,6 +85,7 @@ void Graphics::Init() {
 	transition_frames_left = 0;
 
 	black_screen = Bitmap::Create(DisplayUi->GetWidth(), DisplayUi->GetHeight(), Color(0,0,0,255));
+	transition_buffer = Bitmap::Create(DisplayUi->GetWidth() / 2 + 1, DisplayUi->GetHeight() / 2 + 1, false);
 
 	state.reset(new State());
 	global_state.reset(new State());
@@ -97,6 +99,7 @@ void Graphics::Quit() {
 
 	frozen_screen.reset();
 	black_screen.reset();
+	transition_buffer.reset();
 
 	Cache::Clear();
 }
@@ -348,24 +351,6 @@ void Graphics::UpdateTransition() {
 
 	transition_frames_left--;
 
-	// Fallback to FadeIn/Out for not implemented transition types:
-	// (Remove from here when implemented below)
-	switch (transition_type) {
-	case TransitionRandomBlocks:
-	case TransitionRandomBlocksUp:
-	case TransitionRandomBlocksDown:
-	case TransitionZoomIn:
-	case TransitionZoomOut:
-	case TransitionMosaicIn:
-	case TransitionMosaicOut:
-	case TransitionWaveIn:
-	case TransitionWaveOut:
-		transition_type = TransitionFadeIn;
-		break;
-	default:
-		break;
-	}
-
 	switch (transition_type) {
 	case TransitionFadeIn:
 	case TransitionFadeOut:
@@ -373,11 +358,31 @@ void Graphics::UpdateTransition() {
 		dst->Blit(0, 0, *screen2, screen2->GetRect(), 255 * percentage / 100);
 		break;
 	case TransitionRandomBlocks:
-		break;
 	case TransitionRandomBlocksUp:
+	case TransitionRandomBlocksDown: {
+		const int block = 16;
+		dst->Blit(0, 0, *screen1, screen1->GetRect(), 255);
+		for (int y = 0; y < h; y += block) {
+			for (int x = 0; x < w; x += block) {
+				const unsigned int bx = static_cast<unsigned int>(x / block);
+				const unsigned int by = static_cast<unsigned int>(y / block);
+				unsigned int rank = (bx * 1103515245u + by * 12345u + (bx ^ (by << 4)) * 2654435761u) % 10000u;
+				if (transition_type == TransitionRandomBlocksUp) {
+					const unsigned int rows = static_cast<unsigned int>((h + block - 1) / block);
+					rank = rows > 1 ? (by * 8000u / (rows - 1u) + rank / 5u) : rank;
+				} else if (transition_type == TransitionRandomBlocksDown) {
+					const unsigned int rows = static_cast<unsigned int>((h + block - 1) / block);
+					rank = rows > 1 ? ((rows - 1u - by) * 8000u / (rows - 1u) + rank / 5u) : rank;
+				}
+				if (rank >= static_cast<unsigned int>(percentage * 100))
+					continue;
+				const int bw = std::min(block, w - x);
+				const int bh = std::min(block, h - y);
+				dst->Blit(x, y, *screen2, Rect(x, y, bw, bh), 255);
+			}
+		}
 		break;
-	case TransitionRandomBlocksDown:
-		break;
+	}
 	case TransitionBlindOpen:
 		for (int i = 0; i < h / 8; i++) {
 			dst->Blit(0, i * 8, *screen1, Rect(0, i * 8, w, 8 - 8 * percentage / 100), 255);
@@ -480,18 +485,55 @@ void Graphics::UpdateTransition() {
 		dst->Blit(w / 2 - (w / 2) * percentage / 100, h / 2 + (h / 2) * percentage / 100, *screen2, Rect(w / 2 - (w / 2) * percentage / 100, h / 2 + (h / 2) * percentage / 100, w * percentage / 100, h / 2 + (h / 2) * percentage / 100), 255);
 		dst->Blit(0, h / 2 - (h / 2) * percentage / 100, *screen2, Rect(0, h / 2 - (h / 2) * percentage / 100, w, h * percentage / 100), 255);
 		break;
-	case TransitionZoomIn:
+	case TransitionZoomIn: {
+		dst->Blit(0, 0, *screen1, screen1->GetRect(), 255);
+		const int zw = std::max(1, w * percentage / 100);
+		const int zh = std::max(1, h * percentage / 100);
+		dst->StretchBlit(Rect((w - zw) / 2, (h - zh) / 2, zw, zh), *screen2, screen2->GetRect(), 255);
 		break;
-	case TransitionZoomOut:
+	}
+	case TransitionZoomOut: {
+		dst->Blit(0, 0, *screen2, screen2->GetRect(), 255);
+		const int remain = 100 - percentage;
+		if (remain > 0) {
+			const int zw = std::max(1, w * remain / 100);
+			const int zh = std::max(1, h * remain / 100);
+			dst->StretchBlit(Rect((w - zw) / 2, (h - zh) / 2, zw, zh), *screen1, screen1->GetRect(), 255);
+		}
 		break;
+	}
 	case TransitionMosaicIn:
+	case TransitionMosaicOut: {
+		const int progress = transition_type == TransitionMosaicIn ? percentage : 100 - percentage;
+		int block = 1 + (100 - progress) * 15 / 100;
+		if (block <= 1 || !transition_buffer) {
+			dst->Blit(0, 0, transition_type == TransitionMosaicIn ? *screen2 : *screen1,
+				transition_type == TransitionMosaicIn ? screen2->GetRect() : screen1->GetRect(), 255);
+		} else {
+			const BitmapRef& source = transition_type == TransitionMosaicIn ? screen2 : screen1;
+			const int sw = (w + block - 1) / block;
+			const int sh = (h + block - 1) / block;
+			transition_buffer->StretchBlit(Rect(0, 0, sw, sh), *source, source->GetRect(), 255);
+			dst->StretchBlit(Rect(0, 0, w, h), *transition_buffer, Rect(0, 0, sw, sh), 255);
+		}
+		if (transition_type == TransitionMosaicOut)
+			dst->Blit(0, 0, *screen2, screen2->GetRect(), 255 * percentage / 100);
 		break;
-	case TransitionMosaicOut:
+	}
+	case TransitionWaveIn: {
+		dst->Blit(0, 0, *screen1, screen1->GetRect(), 255);
+		const int depth = (100 - percentage) * 16 / 100;
+		dst->WaverBlit(0, 0, 1.0, 1.0, *screen2, screen2->GetRect(), depth,
+			static_cast<double>(transition_frame) * 0.25, 255 * percentage / 100);
 		break;
-	case TransitionWaveIn:
+	}
+	case TransitionWaveOut: {
+		dst->Blit(0, 0, *screen2, screen2->GetRect(), 255);
+		const int depth = percentage * 16 / 100;
+		dst->WaverBlit(0, 0, 1.0, 1.0, *screen1, screen1->GetRect(), depth,
+			static_cast<double>(transition_frame) * 0.25, 255 * (100 - percentage) / 100);
 		break;
-	case TransitionWaveOut:
-		break;
+	}
 	default:
 		DisplayUi->CleanDisplay();
 		break;

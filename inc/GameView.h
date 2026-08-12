@@ -28,6 +28,8 @@ public:
     TBool IsGameRunning() const;
     void HandleLeftSoftkeyL();
     void HandleRightSoftkeyL();
+    void PlaySelectedGameL();
+    TKeyResponse HandleKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType);
 
 private:
     CGameView();
@@ -50,12 +52,23 @@ private:
     void StartSelectedGameL();
     void StopGame();
     void ShowLoadErrorL(TInt aError);
-    void SetKeyMapVisible(TBool aVisible);
+    void OpenGameMenu();
+    void CloseGameMenu();
+    void MoveGameMenuSelection(TInt aDelta);
+    void ActivateGameMenuItemL();
+    void ToggleSound();
+    void ToggleFrameSkip();
+    void RestartGameL();
     void ToggleFpsOverlayL();
     void AdjustMasterVolume(TInt aDelta);
+    void DrawGameMenuOverlay(CWindowGc& aGc) const;
     void DrawKeyMapOverlay(CWindowGc& aGc) const;
     void DrawVolumeOverlay(CWindowGc& aGc, const TPoint& aDestination) const;
-    TUint32 MapPlayerKey(const TKeyEvent& aKeyEvent) const;
+    TUint32 MapPlayerScanKey(const TKeyEvent& aKeyEvent) const;
+    TUint32 MapPlayerCharacterKey(TInt aCode) const;
+    TUint32 FindDynamicPlayerScanKey(TInt aScanCode) const;
+    void RememberDynamicPlayerScanKey(TInt aScanCode, TUint32 aPlayerKey);
+    void ForgetDynamicPlayerScanKey(TInt aScanCode);
 
 private:
     RFs iFs;
@@ -70,13 +83,22 @@ private:
     CAsyncCallBack* iStartGameCallback;
     TBool iForeground;
     TBool iKeyMapVisible;
+    TBool iGameMenuActive;
+    TInt iGameMenuSelection;
+    TBool iLeftSoftkeyHeld;
+    TBool iRightSoftkeyHeld;
     TBool iPendingCancelPulse;
-    TBool iPendingDecisionPulse;
+    TUint32 iHeldPlayerKeys;
+    TUint32 iPendingPlayerKeyPulses;
+    TInt iDynamicPlayerScanCodes[16];
+    TUint32 iDynamicPlayerScanKeys[16];
+    TInt iDynamicPlayerScanCount;
     TBool iVolumeUpHeld;
     TBool iVolumeDownHeld;
     mutable TBool iFrameDrawPending;
     mutable TBool iVolumeOverlayErasePending;
     TInt iMasterVolume;
+    TInt iAudibleVolume;
     TInt iVolumeOverlayTicks;
     TFileName iGameRoot;
 };

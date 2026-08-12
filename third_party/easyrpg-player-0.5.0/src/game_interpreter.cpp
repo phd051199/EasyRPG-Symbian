@@ -140,7 +140,7 @@ void Game_Interpreter::SetupReference(
 }
 
 void Game_Interpreter::CancelMenuCall() {
-	// TODO
+	Game_Temp::menu_calling = false;
 }
 
 void Game_Interpreter::SetupWait(int duration) {

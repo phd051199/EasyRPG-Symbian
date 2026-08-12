@@ -1,0 +1,54 @@
+--- a/src/scene_order.cpp
++++ b/src/scene_order.cpp
+@@ -143,8 +143,7 @@ void Scene_Order::Redo() {
+ 	window_confirm->SetIndex(-1);
+ 
+ 	actor_counter = 0;
+-	actors.clear();
+-	actors.resize(actors.size());
++	actors.assign(Main_Data::game_party->GetActors().size(), 0);
+ }
+ 
+ void Scene_Order::Confirm() {
+--- a/src/scene_battle_rpg2k.cpp
++++ b/src/scene_battle_rpg2k.cpp
+@@ -887,12 +887,12 @@ bool Scene_Battle_Rpg2k::CheckLose() {
+ }
+ 
+ bool Scene_Battle_Rpg2k::CheckAbort() {
+-	/*if (!Game_Battle::terminate)
+-		return;
+-	Game_Temp::battle_result = Game_Temp::BattleAbort;
+-	Scene::Pop();*/
+-
+-	return false;
++	if (!Game_Battle::IsTerminating())
++		return false;
++	if (Game_Temp::battle_result != Game_Temp::BattleEscape)
++		Game_Temp::battle_result = Game_Temp::BattleAbort;
++	Scene::Pop();
++	return true;
+ }
+ 
+ bool Scene_Battle_Rpg2k::CheckFlee() {
+--- a/src/scene_battle_rpg2k3.cpp
++++ b/src/scene_battle_rpg2k3.cpp
+@@ -1069,12 +1069,12 @@ bool Scene_Battle_Rpg2k3::CheckLose() {
+ }
+ 
+ bool Scene_Battle_Rpg2k3::CheckAbort() {
+-	/*if (!Game_Battle::terminate)
+-		return;
+-	Game_Temp::battle_result = Game_Temp::BattleAbort;
+-	Scene::Pop();*/
+-
+-	return false;
++	if (!Game_Battle::IsTerminating())
++		return false;
++	if (Game_Temp::battle_result != Game_Temp::BattleEscape)
++		Game_Temp::battle_result = Game_Temp::BattleAbort;
++	Scene::Pop();
++	return true;
+ }
+ 
+ bool Scene_Battle_Rpg2k3::CheckFlee() {

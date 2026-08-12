@@ -124,6 +124,11 @@ unsigned int SymbianHashTone(unsigned int aHash, const Tone& aTone) {
 	return SymbianHashInt(aHash, aTone.gray);
 }
 
+bool SymbianIntersectsRect(const Rect& aFirst, const Rect& aSecond) {
+	return aFirst.x < aSecond.x + aSecond.width && aSecond.x < aFirst.x + aFirst.width &&
+		aFirst.y < aSecond.y + aSecond.height && aSecond.y < aFirst.y + aFirst.height;
+}
+
 bool SymbianRecordDraw(Bitmap* aDestination, unsigned int aSignature, const Rect& aRect) {
 	if (!DisplayUi || !DisplayUi->GetDisplaySurface() || DisplayUi->GetDisplaySurface().get() != aDestination)
 		return false;
@@ -131,7 +136,8 @@ bool SymbianRecordDraw(Bitmap* aDestination, unsigned int aSignature, const Rect
 		SymbianRenderDamage::Record(aSignature, aRect);
 		return true;
 	}
-	if (SymbianRenderDamage::IsPainting() && !SymbianRenderDamage::IntersectsDirty(aRect))
+	const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+	if (paint_clip && !SymbianIntersectsRect(aRect, *paint_clip))
 		return true;
 	return false;
 }
@@ -170,13 +176,19 @@ void SymbianFill565Rect(Bitmap& aBitmap, const Rect& aRect, uint16_t aColor) {
 	if (aRect.IsEmpty())
 		return;
 	uint8_t* base = static_cast<uint8_t*>(aBitmap.pixels());
+	const int pitch = aBitmap.pitch();
 	if (aColor == 0) {
+		const size_t row_bytes = static_cast<size_t>(aRect.width) * 2u;
+		if (aRect.x == 0 && row_bytes == static_cast<size_t>(pitch)) {
+			std::memset(base + aRect.y * pitch, 0, row_bytes * static_cast<size_t>(aRect.height));
+			return;
+		}
 		for (int y = aRect.y; y < aRect.y + aRect.height; ++y)
-			std::memset(base + y * aBitmap.pitch() + aRect.x * 2, 0, static_cast<size_t>(aRect.width) * 2);
+			std::memset(base + y * pitch + aRect.x * 2, 0, row_bytes);
 		return;
 	}
 	for (int y = aRect.y; y < aRect.y + aRect.height; ++y) {
-		uint16_t* row = reinterpret_cast<uint16_t*>(base + y * aBitmap.pitch()) + aRect.x;
+		uint16_t* row = reinterpret_cast<uint16_t*>(base + y * pitch) + aRect.x;
 		for (int x = 0; x < aRect.width; ++x)
 			row[x] = aColor;
 	}
@@ -187,8 +199,9 @@ void SymbianFill565(Bitmap& aBitmap, const Rect& aInput, uint16_t aColor) {
 	rect.Adjust(aBitmap.GetRect());
 	if (rect.IsEmpty())
 		return;
-	if (SymbianRenderDamage::IsPainting())
-		rect.Adjust(SymbianRenderDamage::CurrentPaintRect());
+	const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+	if (paint_clip)
+		rect.Adjust(*paint_clip);
 	SymbianFill565Rect(aBitmap, rect, aColor);
 }
 
@@ -199,6 +212,26 @@ unsigned int SymbianMul255(unsigned int aValue, unsigned int aAlpha) {
 
 uint16_t SymbianPack565(unsigned int aRed, unsigned int aGreen, unsigned int aBlue) {
 	return static_cast<uint16_t>(((aRed >> 3) << 11) | ((aGreen >> 2) << 5) | (aBlue >> 3));
+}
+
+uint16_t SymbianA1555To565(uint16_t aPixel) {
+	return static_cast<uint16_t>(((aPixel & 0x7fe0u) << 1) |
+		((aPixel & 0x0200u) >> 4) |
+		(aPixel & 0x001fu));
+}
+
+void SymbianCopyTileRow565(uint8_t* aDestination, const uint8_t* aSource) {
+	if (((reinterpret_cast<size_t>(aDestination) | reinterpret_cast<size_t>(aSource)) & 3u) == 0) {
+		uint32_t* destination = reinterpret_cast<uint32_t*>(aDestination);
+		const uint32_t* source = reinterpret_cast<const uint32_t*>(aSource);
+		for (int index = 0; index < TILE_SIZE / 2; ++index)
+			destination[index] = source[index];
+		return;
+	}
+	uint16_t* destination = reinterpret_cast<uint16_t*>(aDestination);
+	const uint16_t* source = reinterpret_cast<const uint16_t*>(aSource);
+	for (int index = 0; index < TILE_SIZE; ++index)
+		destination[index] = source[index];
 }
 
 void SymbianExpand565(uint16_t aPixel, unsigned int& aRed, unsigned int& aGreen, unsigned int& aBlue) {
@@ -245,8 +278,9 @@ bool SymbianBlitTo565(void* aDestinationPixels,
 	height = std::min(height, aSourceHeight - sy);
 	width = std::min(width, aDestinationWidth - dx);
 	height = std::min(height, aDestinationHeight - dy);
-	if (SymbianRenderDamage::IsPainting()) {
-		const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+	const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+	if (paint_clip) {
+		const Rect& dirty = *paint_clip;
 		const int left = std::max(dx, dirty.x);
 		const int top = std::max(dy, dirty.y);
 		const int right = std::min(dx + width, dirty.x + dirty.width);
@@ -268,10 +302,17 @@ bool SymbianBlitTo565(void* aDestinationPixels,
 	const uint8_t* sourceBase = static_cast<const uint8_t*>(aSourcePixels);
 	if (source565 && opacity == 255u) {
 		const size_t rowBytes = static_cast<size_t>(width) * 2u;
-		for (int row = 0; row < height; ++row) {
-			std::memcpy(destinationBase + (dy + row) * aDestinationPitch + dx * 2,
-				sourceBase + (sy + row) * aSourcePitch + sx * 2,
-				rowBytes);
+		if (dx == 0 && sx == 0 && rowBytes == static_cast<size_t>(aDestinationPitch) &&
+			rowBytes == static_cast<size_t>(aSourcePitch)) {
+			std::memcpy(destinationBase + dy * aDestinationPitch,
+				sourceBase + sy * aSourcePitch,
+				rowBytes * static_cast<size_t>(height));
+		} else {
+			for (int row = 0; row < height; ++row) {
+				std::memcpy(destinationBase + (dy + row) * aDestinationPitch + dx * 2,
+					sourceBase + (sy + row) * aSourcePitch + sx * 2,
+					rowBytes);
+			}
 		}
 		aWrittenRect.Set(dx, dy, width, height);
 		return true;
@@ -286,12 +327,7 @@ bool SymbianBlitTo565(void* aDestinationPixels,
 				const uint16_t pixel = source[column];
 				if ((pixel & 0x8000u) == 0)
 					continue;
-				const unsigned int green5 = (pixel >> 5) & 31u;
-				const unsigned int green6 = (green5 << 1) | (green5 >> 4);
-				destination[column] = static_cast<uint16_t>(
-					((pixel & 0x7c00u) << 1) |
-					(green6 << 5) |
-					(pixel & 0x001fu));
+				destination[column] = SymbianA1555To565(pixel);
 			}
 		}
 		aWrittenRect.Set(dx, dy, width, height);
@@ -477,8 +513,9 @@ bool SymbianScaleTo565(void* aDestinationPixels,
 
 	Rect destination = aDestinationRect;
 	destination.Adjust(Rect(0, 0, aDestinationWidth, aDestinationHeight));
-	if (SymbianRenderDamage::IsPainting())
-		destination.Adjust(SymbianRenderDamage::CurrentPaintRect());
+	const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+	if (paint_clip)
+		destination.Adjust(*paint_clip);
 	if (destination.IsEmpty()) {
 		aWrittenRect = Rect();
 		return true;
@@ -767,8 +804,6 @@ void Bitmap::HueChangeBlit(int x, int y, Bitmap const& src, Rect const& src_rect
 
 void Bitmap::RefreshCallback() {
 #ifdef EASYRPG_SYMBIAN
-	damage_rect = GetRect();
-	damage_valid = !damage_rect.IsEmpty();
 	++revision_counter;
 	if (revision_counter == 0)
 		revision_counter = 1;
@@ -1010,6 +1045,15 @@ void Bitmap::Init(int width, int height, void* data, int pitch, bool destroy) {
 	if (bitmap == NULL) {
 		Output::Error("Couldn't create %dx%d image.", width, height);
 	}
+#ifdef EASYRPG_SYMBIAN
+	else {
+		symbian_width = width;
+		symbian_height = height;
+		symbian_pitch = pixman_image_get_stride(bitmap);
+		symbian_bpp = (pixman_image_get_depth(bitmap) + 7) / 8;
+		symbian_pixels = pixman_image_get_data(bitmap);
+	}
+#endif
 
 	if (format.bits == 8 && format.alpha_type == PF::NoAlpha) {
 		initialize_palette();
@@ -1187,30 +1231,53 @@ Bitmap::Bitmap(Bitmap const& source, Rect const& src_rect, bool transparent) {
 }
 
 void* Bitmap::pixels() {
+#ifdef EASYRPG_SYMBIAN
+	return symbian_pixels;
+#else
 	if (!bitmap) {
 		return nullptr;
 	}
-
 	return (void*) pixman_image_get_data(bitmap);
+#endif
 }
 void const* Bitmap::pixels() const {
+#ifdef EASYRPG_SYMBIAN
+	return symbian_pixels;
+#else
 	return (void const*) pixman_image_get_data(bitmap);
+#endif
 }
 
 int Bitmap::bpp() const {
+#ifdef EASYRPG_SYMBIAN
+	return symbian_bpp;
+#else
 	return (pixman_image_get_depth(bitmap) + 7) / 8;
+#endif
 }
 
 int Bitmap::width() const {
+#ifdef EASYRPG_SYMBIAN
+	return symbian_width;
+#else
 	return pixman_image_get_width(bitmap);
+#endif
 }
 
 int Bitmap::height() const {
+#ifdef EASYRPG_SYMBIAN
+	return symbian_height;
+#else
 	return pixman_image_get_height(bitmap);
+#endif
 }
 
 int Bitmap::pitch() const {
+#ifdef EASYRPG_SYMBIAN
+	return symbian_pitch;
+#else
 	return pixman_image_get_stride(bitmap);
+#endif
 }
 
 #ifdef EASYRPG_SYMBIAN
@@ -1222,37 +1289,10 @@ void Bitmap::Touch() {
 	RefreshCallback();
 }
 
-void Bitmap::Touch(const Rect& aInput) {
-	Rect rect = aInput;
-	rect.Adjust(GetRect());
-	if (!rect.IsEmpty()) {
-		if (damage_valid) {
-			const int left = std::min(damage_rect.x, rect.x);
-			const int top = std::min(damage_rect.y, rect.y);
-			const int right = std::max(damage_rect.x + damage_rect.width, rect.x + rect.width);
-			const int bottom = std::max(damage_rect.y + damage_rect.height, rect.y + rect.height);
-			damage_rect.Set(left, top, right - left, bottom - top);
-		} else {
-			damage_rect = rect;
-			damage_valid = true;
-		}
-	}
+void Bitmap::Touch(const Rect&) {
 	++revision_counter;
 	if (revision_counter == 0)
 		revision_counter = 1;
-}
-
-bool Bitmap::HasDamage() const {
-	return damage_valid;
-}
-
-const Rect& Bitmap::DamageRect() const {
-	return damage_rect;
-}
-
-void Bitmap::ClearDamage() {
-	damage_valid = false;
-	damage_rect = Rect();
 }
 
 void Bitmap::SetClipRects(const Rect* aRects, int aCount) {
@@ -1400,16 +1440,21 @@ void Bitmap::BlitTileFast565(int x, int y, Bitmap const& src, int src_x, int src
 		int sy = src_y;
 		int copy_width = TILE_SIZE;
 		int copy_height = TILE_SIZE;
+		const int source_width = src.width();
+		const int source_height = src.height();
+		const int destination_width = width();
+		const int destination_height = height();
 		if (sx < 0) { dx -= sx; copy_width += sx; sx = 0; }
 		if (sy < 0) { dy -= sy; copy_height += sy; sy = 0; }
 		if (dx < 0) { sx -= dx; copy_width += dx; dx = 0; }
 		if (dy < 0) { sy -= dy; copy_height += dy; dy = 0; }
-		copy_width = std::min(copy_width, src.width() - sx);
-		copy_height = std::min(copy_height, src.height() - sy);
-		copy_width = std::min(copy_width, width() - dx);
-		copy_height = std::min(copy_height, height() - dy);
-		if (SymbianRenderDamage::IsPainting()) {
-			const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+		copy_width = std::min(copy_width, source_width - sx);
+		copy_height = std::min(copy_height, source_height - sy);
+		copy_width = std::min(copy_width, destination_width - dx);
+		copy_height = std::min(copy_height, destination_height - dy);
+		const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+		if (paint_clip) {
+			const Rect& dirty = *paint_clip;
 			const int left = std::max(dx, dirty.x);
 			const int top = std::max(dy, dirty.y);
 			const int right = std::min(dx + copy_width, dirty.x + dirty.width);
@@ -1426,24 +1471,27 @@ void Bitmap::BlitTileFast565(int x, int y, Bitmap const& src, int src_x, int src
 
 		uint8_t* destination_base = static_cast<uint8_t*>(pixels());
 		const uint8_t* source_base = static_cast<const uint8_t*>(src.pixels());
+		const int destination_pitch = pitch();
+		const int source_pitch = src.pitch();
 		if (src.pixman_format == PIXMAN_r5g6b5) {
-			const size_t row_bytes = static_cast<size_t>(copy_width) * 2u;
-			for (int row = 0; row < copy_height; ++row)
-				std::memcpy(destination_base + (dy + row) * pitch() + dx * 2,
-					source_base + (sy + row) * src.pitch() + sx * 2,
-					row_bytes);
+			if (copy_width == TILE_SIZE) {
+				for (int row = 0; row < copy_height; ++row)
+					SymbianCopyTileRow565(destination_base + (dy + row) * destination_pitch + dx * 2,
+						source_base + (sy + row) * source_pitch + sx * 2);
+			} else {
+				const size_t row_bytes = static_cast<size_t>(copy_width) * 2u;
+				for (int row = 0; row < copy_height; ++row)
+					std::memcpy(destination_base + (dy + row) * destination_pitch + dx * 2,
+						source_base + (sy + row) * source_pitch + sx * 2,
+						row_bytes);
+			}
 		} else {
 			for (int row = 0; row < copy_height; ++row) {
-				uint16_t* destination = reinterpret_cast<uint16_t*>(destination_base + (dy + row) * pitch()) + dx;
-				const uint16_t* source = reinterpret_cast<const uint16_t*>(source_base + (sy + row) * src.pitch()) + sx;
+				uint16_t* destination = reinterpret_cast<uint16_t*>(destination_base + (dy + row) * destination_pitch) + dx;
+				const uint16_t* source = reinterpret_cast<const uint16_t*>(source_base + (sy + row) * source_pitch) + sx;
 				for (int column = 0; column < copy_width; ++column) {
 					const uint16_t pixel = source[column];
-					const unsigned int green5 = (pixel >> 5) & 31u;
-					const unsigned int green6 = (green5 << 1) | (green5 >> 4);
-					destination[column] = static_cast<uint16_t>(
-						((pixel & 0x7c00u) << 1) |
-						(green6 << 5) |
-						(pixel & 0x001fu));
+					destination[column] = SymbianA1555To565(pixel);
 				}
 			}
 		}
@@ -1911,15 +1959,14 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
 
 		Rect effect_rect(x, y, src_rect.width, src_rect.height);
 		effect_rect.Adjust(GetRect());
-		const bool multi_paint = SymbianRenderDamage::IsPainting() && SymbianRenderDamage::DirtyCount() > 1;
-		if (SymbianRenderDamage::IsPainting())
-			effect_rect.Adjust(SymbianRenderDamage::CurrentPaintRect());
+		const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+		if (paint_clip)
+			effect_rect.Adjust(*paint_clip);
 		uint8_t* base = static_cast<uint8_t*>(pixels());
+		const int destination_pitch = pitch();
 		for (int py = effect_rect.y; py < effect_rect.y + effect_rect.height; ++py) {
-			uint16_t* row = reinterpret_cast<uint16_t*>(base + py * pitch());
+			uint16_t* row = reinterpret_cast<uint16_t*>(base + py * destination_pitch);
 			for (int px = effect_rect.x; px < effect_rect.x + effect_rect.width; ++px) {
-				if (multi_paint && !SymbianRenderDamage::ContainsDirtyPoint(px, py))
-					continue;
 				const uint16_t pixel = row[px];
 				int red = (pixel >> 11) & 31;
 				int green = (pixel >> 5) & 63;

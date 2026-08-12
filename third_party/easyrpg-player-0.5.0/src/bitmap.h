@@ -734,9 +734,6 @@ public:
 	uint32_t Revision() const;
 	void Touch();
 	void Touch(const Rect& aRect);
-	bool HasDamage() const;
-	const Rect& DamageRect() const;
-	void ClearDamage();
 	void SetClipRects(const Rect* aRects, int aCount);
 	void ClearClipRects();
 #endif
@@ -777,8 +774,11 @@ protected:
 	bool read_only = false;
 #ifdef EASYRPG_SYMBIAN
 	uint32_t revision_counter = 1;
-	Rect damage_rect;
-	bool damage_valid = false;
+	int symbian_width = 0;
+	int symbian_height = 0;
+	int symbian_pitch = 0;
+	int symbian_bpp = 0;
+	void* symbian_pixels = nullptr;
 #endif
 };
 

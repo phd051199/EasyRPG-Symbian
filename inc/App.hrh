@@ -4,4 +4,10 @@
 #define _UID3 0xE31EA5A1
 #define KEasyRpgLocalisableAppInfoResourceId 6
 
+#define EEasyRpgCmdLauncherPlay 0x6000
+#define EEasyRpgCmdLauncherDelete 0x6001
+#define EEasyRpgCmdLauncherActivate 0x6002
+#define EEasyRpgCmdLauncherAbout 0x6003
+#define EEasyRpgCmdLauncherHomepage 0x6004
+
 #endif

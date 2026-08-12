@@ -26,6 +26,7 @@
 #include "bitmap.h"
 #ifdef EASYRPG_SYMBIAN
 #include "RenderDamage.h"
+static const int KSymbianOpaqueAutotileCachePixels = 262144;
 #endif
 
 // Blocks subtiles IDs
@@ -267,6 +268,8 @@ void TilemapLayer::Draw(int z_order) {
 			const int first_map_y = WrapTileIndex(oy / TILE_SIZE, height);
 			int map_x = WrapTileIndex(ox / TILE_SIZE, width);
 			int map_draw_x = -offset_x;
+			Rect animated_dirty;
+			bool has_animated_dirty = false;
 			for (int x = 0; x < tiles_x; ++x) {
 				int map_y = first_map_y;
 				int map_draw_y = -offset_y;
@@ -274,8 +277,18 @@ void TilemapLayer::Draw(int z_order) {
 					const TileData& tile = data_cache[map_x][map_y];
 					if (tile.z == z_order &&
 						((dirty_ab && tile.source == SourceAutotileAB) ||
-						 (dirty_c && tile.source == SourceChipsetAnimatedC)))
-						SymbianRenderDamage::MarkDirty(Rect(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE));
+						 (dirty_c && tile.source == SourceChipsetAnimatedC))) {
+						if (!has_animated_dirty) {
+							animated_dirty.Set(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE);
+							has_animated_dirty = true;
+						} else {
+							const int left = std::min(animated_dirty.x, map_draw_x);
+							const int top = std::min(animated_dirty.y, map_draw_y);
+							const int right = std::max(animated_dirty.x + animated_dirty.width, map_draw_x + TILE_SIZE);
+							const int bottom = std::max(animated_dirty.y + animated_dirty.height, map_draw_y + TILE_SIZE);
+							animated_dirty.Set(left, top, right - left, bottom - top);
+						}
+					}
 					++map_y;
 					if (map_y == height)
 						map_y = 0;
@@ -286,6 +299,8 @@ void TilemapLayer::Draw(int z_order) {
 					map_x = 0;
 				map_draw_x += TILE_SIZE;
 			}
+			if (has_animated_dirty)
+				SymbianRenderDamage::MarkDirty(animated_dirty);
 			symbian_recorded_animation_step_ab = animation_step_ab;
 			symbian_recorded_animation_step_c = animation_step_c;
 		}
@@ -302,8 +317,9 @@ void TilemapLayer::Draw(int z_order) {
 	int last_tile_x = tiles_x;
 	int last_tile_y = tiles_y;
 #ifdef EASYRPG_SYMBIAN
-	if (SymbianRenderDamage::IsPainting()) {
-		const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+	const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+	if (paint_clip) {
+		const Rect& dirty = *paint_clip;
 		const int base_x = -offset_x;
 		const int base_y = -offset_y;
 		while (first_tile_x < last_tile_x && base_x + (first_tile_x + 1) * TILE_SIZE <= dirty.x)
@@ -356,7 +372,20 @@ void TilemapLayer::Draw(int z_order) {
 					const int col = tile.source_x[frame];
 					const int row = tile.source_y[frame];
 					if (neutral_tone) {
+#ifdef EASYRPG_SYMBIAN
+						Bitmap* draw_source = source->get();
+						if (tile.opacity[frame] == Bitmap::Opaque) {
+							if ((tile.source == SourceChipset || tile.source == SourceChipsetAnimatedC) && chipset_opaque)
+								draw_source = chipset_opaque.get();
+							else if (tile.source == SourceAutotileAB && autotiles_ab_screen_opaque)
+								draw_source = autotiles_ab_screen_opaque.get();
+							else if (tile.source == SourceAutotileD && autotiles_d_screen_opaque)
+								draw_source = autotiles_d_screen_opaque.get();
+						}
+						DrawTile(destination, *draw_source, map_draw_x, map_draw_y, row, col, tile.opacity[frame]);
+#else
 						DrawTile(destination, **source, map_draw_x, map_draw_y, row, col, tile.opacity[frame]);
+#endif
 					} else {
 						BitmapRef* effect = &chipset_effect;
 						std::vector<uint8_t>* tone_tiles = &chipset_tone_tiles;
@@ -748,9 +777,10 @@ BitmapRef const& TilemapLayer::GetChipset() const {
 	return chipset;
 }
 
-void TilemapLayer::SetChipset(BitmapRef const& nchipset) {
+void TilemapLayer::SetChipset(BitmapRef const& nchipset, BitmapRef const& nopaque) {
 	chipset = nchipset;
 #ifdef EASYRPG_SYMBIAN
+	chipset_opaque = nopaque;
 	SymbianTouch();
 #endif
 	chipset_effect.reset();
@@ -759,6 +789,14 @@ void TilemapLayer::SetChipset(BitmapRef const& nchipset) {
 	if (autotiles_ab_next != 0 && autotiles_d_screen != nullptr && layer == 0) {
 		autotiles_ab_screen = GenerateAutotiles(autotiles_ab_next, autotiles_ab_map);
 		autotiles_d_screen = GenerateAutotiles(autotiles_d_next, autotiles_d_map);
+#ifdef EASYRPG_SYMBIAN
+		autotiles_ab_screen_opaque = autotiles_ab_screen && autotiles_ab_screen->GetHeight() > 0 &&
+			autotiles_ab_screen->GetWidth() * autotiles_ab_screen->GetHeight() <= KSymbianOpaqueAutotileCachePixels
+			? Bitmap::Create(*autotiles_ab_screen, autotiles_ab_screen->GetRect(), false) : BitmapRef();
+		autotiles_d_screen_opaque = autotiles_d_screen && autotiles_d_screen->GetHeight() > 0 &&
+			autotiles_d_screen->GetWidth() * autotiles_d_screen->GetHeight() <= KSymbianOpaqueAutotileCachePixels
+			? Bitmap::Create(*autotiles_d_screen, autotiles_d_screen->GetRect(), false) : BitmapRef();
+#endif
 		autotiles_ab_screen_effect.reset();
 		autotiles_d_screen_effect.reset();
 		autotiles_ab_screen_tone_tiles.clear();
@@ -815,6 +853,14 @@ void TilemapLayer::SetMapData(const std::vector<short>& nmap_data) {
 		}
 		autotiles_ab_screen = GenerateAutotiles(autotiles_ab_next, autotiles_ab_map);
 		autotiles_d_screen = GenerateAutotiles(autotiles_d_next, autotiles_d_map);
+#ifdef EASYRPG_SYMBIAN
+		autotiles_ab_screen_opaque = autotiles_ab_screen && autotiles_ab_screen->GetHeight() > 0 &&
+			autotiles_ab_screen->GetWidth() * autotiles_ab_screen->GetHeight() <= KSymbianOpaqueAutotileCachePixels
+			? Bitmap::Create(*autotiles_ab_screen, autotiles_ab_screen->GetRect(), false) : BitmapRef();
+		autotiles_d_screen_opaque = autotiles_d_screen && autotiles_d_screen->GetHeight() > 0 &&
+			autotiles_d_screen->GetWidth() * autotiles_d_screen->GetHeight() <= KSymbianOpaqueAutotileCachePixels
+			? Bitmap::Create(*autotiles_d_screen, autotiles_d_screen->GetRect(), false) : BitmapRef();
+#endif
 		autotiles_ab_screen_effect.reset();
 		autotiles_d_screen_effect.reset();
 		autotiles_ab_screen_tone_tiles.clear();

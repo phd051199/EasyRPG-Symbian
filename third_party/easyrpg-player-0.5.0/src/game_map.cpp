@@ -70,8 +70,7 @@ namespace {
 	std::vector<int> event_next;
 	std::vector<int> event_prev;
 	std::vector<int> event_index_by_id;
-	std::vector<unsigned int> event_query_marks;
-	unsigned int event_query_serial = 1;
+	std::vector<int> event_query_candidates;
 
 	std::unique_ptr<RPG::Map> map;
 	int scroll_direction;
@@ -88,6 +87,8 @@ namespace {
 	bool pan_locked;
 	bool pan_wait;
 	int pan_speed;
+	const int pan_origin_x = 2304;
+	const int pan_origin_y = 1792;
 
 	int last_map_id;
 
@@ -157,13 +158,14 @@ namespace {
 			event_next.clear();
 			event_prev.clear();
 			event_index_by_id.clear();
-			event_query_marks.clear();
+			event_query_candidates.clear();
 			return;
 		}
 		event_cell_heads.assign(map->width * map->height, -1);
 		event_next.assign(events.size(), -1);
 		event_prev.assign(events.size(), -1);
-		event_query_marks.assign(events.size(), 0);
+		event_query_candidates.clear();
+		event_query_candidates.reserve(events.size());
 		int max_id = 0;
 		for (const Game_Event& event : events)
 			max_id = std::max(max_id, event.GetId());
@@ -175,7 +177,6 @@ namespace {
 				event_index_by_id[id] = static_cast<int>(index);
 			LinkSpatialEvent(static_cast<int>(index), EventCellIndex(event.GetX(), event.GetY()));
 		}
-		event_query_serial = 1;
 	}
 
 	int WrapCoordinate(int value, int size) {
@@ -233,10 +234,12 @@ void Game_Map::Init() {
 	pan_locked = false;
 	pan_wait = false;
 	pan_speed = 0;
-	location.pan_finish_x = 0;
-	location.pan_finish_y = 0;
-	location.pan_current_x = 0;
-	location.pan_current_y = 0;
+	location.pan_state = 1;
+	location.pan_finish_x = pan_origin_x;
+	location.pan_finish_y = pan_origin_y;
+	location.pan_current_x = pan_origin_x;
+	location.pan_current_y = pan_origin_y;
+	location.pan_speed = SCREEN_TILE_WIDTH / 128;
 	last_map_id = -1;
 }
 
@@ -245,7 +248,7 @@ void Game_Map::Dispose() {
 	event_next.clear();
 	event_prev.clear();
 	event_index_by_id.clear();
-	event_query_marks.clear();
+	event_query_candidates.clear();
 	event_parallel_updates.clear();
 	event_trigger_checks.clear();
 	events.clear();
@@ -290,10 +293,12 @@ void Game_Map::Setup(int _id) {
 	RebuildEventSpatialIndex();
 	RebuildEventUpdateLists();
 
-	location.pan_finish_x = 0;
-	location.pan_finish_y = 0;
-	location.pan_current_x = 0;
-	location.pan_current_y = 0;
+	location.pan_state = 1;
+	location.pan_finish_x = pan_origin_x;
+	location.pan_finish_y = pan_origin_y;
+	location.pan_current_x = pan_origin_x;
+	location.pan_current_y = pan_origin_y;
+	location.pan_speed = SCREEN_TILE_WIDTH / 128;
 
 	// Save allowed
 	int current_index = GetMapIndex(location.map_id);
@@ -349,11 +354,21 @@ void Game_Map::SetupFromSave() {
 	map_info.Fixup(*map.get());
 	SetChipset(map_info.chipset_id);
 
-	// FIXME: Handle Pan correctly
-	location.pan_current_x = 0;
-	location.pan_current_y = 0;
-	location.pan_finish_x = 0;
-	location.pan_finish_y = 0;
+	if (location.pan_current_x == 0 && location.pan_current_y == 0 &&
+		location.pan_finish_x == 0 && location.pan_finish_y == 0) {
+		location.pan_current_x = pan_origin_x;
+		location.pan_current_y = pan_origin_y;
+		location.pan_finish_x = pan_origin_x;
+		location.pan_finish_y = pan_origin_y;
+	}
+	pan_locked = location.pan_state == 0;
+	pan_speed = 0;
+	int stored_pan_step = std::max(1, location.pan_speed);
+	int pan_step = SCREEN_TILE_WIDTH / 128;
+	while (pan_speed < 6 && pan_step < stored_pan_step) {
+		++pan_speed;
+		pan_step <<= 1;
+	}
 }
 
 void Game_Map::SetupCommon(int _id) {
@@ -695,27 +710,23 @@ bool Game_Map::MakeWay(int x, int y, int d, const Game_Character& self) {
 	const int new_cell = EventCellIndex(new_x, new_y);
 	if (old_cell >= 0 && new_cell >= 0 &&
 		old_cell < static_cast<int>(event_cell_heads.size()) &&
-		new_cell < static_cast<int>(event_cell_heads.size()) &&
-		event_query_marks.size() == events.size()) {
-		++event_query_serial;
-		if (event_query_serial == 0) {
-			std::fill(event_query_marks.begin(), event_query_marks.end(), 0);
-			event_query_serial = 1;
-		}
-		const int cells[2] = {old_cell, new_cell};
-		for (int cell_index = 0; cell_index < 2; ++cell_index) {
-			if (cell_index == 1 && cells[1] == cells[0])
-				continue;
-			int event_index = event_cell_heads[cells[cell_index]];
-			while (event_index >= 0) {
-				const int next_index = event_next[event_index];
-				if (event_query_marks[event_index] != event_query_serial) {
-					event_query_marks[event_index] = event_query_serial;
-					if (!process_event(events[event_index]))
-						return false;
-				}
-				event_index = next_index;
+		new_cell < static_cast<int>(event_cell_heads.size())) {
+		event_query_candidates.clear();
+		int old_index = event_cell_heads[old_cell];
+		int new_index = old_cell == new_cell ? -1 : event_cell_heads[new_cell];
+		while (old_index >= 0 || new_index >= 0) {
+			if (new_index < 0 || (old_index >= 0 && old_index < new_index)) {
+				event_query_candidates.push_back(old_index);
+				old_index = event_next[old_index];
+			} else {
+				event_query_candidates.push_back(new_index);
+				new_index = event_next[new_index];
 			}
+		}
+		for (std::vector<int>::const_iterator it = event_query_candidates.begin();
+			it != event_query_candidates.end(); ++it) {
+			if (!process_event(events[*it]))
+				return false;
 		}
 	} else {
 		for (Game_Event& other : GetEvents()) {
@@ -1522,10 +1533,12 @@ void Game_Map::SubstituteUp(int old_id, int new_id) {
 
 void Game_Map::LockPan() {
 	pan_locked = true;
+	location.pan_state = 0;
 }
 
 void Game_Map::UnlockPan() {
 	pan_locked = false;
+	location.pan_state = 1;
 }
 
 void Game_Map::StartPan(int direction, int distance, int speed, bool wait) {
@@ -1537,13 +1550,15 @@ void Game_Map::StartPan(int direction, int distance, int speed, bool wait) {
 		case PanLeft:	location.pan_finish_x -= distance;		break;
 	}
 	pan_speed = speed;
+	location.pan_speed = (SCREEN_TILE_WIDTH / 128) << pan_speed;
 	pan_wait = wait;
 }
 
 void Game_Map::ResetPan(int speed, bool wait) {
-	location.pan_finish_x = 0;
-	location.pan_finish_y = 0;
+	location.pan_finish_x = pan_origin_x;
+	location.pan_finish_y = pan_origin_y;
 	pan_speed = speed;
+	location.pan_speed = (SCREEN_TILE_WIDTH / 128) << pan_speed;
 	pan_wait = wait;
 }
 
@@ -1579,11 +1594,11 @@ bool Game_Map::IsPanLocked() {
 }
 
 int Game_Map::GetPanX() {
-	return location.pan_current_x;
+	return location.pan_current_x - pan_origin_x;
 }
 
 int Game_Map::GetPanY() {
-	return location.pan_current_y;
+	return location.pan_current_y - pan_origin_y;
 }
 
 void Game_Map::UpdateParallax() {

@@ -485,6 +485,8 @@ void FileFinder::InitRtpPaths(bool warn_no_rtp_found) {
 	add_rtp_path("ux0:/data/easyrpg-player/rtp/" + version_str + "/");
 #elif defined(EASYRPG_SYMBIAN)
 	add_rtp_path("C:/Data/EasyRPG/RTP/" + version_str + "/");
+	add_rtp_path("C:/EasyRPG/RTP/" + version_str + "/");
+	add_rtp_path("E:/Data/EasyRPG/RTP/" + version_str + "/");
 	add_rtp_path("E:/EasyRPG/RTP/" + version_str + "/");
 #elif defined(__ANDROID__)
 	// Invoke "String getRtpPath()" in EasyRPG Activity via JNI

@@ -11,7 +11,7 @@ enum TPhase {
 
 const int KCommandCapacity = 2048;
 const int KDirtyCapacity = 16;
-const int KMaximumDirtyRegions = 1;
+const int KMaximumDirtyRegions = 4;
 const int KFullRedrawAreaPercent = 88;
 const int KDirtyRegionFixedCostDivisor = 12;
 const int KCommandResyncLookahead = 8;
@@ -133,12 +133,23 @@ void OptimizeDirty() {
     if (gDirtyCount <= 0)
         return;
 
-    if (gDirtyCount > KMaximumDirtyRegions) {
-        Rect merged = gDirty[0];
-        for (int index = 1; index < gDirtyCount; ++index)
-            merged = UnionRect(merged, gDirty[index]);
-        gDirty[0] = merged;
-        gDirtyCount = 1;
+    while (gDirtyCount > KMaximumDirtyRegions) {
+        int selectedFirst = 0;
+        int selectedSecond = 1;
+        int selectedIncrease = 0x7fffffff;
+        for (int first = 0; first < gDirtyCount - 1; ++first) {
+            for (int second = first + 1; second < gDirtyCount; ++second) {
+                const Rect merged = UnionRect(gDirty[first], gDirty[second]);
+                const int increase = Area(merged) - Area(gDirty[first]) - Area(gDirty[second]);
+                if (increase < selectedIncrease) {
+                    selectedFirst = first;
+                    selectedSecond = second;
+                    selectedIncrease = increase;
+                }
+            }
+        }
+        gDirty[selectedFirst] = UnionRect(gDirty[selectedFirst], gDirty[selectedSecond]);
+        RemoveDirty(selectedSecond);
     }
 
     Rect combined = gDirty[0];
@@ -166,6 +177,8 @@ void OptimizeDirty() {
 
 namespace SymbianRenderDamage {
 
+const Rect* gPaintClipRect = nullptr;
+
 void Reset() {
     gPhase = EIdle;
     gPreviousCount = 0;
@@ -179,6 +192,7 @@ void Reset() {
     gPaintRegion = -1;
     gFrameRect = Rect();
     gPaintRect = Rect();
+    gPaintClipRect = nullptr;
 }
 
 void ForceFullFrame(int aWidth, int aHeight) {
@@ -191,6 +205,7 @@ void ForceFullFrame(int aWidth, int aHeight) {
     gFullFrameRequested = false;
     gFrameRect = Rect(0, 0, aWidth, aHeight);
     gPaintRect = gFrameRect;
+    gPaintClipRect = nullptr;
     ForceFull();
     gDamageValid = true;
 }
@@ -214,6 +229,7 @@ void BeginRecord(int aWidth, int aHeight) {
     gPaintRegion = -1;
     gFrameRect = Rect(0, 0, aWidth, aHeight);
     gPaintRect = gFrameRect;
+    gPaintClipRect = nullptr;
 }
 
 void BeginFullPaintRecord(int aWidth, int aHeight) {
@@ -225,16 +241,13 @@ void BeginFullPaintRecord(int aWidth, int aHeight) {
     gFullFrameRequested = false;
     gFrameRect = Rect(0, 0, aWidth, aHeight);
     gPaintRect = gFrameRect;
+    gPaintClipRect = nullptr;
     ForceFull();
     gPaintRegion = 0;
 }
 
 bool IsRecording() {
     return gPhase == ERecording;
-}
-
-bool IsPainting() {
-    return gPhase == EPainting || gPhase == EFullPaintRecording;
 }
 
 bool IsFullPaintRecording() {
@@ -364,6 +377,7 @@ void EndRecord() {
     }
 
     gDamageValid = true;
+    gPaintClipRect = nullptr;
     gPhase = EIdle;
 }
 
@@ -375,6 +389,7 @@ void EndFullPaintRecord() {
     gPreviousValid = false;
     gDamageValid = true;
     gPaintRegion = -1;
+    gPaintClipRect = nullptr;
     gPhase = EIdle;
 }
 
@@ -394,38 +409,6 @@ void ConsumeDamage() {
     gDamageValid = false;
 }
 
-bool IntersectsDirty(const Rect& aRect) {
-    if (IsFullFrameDirty())
-        return true;
-    const int right = aRect.x + aRect.width;
-    const int bottom = aRect.y + aRect.height;
-    const int first = gPhase == EPainting && gPaintRegion >= 0 ? gPaintRegion : 0;
-    const int last = gPhase == EPainting && gPaintRegion >= 0 ? gPaintRegion + 1 : gDirtyCount;
-    for (int index = first; index < last; ++index) {
-        const Rect& dirty = gDirty[index];
-        const int dirtyRight = dirty.x + dirty.width;
-        const int dirtyBottom = dirty.y + dirty.height;
-        if (aRect.x < dirtyRight && dirty.x < right &&
-            aRect.y < dirtyBottom && dirty.y < bottom)
-            return true;
-    }
-    return false;
-}
-
-bool ContainsDirtyPoint(int aX, int aY) {
-    if (IsFullFrameDirty())
-        return true;
-    const int first = gPhase == EPainting && gPaintRegion >= 0 ? gPaintRegion : 0;
-    const int last = gPhase == EPainting && gPaintRegion >= 0 ? gPaintRegion + 1 : gDirtyCount;
-    for (int index = first; index < last; ++index) {
-        const Rect& dirty = gDirty[index];
-        if (aX >= dirty.x && aX < dirty.x + dirty.width &&
-            aY >= dirty.y && aY < dirty.y + dirty.height)
-            return true;
-    }
-    return false;
-}
-
 int DirtyCount() {
     return gDirtyCount;
 }
@@ -434,28 +417,25 @@ const Rect& DirtyRect(int aIndex) {
     return gDirty[aIndex];
 }
 
-const Rect& CurrentPaintRect() {
-    if (gPhase == EPainting || gPhase == EFullPaintRecording)
-        return gPaintRect;
-    return gFrameRect;
-}
-
 void BeginPaint() {
     gPaintRegion = -1;
     gPaintRect = gDirtyCount > 0 ? gDirty[0] : gFrameRect;
     for (int index = 1; index < gDirtyCount; ++index)
         gPaintRect = UnionRect(gPaintRect, gDirty[index]);
+    gPaintClipRect = SameRect(gPaintRect, gFrameRect) ? nullptr : &gPaintRect;
     gPhase = EPainting;
 }
 
 void BeginPaint(int aDirtyIndex) {
     gPaintRegion = aDirtyIndex >= 0 && aDirtyIndex < gDirtyCount ? aDirtyIndex : -1;
     gPaintRect = gPaintRegion >= 0 ? gDirty[gPaintRegion] : gFrameRect;
+    gPaintClipRect = SameRect(gPaintRect, gFrameRect) ? nullptr : &gPaintRect;
     gPhase = EPainting;
 }
 
 void EndPaint() {
     gPaintRegion = -1;
+    gPaintClipRect = nullptr;
     gPhase = EIdle;
 }
 

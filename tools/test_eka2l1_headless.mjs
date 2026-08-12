@@ -655,6 +655,16 @@ async function main() {
         const redrawEnd = await evaluate('EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0');
         result.redrawFps = (redrawEnd - redrawStart) * 1000 / Math.max(1, sampleEnd - sampleStart);
         pushLog(`app: redraw rate ${result.redrawFps.toFixed(2)} fps over ${((sampleEnd - sampleStart) / 1000).toFixed(1)}s`);
+        const midiProbe = await evaluate(`(() => {
+            const target = '/eka2l1/drives/c/data/easyrpg/audio/bgm.mid';
+            try {
+                const stat = EKA2L1.module.FS.stat(target);
+                return { exists: EKA2L1.module.FS.isFile(stat.mode), size: stat.size };
+            } catch (error) {
+                return { exists: false, size: 0, error: String(error) };
+            }
+        })()`);
+        pushLog(`midi-temp: ${JSON.stringify(midiProbe)}`);
 
         await capture('app-final.png');
         result.success = true;

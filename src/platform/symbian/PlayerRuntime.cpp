@@ -95,7 +95,8 @@ void ResolveResourcePathL(CZipVfs& aResources,
     {
         _L(".xyz"), _L(".png"), _L(".bmp"),
         _L(".lmu"), _L(".lmt"), _L(".ldb"), _L(".lsd"),
-        _L(".wav"), _L(".mid"), _L(".midi"), _L(".ogg"), _L(".mp3")
+        _L(".wav"), _L(".mid"), _L(".midi"), _L(".ogg"), _L(".mp3"),
+        _L(".avi"), _L(".mpg"), _L(".mpeg"), _L(".mp4"), _L(".3gp")
     };
     for (TUint index = 0; index < sizeof(extensions) / sizeof(extensions[0]); ++index)
     {
@@ -138,6 +139,7 @@ TBool ResolveUpstreamKey(TUint32 aKey, TInt& aWord, TUint32& aMask)
     case CPlayerRuntime::EKeyPeriod: aWord = 2; aMask = 1u << 16; break;
     case CPlayerRuntime::EKeyDivide: aWord = 2; aMask = 1u << 17; break;
     case CPlayerRuntime::EKeyDebug: aWord = 2; aMask = 1u << 26; break;
+    case CPlayerRuntime::EKeyScreenshot: aWord = 2; aMask = 1u << 27; break;
     default: return EFalse;
     }
     return ETrue;

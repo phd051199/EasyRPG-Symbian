@@ -4,6 +4,9 @@
 #include <aknappui.h>
 
 class CGameView;
+class CCoeControl;
+class CEikMenuPane;
+class TWsEvent;
 
 class CEasyRpgAppUi : public CAknAppUi
 {
@@ -15,6 +18,7 @@ public:
     void EnterGameFullscreen();
     void ExitGameFullscreen();
     void HandleCommandL(TInt aCommand);
+    void HandleWsEventL(const TWsEvent& aEvent, CCoeControl* aDestination);
     void HandleStatusPaneSizeChange();
     void HandleForegroundEventL(TBool aForeground);
 

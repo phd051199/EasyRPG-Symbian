@@ -14,6 +14,7 @@
 #include "DisplaySurface.h"
 #include "GameLocator.h"
 #include "GameView.h"
+#include "MovieBridge.h"
 #include "PerfOverlay.h"
 #include "PlayerRuntime.h"
 #include "AppUi.h"
@@ -34,6 +35,18 @@ _LIT(KDoubleListItemFormat, "\t%S\t%S");
 _LIT(KNoGamesFound, "No games found");
 _LIT(KEmptyListSubtitle, "");
 _LIT8(KLcfDatabaseHeader, "LcfDataBase");
+
+enum TGameMenuItem
+{
+    EGameMenuSound = 0,
+    EGameMenuVolume,
+    EGameMenuFrameSkip,
+    EGameMenuKeys,
+    EGameMenuReset,
+    EGameMenuFps,
+    EGameMenuExit,
+    EGameMenuItemCount
+};
 
 TBool RectsOverlap(const TRect& aFirst, const TRect& aSecond)
 {
@@ -371,6 +384,42 @@ void FormatGameSubtitle(RFs& aFs,
                          whole,
                          fraction);
 }
+
+void SetPlayerKeyMask(CPlayerRuntime& aRuntime, TUint32 aMask, TBool aPressed)
+{
+    const TUint32 keys[] =
+    {
+        CPlayerRuntime::EKeyUp,
+        CPlayerRuntime::EKeyDown,
+        CPlayerRuntime::EKeyLeft,
+        CPlayerRuntime::EKeyRight,
+        CPlayerRuntime::EKeyDecision,
+        CPlayerRuntime::EKeyCancel,
+        CPlayerRuntime::EKeyShift,
+        CPlayerRuntime::EKeyN0,
+        CPlayerRuntime::EKeyN1,
+        CPlayerRuntime::EKeyN2,
+        CPlayerRuntime::EKeyN3,
+        CPlayerRuntime::EKeyN4,
+        CPlayerRuntime::EKeyN5,
+        CPlayerRuntime::EKeyN6,
+        CPlayerRuntime::EKeyN7,
+        CPlayerRuntime::EKeyN8,
+        CPlayerRuntime::EKeyN9,
+        CPlayerRuntime::EKeyPlus,
+        CPlayerRuntime::EKeyMinus,
+        CPlayerRuntime::EKeyMultiply,
+        CPlayerRuntime::EKeyDivide,
+        CPlayerRuntime::EKeyPeriod,
+        CPlayerRuntime::EKeyDebug,
+        CPlayerRuntime::EKeyScreenshot
+    };
+    for (TUint index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index)
+    {
+        if ((aMask & keys[index]) != 0)
+            aRuntime.SetKeyState(keys[index], aPressed);
+    }
+}
 }
 
 CGameView* CGameView::NewL(const TRect& aRect)
@@ -394,13 +443,20 @@ CGameView::CGameView()
       iStartGameCallback(NULL),
       iForeground(ETrue),
       iKeyMapVisible(EFalse),
+      iGameMenuActive(EFalse),
+      iGameMenuSelection(EGameMenuSound),
+      iLeftSoftkeyHeld(EFalse),
+      iRightSoftkeyHeld(EFalse),
       iPendingCancelPulse(EFalse),
-      iPendingDecisionPulse(EFalse),
+      iHeldPlayerKeys(0),
+      iPendingPlayerKeyPulses(0),
+      iDynamicPlayerScanCount(0),
       iVolumeUpHeld(EFalse),
       iVolumeDownHeld(EFalse),
       iFrameDrawPending(EFalse),
       iVolumeOverlayErasePending(EFalse),
       iMasterVolume(KDefaultMasterVolume),
+      iAudibleVolume(KDefaultMasterVolume),
       iVolumeOverlayTicks(0)
 {
 }
@@ -408,11 +464,15 @@ CGameView::CGameView()
 void CGameView::ConstructL(const TRect& aRect)
 {
     CreateWindowL();
+    EasyRpgMovieInitializeL(CCoeEnv::Static()->WsSession(),
+                            *CCoeEnv::Static()->ScreenDevice(),
+                            Window());
     User::LeaveIfError(iFs.Connect());
     iMasterVolume = LoadMasterVolume(iFs);
+    if (iMasterVolume > 0)
+        iAudibleVolume = iMasterVolume;
     EasyRpgAudioSetMasterVolume(iMasterVolume);
     iFrameTimer = CFrameTimer::NewL(*this);
-    iPerfOverlay = CPerfOverlay::NewL();
     iStartGameCallback = new (ELeave) CAsyncCallBack(
         TCallBack(&CGameView::StartGameCallback, this),
         CActive::EPriorityHigh);
@@ -441,6 +501,7 @@ void CGameView::ConstructL(const TRect& aRect)
 
 CGameView::~CGameView()
 {
+    EasyRpgMovieShutdown();
     if (iStartGameCallback)
         iStartGameCallback->Cancel();
     delete iStartGameCallback;
@@ -569,8 +630,14 @@ void CGameView::StartSelectedGameL()
     iRuntime = runtime;
     iGameRoot.Copy(selectedArchive);
     iKeyMapVisible = EFalse;
+    iGameMenuActive = EFalse;
+    iGameMenuSelection = EGameMenuSound;
+    iLeftSoftkeyHeld = EFalse;
+    iRightSoftkeyHeld = EFalse;
     iPendingCancelPulse = EFalse;
-    iPendingDecisionPulse = EFalse;
+    iHeldPlayerKeys = 0;
+    iPendingPlayerKeyPulses = 0;
+    iDynamicPlayerScanCount = 0;
     iVolumeUpHeld = EFalse;
     iVolumeDownHeld = EFalse;
     iVolumeOverlayTicks = 0;
@@ -586,9 +653,17 @@ void CGameView::StartSelectedGameL()
 
 void CGameView::StopGame()
 {
+    EasyRpgMovieStop();
+    EasyRpgMovieAcknowledge();
     iKeyMapVisible = EFalse;
+    iGameMenuActive = EFalse;
+    iGameMenuSelection = EGameMenuSound;
+    iLeftSoftkeyHeld = EFalse;
+    iRightSoftkeyHeld = EFalse;
     iPendingCancelPulse = EFalse;
-    iPendingDecisionPulse = EFalse;
+    iHeldPlayerKeys = 0;
+    iPendingPlayerKeyPulses = 0;
+    iDynamicPlayerScanCount = 0;
     iVolumeUpHeld = EFalse;
     iVolumeDownHeld = EFalse;
     iVolumeOverlayTicks = 0;
@@ -634,6 +709,7 @@ void CGameView::ShowLoadErrorL(TInt aError)
 void CGameView::SetForeground(TBool aForeground)
 {
     iForeground = aForeground;
+    EasyRpgMovieSetForeground(aForeground);
 
     if (!iRuntime || !iFrameTimer)
     {
@@ -649,9 +725,13 @@ void CGameView::SetForeground(TBool aForeground)
     if (!aForeground)
     {
         iPendingCancelPulse = EFalse;
-        iPendingDecisionPulse = EFalse;
+        iHeldPlayerKeys = 0;
+        iPendingPlayerKeyPulses = 0;
+        iDynamicPlayerScanCount = 0;
         iVolumeUpHeld = EFalse;
         iVolumeDownHeld = EFalse;
+        iLeftSoftkeyHeld = EFalse;
+        iRightSoftkeyHeld = EFalse;
         iFrameDrawPending = EFalse;
         iRuntime->Suspend();
         iFrameTimer->Stop();
@@ -659,7 +739,7 @@ void CGameView::SetForeground(TBool aForeground)
     else
     {
         iFrameDrawPending = EFalse;
-        if (!iKeyMapVisible)
+        if (!iKeyMapVisible && !iGameMenuActive)
         {
             iRuntime->Resume();
             if (iPerfOverlay)
@@ -692,33 +772,73 @@ void CGameView::HandleLeftSoftkeyL()
 {
     if (!iRuntime)
         return;
-    SetKeyMapVisible(!iKeyMapVisible);
+    if (!iGameMenuActive)
+    {
+        OpenGameMenu();
+        return;
+    }
+    if (!iKeyMapVisible)
+        ActivateGameMenuItemL();
 }
 
 void CGameView::HandleRightSoftkeyL()
 {
-    if (!iRuntime || iKeyMapVisible)
+    if (!iRuntime)
         return;
+    if (iGameMenuActive)
+    {
+        if (iKeyMapVisible)
+        {
+            iKeyMapVisible = EFalse;
+            iFrameDrawPending = EFalse;
+            DrawNow();
+        }
+        else
+        {
+            CloseGameMenu();
+        }
+        return;
+    }
     iPendingCancelPulse = ETrue;
 }
 
-void CGameView::SetKeyMapVisible(TBool aVisible)
+void CGameView::PlaySelectedGameL()
 {
-    if (!iRuntime || iKeyMapVisible == aVisible)
+    StartSelectedGameL();
+}
+
+void CGameView::OpenGameMenu()
+{
+    if (!iRuntime || iGameMenuActive)
         return;
 
     iRuntime->ReleaseAllKeys();
     iPendingCancelPulse = EFalse;
-    iPendingDecisionPulse = EFalse;
+    iHeldPlayerKeys = 0;
+    iPendingPlayerKeyPulses = 0;
+    iDynamicPlayerScanCount = 0;
     iFrameDrawPending = EFalse;
-    iKeyMapVisible = aVisible;
-    if (aVisible)
-    {
-        iRuntime->Suspend();
-        if (iFrameTimer)
-            iFrameTimer->Stop();
-    }
-    else if (iForeground)
+    iKeyMapVisible = EFalse;
+    iGameMenuActive = ETrue;
+    iRuntime->Suspend();
+    if (iFrameTimer)
+        iFrameTimer->Stop();
+    DrawNow();
+}
+
+void CGameView::CloseGameMenu()
+{
+    if (!iRuntime || !iGameMenuActive)
+        return;
+
+    iKeyMapVisible = EFalse;
+    iGameMenuActive = EFalse;
+    iPendingCancelPulse = EFalse;
+    iHeldPlayerKeys = 0;
+    iPendingPlayerKeyPulses = 0;
+    iDynamicPlayerScanCount = 0;
+    iFrameDrawPending = EFalse;
+    if (iForeground)
     {
         iRuntime->Resume();
         if (iPerfOverlay)
@@ -727,6 +847,90 @@ void CGameView::SetKeyMapVisible(TBool aVisible)
             iFrameTimer->Start();
     }
     DrawNow();
+}
+
+void CGameView::MoveGameMenuSelection(TInt aDelta)
+{
+    if (!iGameMenuActive || iKeyMapVisible)
+        return;
+    iGameMenuSelection += aDelta;
+    while (iGameMenuSelection < 0)
+        iGameMenuSelection += EGameMenuItemCount;
+    while (iGameMenuSelection >= EGameMenuItemCount)
+        iGameMenuSelection -= EGameMenuItemCount;
+    iFrameDrawPending = EFalse;
+    DrawNow();
+}
+
+void CGameView::ActivateGameMenuItemL()
+{
+    if (!iGameMenuActive || iKeyMapVisible)
+        return;
+
+    switch (iGameMenuSelection)
+    {
+    case EGameMenuSound:
+        ToggleSound();
+        break;
+    case EGameMenuVolume:
+        AdjustMasterVolume(KVolumeStep);
+        break;
+    case EGameMenuFrameSkip:
+        ToggleFrameSkip();
+        DrawNow();
+        break;
+    case EGameMenuKeys:
+        iKeyMapVisible = ETrue;
+        iFrameDrawPending = EFalse;
+        DrawNow();
+        break;
+    case EGameMenuReset:
+        RestartGameL();
+        break;
+    case EGameMenuFps:
+        ToggleFpsOverlayL();
+        break;
+    case EGameMenuExit:
+        StopGame();
+        break;
+    default:
+        break;
+    }
+}
+
+void CGameView::ToggleSound()
+{
+    if (iMasterVolume > 0)
+    {
+        iAudibleVolume = iMasterVolume;
+        iMasterVolume = 0;
+    }
+    else
+    {
+        if (iAudibleVolume <= 0)
+            iAudibleVolume = KDefaultMasterVolume;
+        iMasterVolume = iAudibleVolume;
+        SaveMasterVolume(iFs, iMasterVolume);
+    }
+    EasyRpgAudioSetMasterVolume(iMasterVolume);
+    iVolumeOverlayTicks = KVolumeOverlayTicks;
+    iVolumeOverlayErasePending = EFalse;
+    iFrameDrawPending = EFalse;
+    DrawNow();
+}
+
+void CGameView::ToggleFrameSkip()
+{
+    if (iFrameTimer)
+        iFrameTimer->SetFrameSkipEnabled(!iFrameTimer->FrameSkipEnabled());
+}
+
+void CGameView::RestartGameL()
+{
+    if (!iRuntime)
+        return;
+    StopGame();
+    StartSelectedGameL();
 }
 
 void CGameView::ToggleFpsOverlayL()
@@ -750,6 +954,8 @@ void CGameView::AdjustMasterVolume(TInt aDelta)
     if (volume != iMasterVolume)
     {
         iMasterVolume = volume;
+        if (iMasterVolume > 0)
+            iAudibleVolume = iMasterVolume;
         EasyRpgAudioSetMasterVolume(iMasterVolume);
         SaveMasterVolume(iFs, iMasterVolume);
     }
@@ -761,7 +967,7 @@ void CGameView::AdjustMasterVolume(TInt aDelta)
 
 void CGameView::DrawVolumeOverlay(CWindowGc& aGc, const TPoint& aDestination) const
 {
-    if (iVolumeOverlayTicks <= 0)
+    if (iVolumeOverlayTicks <= 0 || iGameMenuActive)
         return;
 
     TBuf8<16> text;
@@ -778,11 +984,95 @@ void CGameView::DrawVolumeOverlay(CWindowGc& aGc, const TPoint& aDestination) co
     DrawSmallBitmapText(aGc, x, y, text);
 }
 
+void CGameView::DrawGameMenuOverlay(CWindowGc& aGc) const
+{
+    if (!iGameMenuActive || iKeyMapVisible)
+        return;
+
+    const TRect view = Rect();
+    const TInt panelWidth = Min(156, Max(1, view.Width() - 12));
+    const TInt panelHeight = Min(116, Max(1, view.Height() - 12));
+    const TPoint panelOrigin(view.iTl.iX + 6,
+                             view.iTl.iY + (view.Height() - panelHeight) / 2);
+    const TRect panel(panelOrigin, TSize(panelWidth, panelHeight));
+
+    aGc.SetPenStyle(CGraphicsContext::ESolidPen);
+    aGc.SetPenColor(TRgb(255, 255, 255));
+    aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
+    aGc.SetBrushColor(TRgb(0, 0, 0));
+    aGc.DrawRect(panel);
+
+    aGc.SetPenStyle(CGraphicsContext::ENullPen);
+    aGc.SetBrushColor(TRgb(255, 255, 255));
+    DrawSmallBitmapText(aGc, panel.iTl.iX + 7, panel.iTl.iY + 6, _L8("MENU"));
+
+    const TInt rowX = panel.iTl.iX + 5;
+    const TInt rowWidth = panelWidth - 10;
+    const TInt firstY = panel.iTl.iY + 19;
+    const TInt rowStep = 11;
+    for (TInt item = 0; item < EGameMenuItemCount; ++item)
+    {
+        TBuf8<28> text;
+        switch (item)
+        {
+        case EGameMenuSound:
+            text.Copy(iMasterVolume > 0 ? _L8("SOUND ON") : _L8("SOUND OFF"));
+            break;
+        case EGameMenuVolume:
+            text.Format(_L8("VOLUME %d%%"), iMasterVolume);
+            break;
+        case EGameMenuFrameSkip:
+            text.Copy(iFrameTimer && iFrameTimer->FrameSkipEnabled()
+                ? _L8("FRAMESKIP AUTO")
+                : _L8("FRAMESKIP OFF"));
+            break;
+        case EGameMenuKeys:
+            text.Copy(_L8("KEYS"));
+            break;
+        case EGameMenuReset:
+            text.Copy(_L8("RESET"));
+            break;
+        case EGameMenuFps:
+            text.Copy(iPerfOverlay ? _L8("FPS ON") : _L8("FPS OFF"));
+            break;
+        case EGameMenuExit:
+            text.Copy(_L8("EXIT"));
+            break;
+        default:
+            text.Zero();
+            break;
+        }
+
+        const TInt y = firstY + item * rowStep;
+        if (item == iGameMenuSelection)
+        {
+            aGc.SetBrushColor(TRgb(255, 255, 255));
+            aGc.DrawRect(TRect(TPoint(rowX, y - 2), TSize(rowWidth, 10)));
+            aGc.SetBrushColor(TRgb(0, 0, 0));
+            DrawSmallBitmapText(aGc, rowX + 4, y, text);
+            aGc.SetBrushColor(TRgb(255, 255, 255));
+        }
+        else
+        {
+            DrawSmallBitmapText(aGc, rowX + 4, y, text);
+        }
+    }
+
+    DrawSmallBitmapText(aGc,
+                        panel.iTl.iX + 7,
+                        panel.iBr.iY - 10,
+                        _L8("SELECT"));
+    DrawSmallBitmapText(aGc,
+                        panel.iBr.iX - 31,
+                        panel.iBr.iY - 10,
+                        _L8("BACK"));
+}
+
 void CGameView::DrawKeyMapOverlay(CWindowGc& aGc) const
 {
     const TRect view = Rect();
     const TInt panelWidth = Min(304, Max(1, view.Width() - 16));
-    const TInt panelHeight = Min(78, Max(1, view.Height() - 16));
+    const TInt panelHeight = Min(87, Max(1, view.Height() - 16));
     const TPoint panelOrigin(view.iTl.iX + (view.Width() - panelWidth) / 2,
                              view.iTl.iY + (view.Height() - panelHeight) / 2);
     const TRect panel(panelOrigin, TSize(panelWidth, panelHeight));
@@ -815,7 +1105,7 @@ void CGameView::DrawKeyMapOverlay(CWindowGc& aGc) const
     leftY += step;
     DrawSmallBitmapText(aGc, leftX, leftY, _L8("ENTER/SPACE  \x04  ATTACK/OK"));
 
-    DrawSmallBitmapText(aGc, rightX, rightY, _L8("R SOFT  \x04  CANCEL/MENU"));
+    DrawSmallBitmapText(aGc, rightX, rightY, _L8("R SOFT  \x04  BACK"));
     rightY += step;
     DrawSmallBitmapText(aGc, rightX, rightY, _L8("SHIFT  \x04  SHIFT"));
     rightY += step;
@@ -823,12 +1113,14 @@ void CGameView::DrawKeyMapOverlay(CWindowGc& aGc) const
     rightY += step;
     DrawSmallBitmapText(aGc, rightX, rightY, _L8("+ - * / .  \x04  OPERATOR"));
     rightY += step;
-    DrawSmallBitmapText(aGc, rightX, rightY, _L8("L SOFT  \x04  RESUME"));
+    DrawSmallBitmapText(aGc, rightX, rightY, _L8("CENTER  \x04  BACK"));
     rightY += step;
     if (iPerfOverlay)
         DrawSmallBitmapText(aGc, rightX, rightY, _L8("F  \x04  FPS OFF"));
     else
         DrawSmallBitmapText(aGc, rightX, rightY, _L8("F  \x04  FPS ON"));
+    rightY += step;
+    DrawSmallBitmapText(aGc, rightX, rightY, _L8("P  \x04  SCREENSHOT"));
     rightY += step;
     DrawSmallBitmapText(aGc, rightX, rightY, _L8("SIDE +/-  \x04  VOLUME"));
 }
@@ -856,6 +1148,8 @@ void CGameView::Draw(const TRect& aRect) const
         CWindowGc& gc = SystemGc();
         if (iKeyMapVisible)
             DrawKeyMapOverlay(gc);
+        else if (iGameMenuActive)
+            DrawGameMenuOverlay(gc);
         DrawVolumeOverlay(gc, TPoint(0, 0));
         return;
     }
@@ -940,6 +1234,8 @@ void CGameView::Draw(const TRect& aRect) const
 
     if (iKeyMapVisible)
         DrawKeyMapOverlay(gc);
+    else if (iGameMenuActive)
+        DrawGameMenuOverlay(gc);
     DrawVolumeOverlay(gc, destination);
 }
 
@@ -973,6 +1269,8 @@ void CGameView::FocusChanged(TDrawNow aDrawNow)
         {
             iVolumeUpHeld = EFalse;
             iVolumeDownHeld = EFalse;
+            iLeftSoftkeyHeld = EFalse;
+            iRightSoftkeyHeld = EFalse;
             iRuntime->ReleaseAllKeys();
         }
     }
@@ -990,6 +1288,11 @@ TInt CGameView::CountComponentControls() const
 CCoeControl* CGameView::ComponentControl(TInt aIndex) const
 {
     return aIndex == 0 && !iRuntime ? iListBox : NULL;
+}
+
+TKeyResponse CGameView::HandleKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType)
+{
+    return OfferKeyEventL(aKeyEvent, aType);
 }
 
 TKeyResponse CGameView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType)
@@ -1025,7 +1328,7 @@ TKeyResponse CGameView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aT
         {
             if (!held || aKeyEvent.iRepeats > 0)
                 AdjustMasterVolume(volumeUp ? KVolumeStep : -KVolumeStep);
-            held = ETrue;
+            held = EFalse;
         }
         else if (aType == EEventKeyUp)
         {
@@ -1037,51 +1340,147 @@ TKeyResponse CGameView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aT
     if (leftSoftkey)
     {
         if (aType == EEventKeyDown)
-            HandleLeftSoftkeyL();
+        {
+            if (!iLeftSoftkeyHeld)
+                HandleLeftSoftkeyL();
+            iLeftSoftkeyHeld = ETrue;
+        }
+        else if (aType == EEventKey)
+        {
+            if (!iLeftSoftkeyHeld && aKeyEvent.iRepeats == 0)
+                HandleLeftSoftkeyL();
+            iLeftSoftkeyHeld = EFalse;
+        }
+        else if (aType == EEventKeyUp)
+        {
+            iLeftSoftkeyHeld = EFalse;
+        }
         return EKeyWasConsumed;
     }
 
     if (rightSoftkey)
     {
-        if (iKeyMapVisible)
+        if (iGameMenuActive)
+        {
+            if (aType == EEventKeyDown)
+            {
+                if (!iRightSoftkeyHeld)
+                    HandleRightSoftkeyL();
+                iRightSoftkeyHeld = ETrue;
+            }
+            else if (aType == EEventKey)
+            {
+                if (!iRightSoftkeyHeld && aKeyEvent.iRepeats == 0)
+                    HandleRightSoftkeyL();
+                iRightSoftkeyHeld = EFalse;
+            }
+            else if (aType == EEventKeyUp)
+            {
+                iRightSoftkeyHeld = EFalse;
+            }
             return EKeyWasConsumed;
+        }
+
         if (aType == EEventKeyDown)
+        {
+            iHeldPlayerKeys |= CPlayerRuntime::EKeyCancel;
             iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, ETrue);
+        }
         else if (aType == EEventKeyUp)
+        {
+            iHeldPlayerKeys &= ~CPlayerRuntime::EKeyCancel;
             iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, EFalse);
+        }
+        else if (aType == EEventKey &&
+                 (iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) == 0)
+        {
+            iPendingPlayerKeyPulses |= CPlayerRuntime::EKeyCancel;
+        }
         return EKeyWasConsumed;
     }
 
-    if (iKeyMapVisible)
+    if (iGameMenuActive)
     {
-        if (aType == EEventKeyDown &&
-            (aKeyEvent.iScanCode == 'F' ||
-             aKeyEvent.iCode == 'F' ||
-             aKeyEvent.iCode == 'f'))
-            ToggleFpsOverlayL();
+        if (aType != EEventKey)
+            return EKeyWasConsumed;
+
+        TUint32 menuKey = MapPlayerScanKey(aKeyEvent);
+        if (menuKey == 0)
+            menuKey = MapPlayerCharacterKey(aKeyEvent.iCode);
+
+        if (iKeyMapVisible)
+        {
+            if (menuKey == CPlayerRuntime::EKeyDecision)
+            {
+                iKeyMapVisible = EFalse;
+                iFrameDrawPending = EFalse;
+                DrawNow();
+            }
+            else if (aKeyEvent.iRepeats == 0 &&
+                     (aKeyEvent.iCode == 'F' || aKeyEvent.iCode == 'f'))
+            {
+                ToggleFpsOverlayL();
+            }
+            return EKeyWasConsumed;
+        }
+
+        if (menuKey == CPlayerRuntime::EKeyUp)
+            MoveGameMenuSelection(-1);
+        else if (menuKey == CPlayerRuntime::EKeyDown)
+            MoveGameMenuSelection(1);
+        else if (menuKey == CPlayerRuntime::EKeyLeft &&
+                 iGameMenuSelection == EGameMenuVolume)
+            AdjustMasterVolume(-KVolumeStep);
+        else if (menuKey == CPlayerRuntime::EKeyRight &&
+                 iGameMenuSelection == EGameMenuVolume)
+            AdjustMasterVolume(KVolumeStep);
+        else if (menuKey == CPlayerRuntime::EKeyDecision)
+            ActivateGameMenuItemL();
+        else if (menuKey == CPlayerRuntime::EKeyCancel)
+            CloseGameMenu();
         return EKeyWasConsumed;
     }
 
-    const TUint32 playerKey = MapPlayerKey(aKeyEvent);
-    if (playerKey == 0)
-        return EKeyWasNotConsumed;
+    TUint32 scanKey = MapPlayerScanKey(aKeyEvent);
+    if (scanKey == 0)
+        scanKey = FindDynamicPlayerScanKey(aKeyEvent.iScanCode);
 
-    if (aType == EEventKey && playerKey == CPlayerRuntime::EKeyDecision)
+    if (aType == EEventKeyDown && scanKey != 0)
     {
-        iPendingDecisionPulse = ETrue;
+        iHeldPlayerKeys |= scanKey;
+        iRuntime->SetKeyState(scanKey, ETrue);
         return EKeyWasConsumed;
     }
 
-    if (aType == EEventKeyDown)
+    if (aType == EEventKeyUp && scanKey != 0)
     {
-        iRuntime->SetKeyState(playerKey, ETrue);
+        iHeldPlayerKeys &= ~scanKey;
+        iRuntime->SetKeyState(scanKey, EFalse);
+        ForgetDynamicPlayerScanKey(aKeyEvent.iScanCode);
         return EKeyWasConsumed;
     }
 
-    if (aType == EEventKeyUp)
+    if (aType == EEventKey)
     {
-        iRuntime->SetKeyState(playerKey, EFalse);
-        return EKeyWasConsumed;
+        if (scanKey != 0)
+        {
+            if ((iHeldPlayerKeys & scanKey) == 0)
+                iPendingPlayerKeyPulses |= scanKey;
+            return EKeyWasConsumed;
+        }
+
+        const TUint32 playerKey = MapPlayerCharacterKey(aKeyEvent.iCode);
+        if (playerKey != 0)
+        {
+            if (aKeyEvent.iScanCode != 0)
+            {
+                RememberDynamicPlayerScanKey(aKeyEvent.iScanCode, playerKey);
+                iHeldPlayerKeys |= playerKey;
+                iRuntime->SetKeyState(playerKey, ETrue);
+            }
+            iPendingPlayerKeyPulses |= playerKey;
+            return EKeyWasConsumed;
+        }
     }
 
     return EKeyWasNotConsumed;
@@ -1130,24 +1529,23 @@ void CGameView::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
         }
     }
 
-    const TBool cancelPulse = iPendingCancelPulse;
-    const TBool decisionPulse = iPendingDecisionPulse;
-    if (cancelPulse)
-        iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, ETrue);
-    if (decisionPulse)
-        iRuntime->SetKeyState(CPlayerRuntime::EKeyDecision, ETrue);
-    iRuntime->TickL(aLogicFrame, aRenderFrame);
-    if (cancelPulse)
+    TUint32 pulseKeys = iPendingPlayerKeyPulses;
+    if (iPendingCancelPulse)
+        pulseKeys |= CPlayerRuntime::EKeyCancel;
+    if (pulseKeys != 0)
+        SetPlayerKeyMask(*iRuntime, pulseKeys, ETrue);
+    const TBool movieActive = EasyRpgMovieIsActive();
+    iRuntime->TickL(aLogicFrame, aRenderFrame && !movieActive);
+    if (pulseKeys != 0)
+        SetPlayerKeyMask(*iRuntime, pulseKeys & ~iHeldPlayerKeys, EFalse);
+    iPendingPlayerKeyPulses = 0;
+    iPendingCancelPulse = EFalse;
+    if (EasyRpgMovieConsumeRedraw())
     {
-        iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, EFalse);
-        iPendingCancelPulse = EFalse;
+        iFrameDrawPending = EFalse;
+        DrawNow();
     }
-    if (decisionPulse)
-    {
-        iRuntime->SetKeyState(CPlayerRuntime::EKeyDecision, EFalse);
-        iPendingDecisionPulse = EFalse;
-    }
-    if (aRenderFrame && iDisplaySurface && iDisplaySurface->HasFrame())
+    if (aRenderFrame && !EasyRpgMovieIsActive() && iDisplaySurface && iDisplaySurface->HasFrame())
     {
         if (iPerfOverlay)
             iPerfOverlay->FrameRendered();
@@ -1171,7 +1569,7 @@ void CGameView::FrameError(TInt aError)
     TRAP_IGNORE(ShowLoadErrorL(aError));
 }
 
-TUint32 CGameView::MapPlayerKey(const TKeyEvent& aKeyEvent) const
+TUint32 CGameView::MapPlayerScanKey(const TKeyEvent& aKeyEvent) const
 {
     switch (aKeyEvent.iScanCode)
     {
@@ -1240,11 +1638,16 @@ TUint32 CGameView::MapPlayerKey(const TKeyEvent& aKeyEvent) const
     case EStdKeyFullStop:
     case EStdKeyNkpFullStop:
         return CPlayerRuntime::EKeyPeriod;
+    case 'P':
+        return CPlayerRuntime::EKeyScreenshot;
     default:
-        break;
+        return 0;
     }
+}
 
-    switch (aKeyEvent.iCode)
+TUint32 CGameView::MapPlayerCharacterKey(TInt aCode) const
+{
+    switch (aCode)
     {
     case EKeyUpArrow:
     case 'W':
@@ -1303,10 +1706,52 @@ TUint32 CGameView::MapPlayerKey(const TKeyEvent& aKeyEvent) const
         return CPlayerRuntime::EKeyDivide;
     case '.':
         return CPlayerRuntime::EKeyPeriod;
+    case 'P':
+    case 'p':
+        return CPlayerRuntime::EKeyScreenshot;
     default:
-        break;
+        return 0;
+    }
+}
+
+TUint32 CGameView::FindDynamicPlayerScanKey(TInt aScanCode) const
+{
+    for (TInt index = 0; index < iDynamicPlayerScanCount; ++index)
+    {
+        if (iDynamicPlayerScanCodes[index] == aScanCode)
+            return iDynamicPlayerScanKeys[index];
+    }
+    return 0;
+}
+
+void CGameView::RememberDynamicPlayerScanKey(TInt aScanCode, TUint32 aPlayerKey)
+{
+    for (TInt index = 0; index < iDynamicPlayerScanCount; ++index)
+    {
+        if (iDynamicPlayerScanCodes[index] == aScanCode)
+        {
+            iDynamicPlayerScanKeys[index] = aPlayerKey;
+            return;
+        }
     }
 
-    return 0;
+    if (iDynamicPlayerScanCount >= 16)
+        return;
+    iDynamicPlayerScanCodes[iDynamicPlayerScanCount] = aScanCode;
+    iDynamicPlayerScanKeys[iDynamicPlayerScanCount] = aPlayerKey;
+    ++iDynamicPlayerScanCount;
+}
+
+void CGameView::ForgetDynamicPlayerScanKey(TInt aScanCode)
+{
+    for (TInt index = 0; index < iDynamicPlayerScanCount; ++index)
+    {
+        if (iDynamicPlayerScanCodes[index] != aScanCode)
+            continue;
+        --iDynamicPlayerScanCount;
+        iDynamicPlayerScanCodes[index] = iDynamicPlayerScanCodes[iDynamicPlayerScanCount];
+        iDynamicPlayerScanKeys[index] = iDynamicPlayerScanKeys[iDynamicPlayerScanCount];
+        return;
+    }
 }
 

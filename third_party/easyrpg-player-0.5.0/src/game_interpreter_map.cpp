@@ -45,6 +45,10 @@
 #include "util_macro.h"
 #include "game_interpreter_map.h"
 #include "reader_lcf.h"
+#ifdef EASYRPG_SYMBIAN
+#include "filefinder.h"
+#include "CoreMovie.h"
+#endif
 
 Game_Interpreter_Map::Game_Interpreter_Map(int depth, bool main_flag) :
 	Game_Interpreter(depth, main_flag) {
@@ -748,11 +752,38 @@ bool Game_Interpreter_Map::CommandPlayMovie(RPG::EventCommand const& com) { // c
 	int res_x = com.parameters[3];
 	int res_y = com.parameters[4];
 
+#ifdef EASYRPG_SYMBIAN
+	const int state = EasyRpgMoviePoll();
+	if (state == 1)
+		return false;
+	if (state == 2) {
+		EasyRpgMovieAcknowledge();
+		return true;
+	}
+	if (state < 0) {
+		Output::Warning("Movie playback failed: %s (%d)", filename.c_str(), state);
+		EasyRpgMovieAcknowledge();
+		return true;
+	}
+
+	std::string path = FileFinder::FindDefault("Movie", filename);
+	if (path.empty()) {
+		Output::Warning("Movie not found: %s", filename.c_str());
+		return true;
+	}
+
+	Main_Data::game_screen->PlayMovie(path, pos_x, pos_y, res_x, res_y);
+	const int error = EasyRpgMovieStart(path.c_str(), pos_x, pos_y, res_x, res_y);
+	if (error != 0) {
+		Output::Warning("Movie playback failed: %s (%d)", path.c_str(), error);
+		return true;
+	}
+	return false;
+#else
 	Output::Warning("Couldn't play movie: %s.\nMovie playback is not implemented (yet).", filename.c_str());
-
 	Main_Data::game_screen->PlayMovie(filename, pos_x, pos_y, res_x, res_y);
-
 	return true;
+#endif
 }
 
 bool Game_Interpreter_Map::CommandOpenSaveMenu(RPG::EventCommand const& /* com */) { // code 11910

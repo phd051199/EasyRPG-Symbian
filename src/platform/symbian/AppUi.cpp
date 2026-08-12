@@ -1,6 +1,9 @@
+#include <aknnotewrappers.h>
 #include <avkon.hrh>
 #include <eikbtgpc.h>
 #include <eikspane.h>
+#include <w32std.h>
+#include "App.hrh"
 #include "GameView.h"
 #include "AppUi.h"
 
@@ -40,6 +43,22 @@ void CEasyRpgAppUi::ExitGameFullscreen()
     if (Cba()) Cba()->MakeVisible(ETrue);
 }
 
+void CEasyRpgAppUi::HandleWsEventL(const TWsEvent& aEvent, CCoeControl* aDestination)
+{
+    if (iGameView && iGameView->IsGameRunning())
+    {
+        const TInt type = aEvent.Type();
+        if (type == EEventKeyDown || type == EEventKey || type == EEventKeyUp)
+        {
+            const TKeyEvent* keyEvent = aEvent.Key();
+            if (keyEvent &&
+                iGameView->HandleKeyEventL(*keyEvent, static_cast<TEventCode>(type)) == EKeyWasConsumed)
+                return;
+        }
+    }
+    CAknAppUi::HandleWsEventL(aEvent, aDestination);
+}
+
 void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 {
     if (iGameView && iGameView->IsGameRunning())
@@ -58,6 +77,16 @@ void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 
     switch (aCommand)
     {
+    case EEasyRpgCmdLauncherPlay:
+        if (iGameView)
+            iGameView->PlaySelectedGameL();
+        break;
+    case EEasyRpgCmdLauncherAbout:
+        {
+            CAknInformationNote* note = new (ELeave) CAknInformationNote;
+            note->ExecuteLD(_L("EasyRPG"));
+        }
+        break;
     case EEikCmdExit:
     case EAknSoftkeyExit:
         Exit();

@@ -155,6 +155,7 @@ void Game_Screen::ShakeOnce(int power, int speed, int tenths) {
 	data.shake_time_left = tenths * DEFAULT_FPS / 10;
 	data.shake_position = 0;
 	data.shake_continuous = false;
+	shake_direction = 1;
 }
 
 void Game_Screen::ShakeBegin(int power, int speed) {
@@ -163,6 +164,7 @@ void Game_Screen::ShakeBegin(int power, int speed) {
 	data.shake_time_left = 0;
 	data.shake_position = 0;
 	data.shake_continuous = true;
+	shake_direction = 1;
 }
 
 void Game_Screen::ShakeEnd() {
@@ -285,6 +287,8 @@ void Game_Screen::Update() {
 		case Weather_Fog:
 			break;
 		case Weather_Sandstorm:
+			InitSnowRain();
+			UpdateSnowRain(3);
 			break;
 	}
 }

@@ -1,9 +1,16 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
+#include <memory>
 #include <string>
 
+#include "baseui.h"
+#include "bitmap.h"
+#include "filefinder.h"
+#include "main_data.h"
 #include "output.h"
+#include "utils.h"
 
 namespace {
 void WriteLine(const char* prefix, const char* message) {
@@ -23,9 +30,24 @@ void PrintLine(const char* prefix, const char* fmt, va_list ap) {
 
 namespace Output {
 void Quit() {}
-bool TakeScreenshot() { return false; }
-bool TakeScreenshot(std::string const&) { return false; }
-bool TakeScreenshot(std::ostream&) { return false; }
+bool TakeScreenshot() {
+    int index = 0;
+    std::string path;
+    do {
+        path = FileFinder::MakePath(Main_Data::GetSavePath(),
+                                    "screenshot_" + Utils::ToString(index++) + ".png");
+    } while (FileFinder::Exists(path));
+    return TakeScreenshot(path);
+}
+bool TakeScreenshot(std::string const& file) {
+    std::shared_ptr<std::fstream> stream = FileFinder::openUTF8(
+        file, std::ios_base::binary | std::ios_base::out | std::ios_base::trunc);
+    return stream && TakeScreenshot(*stream);
+}
+bool TakeScreenshot(std::ostream& stream) {
+    return DisplayUi && DisplayUi->GetDisplaySurface() &&
+        DisplayUi->GetDisplaySurface()->WritePNG(stream);
+}
 void ToggleLog() {}
 void IgnorePause(bool) {}
 

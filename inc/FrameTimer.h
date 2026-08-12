@@ -19,6 +19,8 @@ public:
     void Start();
     void Stop();
     TBool Running() const;
+    void SetFrameSkipEnabled(TBool aEnabled);
+    TBool FrameSkipEnabled() const;
 
 private:
     enum
@@ -26,6 +28,7 @@ private:
         KLogicFps = 60,
         KRenderFps = 30,
         KLogicTicksPerRender = KLogicFps / KRenderFps,
+        KMaxLogicCatchUpTicks = 8,
         KMaxTimerDelayMicroseconds = 16667
     };
 
@@ -53,6 +56,7 @@ private:
     TInt64 iNextDeadlineCounter;
     TUint32 iLogicFrame;
     TBool iRunning;
+    TBool iFrameSkipEnabled;
 };
 
 #endif

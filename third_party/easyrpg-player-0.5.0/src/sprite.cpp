@@ -84,7 +84,10 @@ void Sprite::Draw() {
 		if (rect.IsEmpty())
 			return;
 		const Rect draw_rect(x - ox, y - oy, rect.width, rect.height);
-		if (SymbianRenderDamage::IsPainting() && !SymbianRenderDamage::IntersectsDirty(draw_rect))
+		const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+		if (paint_clip &&
+			(draw_rect.x >= paint_clip->x + paint_clip->width || paint_clip->x >= draw_rect.x + draw_rect.width ||
+			 draw_rect.y >= paint_clip->y + paint_clip->height || paint_clip->y >= draw_rect.y + draw_rect.height))
 			return;
 		if (!SymbianRenderDamage::IsRecording())
 			goto draw_sprite;
@@ -154,14 +157,6 @@ void Sprite::BlitScreenIntern(Bitmap const& draw_bitmap,
 }
 
 BitmapRef Sprite::Refresh(Rect& rect) {
-	if (zoom_x_effect != 1.0 && zoom_y_effect != 1.0 && angle_effect != 0.0 && waver_effect_depth != 0) {
-		// TODO: Out of bounds check adjustments for zoom, angle and waver
-		// but even without this will catch most of the cases
-		if (Rect(x - ox, y - ox, GetWidth(), GetHeight()).IsOutOfBounds(Rect(0, 0, SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT))) {
-			return BitmapRef();
-		};
-	}
-
 	rect.Adjust(bitmap->GetWidth(), bitmap->GetHeight());
 
 	bool no_tone = tone_effect == Tone();

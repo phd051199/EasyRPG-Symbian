@@ -3,12 +3,13 @@
 
 #include <__config>
 #include <istream>
+#include <ostream>
 #include <cstdio>
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template<class CharT, class Traits>
-class basic_fstream : public basic_istream<CharT, Traits> {
+class basic_fstream : public basic_istream<CharT, Traits>, public basic_ostream<CharT, Traits> {
 public:
     basic_fstream() : file_(0) {}
     basic_fstream(const char* path, ios_base::openmode mode) : file_(0) { open(path, mode); }
@@ -28,7 +29,8 @@ public:
         if (binary) mode_buf[i++] = 'b';
         mode_buf[i] = 0;
         file_ = fopen(path, mode_buf);
-        this->attach(file_);
+        basic_istream<CharT, Traits>::attach(file_);
+        basic_ostream<CharT, Traits>::attach(file_);
         if (file_ && (mode & ios_base::ate)) fseek(file_, 0, SEEK_END);
     }
     void close() {
@@ -36,7 +38,8 @@ public:
             fclose(file_);
             file_ = 0;
         }
-        this->attach(0);
+        basic_istream<CharT, Traits>::attach(0);
+        basic_ostream<CharT, Traits>::attach(0);
     }
     operator bool() const { return file_ != 0; }
     FILE* native_handle() const { return file_; }

@@ -1,0 +1,572 @@
+--- a/src/battle_animation.cpp
++++ b/src/battle_animation.cpp
+@@ -205,7 +205,10 @@
+ 			flash_length);
+ 	}
+ 
+-	// TODO: Shake.
++	if (timing.screen_shake == RPG::AnimationTiming::ScreenShake_target)
++		ShakeTargets(3, 5, 32);
++	else if (timing.screen_shake == RPG::AnimationTiming::ScreenShake_screen)
++		ShakeScreen(3, 5, 32);
+ }
+ 
+ // For handling the vertical position.
+@@ -246,6 +249,10 @@
+ void BattleAnimationChara::SetFlash(Color c) {
+ 	character.Flash(c, flash_length);
+ }
++void BattleAnimationChara::ShakeTargets(int, int, int) {
++}
++void BattleAnimationChara::ShakeScreen(int, int, int) {
++}
+ bool BattleAnimationChara::ShouldScreenFlash() const { return true; }
+ 
+ /////////
+@@ -277,7 +284,7 @@
+ 		if (sprite && sprite->GetBitmap()) {
+ 			offset = CalculateOffset(animation.position, sprite->GetHeight());
+ 		}
+-		DrawAt(battler.GetBattleX(), battler.GetBattleY() + offset);
++		DrawAt(battler.GetBattleX() + battler.GetBattleShakeX(), battler.GetBattleY() + offset);
+ 	}
+ }
+ void BattleAnimationBattlers::SetFlash(Color c) {
+@@ -288,6 +295,13 @@
+ 			sprite->Flash(c, flash_length);
+ 	}
+ }
++void BattleAnimationBattlers::ShakeTargets(int strength, int speed, int frames) {
++	for (std::vector<Game_Battler*>::const_iterator it = battlers.begin(); it != battlers.end(); ++it)
++		(*it)->ShakeOnce(strength, speed, frames);
++}
++void BattleAnimationBattlers::ShakeScreen(int strength, int speed, int frames) {
++	Main_Data::game_screen->ShakeOnce(strength, speed, frames);
++}
+ bool BattleAnimationBattlers::ShouldScreenFlash() const { return should_flash; }
+ 
+ /////////
+@@ -315,6 +329,9 @@
+ 	}
+ }
+ void BattleAnimationGlobal::SetFlash(Color) {
+-	// nop
++}
++void BattleAnimationGlobal::ShakeTargets(int, int, int) {
++}
++void BattleAnimationGlobal::ShakeScreen(int, int, int) {
+ }
+ bool BattleAnimationGlobal::ShouldScreenFlash() const { return true; }
+--- a/src/game_battlealgorithm.h
++++ b/src/game_battlealgorithm.h
+@@ -80,6 +80,10 @@
+ 	 * @return true if there was a next target available
+ 	 */
+ 	bool TargetNext();
++	bool RepeatNext();
++	void SetRepeat(int repeat_count);
++	virtual void ApplyComboHitsMultiplier(int hits);
++	virtual void PrepareRepeatAnimation();
+ 
+ 	/**
+ 	 * Defines switches that will be switched on after the action is finished.
+@@ -298,6 +302,8 @@
+ 	std::vector<Game_Battler*>::iterator current_target;
+ 
+ 	bool no_target;
++	int repeat = 1;
++	int current_repeat = 0;
+ 
+ 	int hp;
+ 	int sp;
+@@ -333,6 +339,13 @@
+ 	int GetSourceAnimationState() const override;
+ 	const RPG::Sound* GetStartSe() const override;
+ 	int GetPhysicalDamageRate() const override;
++	void ApplyComboHitsMultiplier(int hits) override;
++	void PrepareRepeatAnimation() override;
++
++private:
++	const RPG::Item* GetCurrentWeapon() const;
++	int primary_repeat_count = 1;
++	bool dual_weapons = false;
+ };
+ 
+ class Skill : public AlgorithmBase {
+@@ -375,7 +388,7 @@
+ 	const RPG::Item& item;
+ };
+ 
+-class NormalDual : public AlgorithmBase {
++class NormalDual : public Normal {
+ public:
+ 	NormalDual(Game_Battler* source, Game_Battler* target);
+ 
+--- a/src/game_interpreter_battle.cpp
++++ b/src/game_interpreter_battle.cpp
+@@ -138,13 +138,11 @@
+ 		return true;
+ 	}
+ 
+-	Output::Warning("Battle: Enable Combo not implemented");
+-
+-	// TODO
+-	// int command_id = com.parameters[1];
+-	// int multiple = com.parameters[2];
+-
+-	// Game_Actors::GetActor(actor_id)->EnableCombo(command_id, multiple);
++	int command_id = com.parameters[1];
++	int multiple = com.parameters[2];
++	Game_Actor* actor = Game_Actors::GetActor(actor_id);
++	if (actor)
++		actor->SetBattleCombo(command_id, multiple);
+ 
+ 	return true;
+ }
+--- a/src/game_battler.cpp
++++ b/src/game_battler.cpp
+@@ -669,6 +669,8 @@
+ 	defending = false;
+ 	battle_turn = 0;
+ 	last_battle_action = -1;
++	battle_combo_command_id = -1;
++	battle_combo_times = 1;
+ 	atk_modifier = 0;
+ 	def_modifier = 0;
+ 	spi_modifier = 0;
+--- a/src/game_actor.cpp
++++ b/src/game_actor.cpp
+@@ -854,6 +854,19 @@
+ 	}
+ }
+ 
++bool Game_Actor::HasRowCommand() const {
++	const std::vector<uint32_t>& commands = GetData().battle_commands;
++	const RPG::Actor& actor = Data::actors[GetId() - 1];
++	for (size_t i = 0; i < commands.size(); ++i) {
++		const int command_index = commands[i];
++		if (command_index == 0)
++			return true;
++		if (command_index == -1 && i < actor.battle_commands.size() && actor.battle_commands[i] == 0)
++			return true;
++	}
++	return false;
++}
++
+ const std::vector<const RPG::BattleCommand*> Game_Actor::GetBattleCommands() const {
+ 	std::vector<const RPG::BattleCommand*> commands;
+ 
+--- a/src/scene_battle.cpp
++++ b/src/scene_battle.cpp
+@@ -382,8 +382,7 @@
+ 			enemy->SetBattleAlgorithm(std::make_shared<Game_BattleAlgorithm::Normal>(enemy, Main_Data::game_party->GetRandomActiveBattler()));
+ 			break;
+ 		case RPG::EnemyAction::Basic_dual_attack:
+-			// ToDo: Must be NormalDual, not implemented
+-			enemy->SetBattleAlgorithm(std::make_shared<Game_BattleAlgorithm::Normal>(enemy, Main_Data::game_party->GetRandomActiveBattler()));
++			enemy->SetBattleAlgorithm(std::make_shared<Game_BattleAlgorithm::NormalDual>(enemy, Main_Data::game_party->GetRandomActiveBattler()));
+ 			break;
+ 		case RPG::EnemyAction::Basic_defense:
+ 			enemy->SetBattleAlgorithm(std::make_shared<Game_BattleAlgorithm::Defend>(enemy));
+--- a/src/scene_battle_rpg2k3.h
++++ b/src/scene_battle_rpg2k3.h
+@@ -65,6 +65,7 @@
+ 	void AttackSelected() override;
+ 	void SubskillSelected();
+ 	void SpecialSelected();
++	void RowSelected();
+ 
+ 	void Escape();
+ 
+--- a/src/game_battlealgorithm.cpp
++++ b/src/game_battlealgorithm.cpp
+@@ -30,6 +30,7 @@
+ #include "game_party_base.h"
+ #include "game_switches.h"
+ #include "game_system.h"
++#include "game_temp.h"
+ #include "main_data.h"
+ #include "output.h"
+ #include "player.h"
+@@ -538,14 +539,56 @@
+ 
+ Game_BattleAlgorithm::Normal::Normal(Game_Battler* source, Game_Battler* target) :
+ 	AlgorithmBase(source, target) {
+-	// no-op
++	if (source->GetType() == Game_Battler::Type_Ally) {
++		Game_Actor* actor = static_cast<Game_Actor*>(source);
++		if (actor->HasTwoWeapons() && actor->GetEquipment(0) && actor->GetEquipment(1)) {
++			dual_weapons = true;
++			SetRepeat(2);
++		}
++	}
+ }
+ 
+ Game_BattleAlgorithm::Normal::Normal(Game_Battler* source, Game_Party_Base* target) :
+ 	AlgorithmBase(source, target) {
+-	// no-op
++	if (source->GetType() == Game_Battler::Type_Ally) {
++		Game_Actor* actor = static_cast<Game_Actor*>(source);
++		if (actor->HasTwoWeapons() && actor->GetEquipment(0) && actor->GetEquipment(1)) {
++			dual_weapons = true;
++			SetRepeat(2);
++		}
++	}
+ }
+ 
++const RPG::Item* Game_BattleAlgorithm::Normal::GetCurrentWeapon() const {
++	if (source->GetType() != Game_Battler::Type_Ally)
++		return NULL;
++	Game_Actor* actor = static_cast<Game_Actor*>(source);
++	const int slot = dual_weapons && current_repeat >= primary_repeat_count ? 1 : 0;
++	return actor->GetEquipment(slot);
++}
++
++void Game_BattleAlgorithm::Normal::ApplyComboHitsMultiplier(int hits) {
++	const int multiplier = std::max(1, hits);
++	if (dual_weapons)
++		primary_repeat_count *= multiplier;
++	AlgorithmBase::ApplyComboHitsMultiplier(multiplier);
++}
++
++void Game_BattleAlgorithm::Normal::PrepareRepeatAnimation() {
++	if (source->GetType() == Game_Battler::Type_Ally) {
++		Game_Actor* actor = static_cast<Game_Actor*>(source);
++		const RPG::Item* weapon = GetCurrentWeapon();
++		if (weapon && weapon->animation_id > 0 && weapon->animation_id <= static_cast<int>(Data::animations.size()))
++			animation = &Data::animations[weapon->animation_id - 1];
++		else {
++			const int animation_id = Data::actors[actor->GetId() - 1].unarmed_animation;
++			animation = animation_id > 0 && animation_id <= static_cast<int>(Data::animations.size()) ? &Data::animations[animation_id - 1] : NULL;
++		}
++	} else {
++		animation = Data::animations.empty() ? NULL : &Data::animations[0];
++	}
++}
++
+ bool Game_BattleAlgorithm::Normal::Execute() {
+ 	Reset();
+ 
+@@ -555,23 +598,19 @@
+ 	if (source->GetType() == Game_Battler::Type_Ally) {
+ 		Game_Actor* ally = static_cast<Game_Actor*>(source);
+ 		int hit_chance = source->GetHitChance();
+-		int weaponID = ally->GetWeaponId() - 1;
+-		
+-		if (weaponID == -1) {
+-			// No Weapon
+-			// Todo: Two Sword style
+-			animation = &Data::animations[Data::actors[ally->GetId() - 1].unarmed_animation - 1];
++		const RPG::Item* weapon = GetCurrentWeapon();
++		if (!weapon) {
++			const int animation_id = Data::actors[ally->GetId() - 1].unarmed_animation;
++			animation = animation_id > 0 && animation_id <= static_cast<int>(Data::animations.size()) ? &Data::animations[animation_id - 1] : NULL;
+ 		} else {
+-			animation = &Data::animations[Data::items[weaponID].animation_id - 1];
+-			RPG::Item weapon = Data::items[weaponID];
+-			hit_chance = weapon.hit;
+-			crit_chance += crit_chance * weapon.critical_hit / 100.0f;
+-			multiplier = GetAttributeMultiplier(weapon.attribute_set);
++			animation = weapon->animation_id > 0 && weapon->animation_id <= static_cast<int>(Data::animations.size()) ? &Data::animations[weapon->animation_id - 1] : NULL;
++			hit_chance = weapon->hit;
++			crit_chance += crit_chance * weapon->critical_hit / 100.0f;
++			multiplier = GetAttributeMultiplier(weapon->attribute_set);
+ 		}
+-		to_hit = (int)(100 - (100 - hit_chance));
+-		if(weaponID != -1 && !Data::items[weaponID].ignore_evasion) {
++		to_hit = hit_chance;
++		if (weapon && !weapon->ignore_evasion)
+ 			to_hit *= (1 + (1.0 * (*current_target)->GetAgi() / ally->GetAgi() - 1) / 2);
+-		}
+ 	} else {
+ 		// Source is Enemy
+ 		int hit = source->GetHitChance();
+@@ -610,14 +649,12 @@
+ 		}
+ 		else {
+ 			if (source->GetType() == Game_Battler::Type_Ally) {
+-				int weaponID = static_cast<Game_Actor*>(source)->GetWeaponId() - 1;
+-				if (weaponID != -1) {
+-					RPG::Item item = Data::items[static_cast<Game_Actor*>(source)->GetWeaponId() - 1];
+-					for (unsigned int i = 0; i < item.state_set.size(); i++) {
+-						if (item.state_set[i] && Utils::GetRandomNumber(0, 99) < (item.state_chance * (*current_target)->GetStateProbability(Data::states[i].ID) / 100)) {
+-							if (item.state_effect) {
++				const RPG::Item* item = GetCurrentWeapon();
++				if (item) {
++					for (unsigned int i = 0; i < item->state_set.size(); i++) {
++						if (item->state_set[i] && Utils::GetRandomNumber(0, 99) < (item->state_chance * (*current_target)->GetStateProbability(Data::states[i].ID) / 100)) {
++							if (item->state_effect)
+ 								healing = true;
+-							}
+ 							conditions.push_back(Data::states[i]);
+ 						}
+ 					}
+@@ -638,7 +675,7 @@
+ 	AlgorithmBase::Apply();
+ 
+ 	source->SetCharged(false);
+-	if (source->GetType() == Game_Battler::Type_Ally) {
++	if (first_attack && source->GetType() == Game_Battler::Type_Ally) {
+ 		Game_Actor* src = static_cast<Game_Actor*>(source);
+ 		if (src->GetWeaponId() != 0) {
+ 			source->ChangeSp(-Data::items[src->GetWeaponId() - 1].sp_cost / src->GetSpCostModifier());
+@@ -656,8 +693,8 @@
+ }
+ 
+ int Game_BattleAlgorithm::Normal::GetSourceAnimationState() const {
+-	// ToDo when it is Dual attack the 2nd call should return LeftHand
+-
++	if (dual_weapons && current_repeat >= primary_repeat_count)
++		return Sprite_Battler::AnimationState_LeftHand;
+ 	return Sprite_Battler::AnimationState_RightHand;
+ }
+ 
+@@ -1033,31 +1070,20 @@
+ }
+ 
+ Game_BattleAlgorithm::NormalDual::NormalDual(Game_Battler* source, Game_Battler* target) :
+-	AlgorithmBase(source, target) {
+-	// no-op
++	Normal(source, target) {
++	SetRepeat(2);
+ }
+ 
+ std::string Game_BattleAlgorithm::NormalDual::GetStartMessage() const {
+-	if (Player::IsRPG2k()) {
+-		return source->GetName() + " TODO DUAL";
+-	}
+-	else {
+-		return "";
+-	}
++	return Normal::GetStartMessage();
+ }
+ 
+ const RPG::Sound* Game_BattleAlgorithm::NormalDual::GetStartSe() const {
+-	if (source->GetType() == Game_Battler::Type_Enemy) {
+-		return &Game_System::GetSystemSE(Game_System::SFX_EnemyAttacks);
+-	}
+-	else {
+-		return NULL;
+-	}
++	return Normal::GetStartSe();
+ }
+ 
+ bool Game_BattleAlgorithm::NormalDual::Execute() {
+-	Output::Warning("Battle: Enemy Double Attack not implemented");
+-	return true;
++	return Normal::Execute();
+ }
+ 
+ Game_BattleAlgorithm::Defend::Defend(Game_Battler* source) :
+@@ -1227,25 +1253,16 @@
+ bool Game_BattleAlgorithm::Escape::Execute() {
+ 	Reset();
+ 
+-	// Monsters always escape
+ 	this->success = true;
+ 
+-	// TODO: Preemptive attack has 100% escape ratio
+-
+ 	if (source->GetType() == Game_Battler::Type_Ally) {
+-		int ally_agi = Main_Data::game_party->GetAverageAgility();
+-		int enemy_agi = Main_Data::game_enemyparty->GetAverageAgility();
+-
+-		double to_hit = 1.5 * ((float)ally_agi / enemy_agi);
+-
+-		// Every failed escape is worth 10% higher escape chance (see help file)
+-		for (int i = 0; i < Game_Battle::escape_fail_count; ++i) {
+-			to_hit += (to_hit * 0.1);
+-		}
+-
+-		to_hit *= 100;
+-
+-		this->success = Utils::GetRandomNumber(0, 99) < (int)to_hit;
++		if (Game_Temp::battle_first_strike && Game_Battle::GetTurn() == 0)
++			return true;
++		const int ally_agi = std::max(1, Main_Data::game_party->GetAverageAgility());
++		const int enemy_agi = Main_Data::game_enemyparty->GetAverageAgility();
++		int chance = enemy_agi <= 0 ? 100 : 150 - static_cast<int>(std::floor(100.0 * enemy_agi / ally_agi + 0.5));
++		chance = std::max(0, std::min(100, chance + Game_Battle::escape_fail_count * 10));
++		this->success = Utils::GetRandomNumber(0, 99) < chance;
+ 	}
+ 
+ 	return this->success;
+--- a/src/scene_battle_rpg2k3.cpp
++++ b/src/scene_battle_rpg2k3.cpp
+@@ -278,6 +278,8 @@
+ 			}
+ 			++i;
+ 		}
++		if (actor->HasRowCommand())
++			commands.push_back(Data::terms.row);
+ 	}
+ 
+ 	command_window.reset(new Window_Command(commands, 76));
+@@ -555,6 +557,26 @@
+ 			return false;
+ 		}
+ 
++		if (action->GetSource()->GetType() == Game_Battler::Type_Ally) {
++			Game_Actor* actor = static_cast<Game_Actor*>(action->GetSource());
++			const int combo_command = actor->GetBattleComboCommand();
++			const int combo_times = actor->GetBattleComboTimes();
++			if (combo_times > 1 && combo_command >= 0 && combo_command == actor->GetLastBattleAction()) {
++				const RPG::BattleCommand* command = NULL;
++				for (std::vector<RPG::BattleCommand>::const_iterator it = Data::battlecommands.commands.begin();
++					it != Data::battlecommands.commands.end(); ++it) {
++					if (it->ID == combo_command) {
++						command = &*it;
++						break;
++					}
++				}
++				if (command && (command->type == RPG::BattleCommand::Type_attack ||
++					command->type == RPG::BattleCommand::Type_skill ||
++					command->type == RPG::BattleCommand::Type_subskill))
++					action->ApplyComboHitsMultiplier(combo_times);
++			}
++		}
++
+ 		ShowNotification(action->GetStartMessage());
+ 
+ 		if (!action->IsTargetValid()) {
+@@ -653,6 +675,14 @@
+ 			status_window->Refresh();
+ 		} while (action->TargetNext());
+ 
++		if (action->RepeatNext()) {
++			action->PrepareRepeatAnimation();
++			action->PlayAnimation();
++			if (source_sprite)
++				source_sprite->SetAnimationState(action->GetSourceAnimationState(), Sprite_Battler::LoopState_WaitAfterFinish);
++			return false;
++		}
++
+ 		if (action->GetResultSe()) {
+ 			Game_System::SePlay(*action->GetResultSe());
+ 		}
+@@ -804,15 +834,29 @@
+ 			Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Decision));
+ 			break;
+ 		case 2: // Escape
+-			// FIXME : Only enabled when party has initiative.
+-			Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Buzzer));
+-			//SetState(State_Escape);
++			if (Game_Battle::IsEscapeAllowed() && Game_Temp::battle_first_strike && Game_Battle::GetTurn() == 0) {
++				Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Decision));
++				SetState(State_Escape);
++			} else {
++				Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Buzzer));
++			}
+ 			break;
+ 	}
+ }
+ 
+ void Scene_Battle_Rpg2k3::CommandSelected() {
+-	const RPG::BattleCommand* command = active_actor->GetBattleCommands()[command_window->GetIndex()];
++	const std::vector<const RPG::BattleCommand*> commands = active_actor->GetBattleCommands();
++	const int index = command_window->GetIndex();
++	if (active_actor->HasRowCommand() && index == static_cast<int>(commands.size())) {
++		Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Decision));
++		RowSelected();
++		return;
++	}
++	if (index < 0 || index >= static_cast<int>(commands.size())) {
++		Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Buzzer));
++		return;
++	}
++	const RPG::BattleCommand* command = commands[index];
+ 
+ 	switch (command->type) {
+ 	case RPG::BattleCommand::Type_attack:
+@@ -890,6 +934,28 @@
+ 	ActionSelectedCallback(active_actor);
+ }
+ 
++void Scene_Battle_Rpg2k3::RowSelected() {
++	if (active_actor->GetBattleRow() == 1) {
++		active_actor->SetBattleRow(-1);
++	} else {
++		int front_count = 0;
++		std::vector<Game_Battler*> battlers;
++		Main_Data::game_party->GetBattlers(battlers);
++		for (std::vector<Game_Battler*>::const_iterator it = battlers.begin(); it != battlers.end(); ++it) {
++			if ((*it)->GetType() == Game_Battler::Type_Ally && static_cast<Game_Actor*>(*it)->GetBattleRow() != 1)
++				++front_count;
++		}
++		if (front_count < 2) {
++			Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Buzzer));
++			return;
++		}
++		active_actor->SetBattleRow(1);
++	}
++	active_actor->SetLastBattleAction(-1);
++	active_actor->SetBattleAlgorithm(std::make_shared<Game_BattleAlgorithm::NoMove>(active_actor));
++	ActionSelectedCallback(active_actor);
++}
++
+ void Scene_Battle_Rpg2k3::Escape() {
+ 	Game_BattleAlgorithm::Escape escape_alg = Game_BattleAlgorithm::Escape(active_actor);
+ 	active_actor->SetGauge(0);
+@@ -1072,9 +1138,7 @@
+ 			// Handle manual attack
+ 			status_window->SetIndex(actor_index);
+ 
+-			if (active_actor->GetBattleCommands().empty()) {
+-				// Skip actors with only row command
+-				// FIXME: Actually support row command ;)
++			if (active_actor->GetBattleCommands().empty() && !active_actor->HasRowCommand()) {
+ 				NextTurn(active_actor);
+ 				active_actor->SetGauge(0);
+ 				return;
+@@ -1095,8 +1159,10 @@
+ 	for_battler->SetGauge(0);
+ 
+ 	if (for_battler->GetType() == Game_Battler::Type_Ally) {
+-		const RPG::BattleCommand* command = static_cast<Game_Actor*>(for_battler)->GetBattleCommands()[command_window->GetIndex()];
+-		for_battler->SetLastBattleAction(command->ID);
++		const std::vector<const RPG::BattleCommand*> commands = static_cast<Game_Actor*>(for_battler)->GetBattleCommands();
++		const int index = command_window->GetIndex();
++		if (index >= 0 && index < static_cast<int>(commands.size()))
++			for_battler->SetLastBattleAction(commands[index]->ID);
+ 		status_window->SetIndex(-1);
+ 	}
+ 
+--- a/src/scene_save.cpp
++++ b/src/scene_save.cpp
+@@ -27,6 +27,7 @@
+ #include "game_actor.h"
+ #include "game_map.h"
+ #include "game_party.h"
++#include "game_system.h"
+ #include "lsd_reader.h"
+ #include "output.h"
+ #include "player.h"
+@@ -88,8 +89,11 @@
+ 		default:;
+ 	}
+ 
+-	Main_Data::game_data.title = title;
++	const RPG::SaveTitle old_title = Main_Data::game_data.title;
++	const int old_save_slot = Main_Data::game_data.system.save_slot;
++	const int old_save_count = Main_Data::game_data.system.save_count;
+ 
++	Main_Data::game_data.title = title;
+ 	Main_Data::game_data.system.save_slot = index + 1;
+ 	Main_Data::game_data.system.save_count += 1;
+ 
+@@ -102,7 +106,14 @@
+ 		filename = FileFinder::MakePath((*tree).directory_path, save_file);
+ 	}
+ 
+-	LSD_Reader::Save(filename, Main_Data::game_data, Player::encoding);
++	if (!LSD_Reader::Save(filename, Main_Data::game_data, Player::encoding)) {
++		Main_Data::game_data.title = old_title;
++		Main_Data::game_data.system.save_slot = old_save_slot;
++		Main_Data::game_data.system.save_count = old_save_count;
++		Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Buzzer));
++		Output::Warning("Save failed: %s", LcfReader::GetError().c_str());
++		return;
++	}
+ 
+ #ifdef EMSCRIPTEN
+ 	// Save changed file system

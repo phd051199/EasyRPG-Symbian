@@ -1,7 +1,6 @@
 #include <cassert>
 
 #include "async_handler.h"
-#include "cache.h"
 #include "graphics.h"
 #include "output.h"
 #include "player.h"
@@ -55,8 +54,6 @@ void Scene::MainFunction() {
     } else if (!init) {
         switch (push_pop_operation) {
         case ScenePushed:
-            if (type == Scene::Gameover)
-                Cache::Clear();
             Start();
             initialized = true;
             break;
@@ -118,9 +115,6 @@ void Scene::Update() {
 }
 
 void Scene::Push(std::shared_ptr<Scene> const& new_scene, bool pop_stack_top) {
-    if (new_scene && new_scene->type == Scene::Gameover)
-        pop_stack_top = true;
-
     if (pop_stack_top && !instances.empty()) {
         old_instances.push_back(instances.back());
         instances.pop_back();

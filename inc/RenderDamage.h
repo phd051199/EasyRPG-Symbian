@@ -24,7 +24,11 @@ bool FullFrameRequested();
 void BeginRecord(int aWidth, int aHeight);
 void BeginFullPaintRecord(int aWidth, int aHeight);
 bool IsRecording();
-bool IsPainting();
+extern const Rect* gPaintClipRect;
+inline const Rect* PaintClipRect()
+{
+    return gPaintClipRect;
+}
 bool IsFullPaintRecording();
 void Record(unsigned int aSignature, const Rect& aRect);
 void MarkDirty(const Rect& aRect);
@@ -35,11 +39,8 @@ bool NeedsPaint();
 bool IsFullFrameDirty();
 bool DamageValid();
 void ConsumeDamage();
-bool IntersectsDirty(const Rect& aRect);
-bool ContainsDirtyPoint(int aX, int aY);
 int DirtyCount();
 const Rect& DirtyRect(int aIndex);
-const Rect& CurrentPaintRect();
 void BeginPaint();
 void BeginPaint(int aDirtyIndex);
 void EndPaint();

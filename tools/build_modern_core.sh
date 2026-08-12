@@ -53,13 +53,17 @@ for header in "$PLAYER_ROOT"/*.h; do
     fi
 done
 PLAYER_WINDOW_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-window-symbian.patch"
+PLAYER_GAMEPLAY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-gameplay.patch"
+PLAYER_PARITY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-parity.patch"
 PLAYER_VENDOR_BASE=$(dirname "$PLAYER_VENDOR_ROOT")
-if patch -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$PLAYER_WINDOW_PATCH" >/dev/null 2>&1; then
-    patch -p1 -d "$PLAYER_VENDOR_BASE" < "$PLAYER_WINDOW_PATCH"
-elif ! patch -R -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$PLAYER_WINDOW_PATCH" >/dev/null 2>&1; then
-    echo "Unable to apply EasyRPG Player Symbian window patch." >&2
-    exit 1
-fi
+for player_patch in "$PLAYER_WINDOW_PATCH" "$PLAYER_GAMEPLAY_PATCH" "$PLAYER_PARITY_PATCH"; do
+    if patch --batch --forward -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$player_patch" >/dev/null 2>&1; then
+        patch --batch --forward -p1 -d "$PLAYER_VENDOR_BASE" < "$player_patch"
+    elif ! patch --batch -R -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$player_patch" >/dev/null 2>&1; then
+        echo "Unable to apply EasyRPG Player patch: $player_patch" >&2
+        exit 1
+    fi
+done
 SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
     "$LIBLCF_ROOT/reader_lcf.cpp"
@@ -90,6 +94,8 @@ SOURCES=(
     "$PROJECT_DIR/src/core/Ui.cpp"
     "$PLAYER_ROOT/scene.cpp"
     "$PROJECT_DIR/src/core/RenderDamage.cpp"
+    "$PROJECT_DIR/src/core/GameBattlerEffects.cpp"
+    "$PROJECT_DIR/src/core/GameBattleAlgorithmEffects.cpp"
     "$PROJECT_DIR/src/core/AsyncHandler.cpp"
     "$PROJECT_DIR/src/core/Audio.cpp"
     "$PROJECT_DIR/src/core/Output.cpp"
@@ -219,12 +225,12 @@ SOURCES=(
     "$PLAYER_VENDOR_ROOT/spriteset_map.cpp"
     "$PLAYER_VENDOR_ROOT/spriteset_battle.cpp"
     "$PLAYER_VENDOR_ROOT/sprite_battler.cpp"
-    "$PLAYER_VENDOR_ROOT/sprite_character.cpp"
+    "$PLAYER_ROOT/sprite_character.cpp"
     "$PLAYER_VENDOR_ROOT/sprite_airshipshadow.cpp"
     "$PLAYER_VENDOR_ROOT/sprite_timer.cpp"
     "$PLAYER_VENDOR_ROOT/plane.cpp"
     "$PLAYER_VENDOR_ROOT/screen.cpp"
-    "$PLAYER_VENDOR_ROOT/weather.cpp"
+    "$PLAYER_ROOT/weather.cpp"
     "$PLAYER_VENDOR_ROOT/frame.cpp"
     "$PLAYER_VENDOR_ROOT/rtp_table.cpp"
     "$GENERATED_CP932"
@@ -326,6 +332,8 @@ for source in "${SOURCES[@]}"; do
         source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
     elif [[ $source == "$PROJECT_DIR/src/core/Ui.cpp" ||
             $source == "$PROJECT_DIR/src/core/RenderDamage.cpp" ||
+            $source == "$PROJECT_DIR/src/core/GameBattlerEffects.cpp" ||
+            $source == "$PROJECT_DIR/src/core/GameBattleAlgorithmEffects.cpp" ||
             $source == "$PROJECT_DIR/src/core/AsyncHandler.cpp" ||
             $source == "$PROJECT_DIR/src/core/Audio.cpp" ||
             $source == "$PROJECT_DIR/src/core/Output.cpp" ||

@@ -51,12 +51,15 @@ bool SkipTextDraw(Bitmap& aDestination, unsigned int aSignature, const Rect& aRe
         SymbianRenderDamage::Record(aSignature, aRect);
         return true;
     }
-    return SymbianRenderDamage::IsPainting() && !SymbianRenderDamage::IntersectsDirty(aRect);
+    const Rect* paintClip = SymbianRenderDamage::PaintClipRect();
+    return paintClip &&
+        (aRect.x >= paintClip->x + paintClip->width || paintClip->x >= aRect.x + aRect.width ||
+         aRect.y >= paintClip->y + paintClip->height || paintClip->y >= aRect.y + aRect.height);
 }
 
-bool ClipTextPixels(Bitmap& aDestination)
+const Rect* TextPaintClip(Bitmap& aDestination)
 {
-    return IsDisplayDestination(aDestination) && SymbianRenderDamage::IsPainting();
+    return IsDisplayDestination(aDestination) ? SymbianRenderDamage::PaintClipRect() : nullptr;
 }
 
 BitmapRef CachedGlyph(const FontRef& aFont, char32_t aCode)
@@ -246,11 +249,10 @@ void DrawSolidGlyph(Bitmap& aDestination,
         glyphRight = aDestination.GetWidth() - aX;
     if (aY + glyphBottom > aDestination.GetHeight())
         glyphBottom = aDestination.GetHeight() - aY;
-    const bool clip = ClipTextPixels(aDestination);
-    const bool multiClip = clip && SymbianRenderDamage::DirtyCount() > 1;
-    if (clip)
+    const Rect* paintClip = TextPaintClip(aDestination);
+    if (paintClip)
     {
-        const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+        const Rect& dirty = *paintClip;
         if (dirty.x - aX > glyphLeft)
             glyphLeft = dirty.x - aX;
         if (dirty.y - aY > glyphTop)
@@ -273,8 +275,6 @@ void DrawSolidGlyph(Bitmap& aDestination,
         for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
         {
             const int destinationX = aX + glyphX;
-            if (multiClip && !SymbianRenderDamage::ContainsDirtyPoint(destinationX, destinationY))
-                continue;
             const uint8_t mask = GlyphAlpha(glyphRow, glyphX, glyphBpp);
             if (mask == 255)
                 BlendColorPixel(destination, destinationX, destinationBpp, color);
@@ -326,11 +326,10 @@ void DrawSystemGlyph(Bitmap& aDestination,
         glyphRight = aSystem.GetWidth() - sourceX;
     if (sourceY + glyphBottom > aSystem.GetHeight())
         glyphBottom = aSystem.GetHeight() - sourceY;
-    const bool clip = ClipTextPixels(aDestination);
-    const bool multiClip = clip && SymbianRenderDamage::DirtyCount() > 1;
-    if (clip)
+    const Rect* paintClip = TextPaintClip(aDestination);
+    if (paintClip)
     {
-        const Rect& dirty = SymbianRenderDamage::CurrentPaintRect();
+        const Rect& dirty = *paintClip;
         if (dirty.x - aX > glyphLeft)
             glyphLeft = dirty.x - aX;
         if (dirty.y - aY > glyphTop)
@@ -356,8 +355,6 @@ void DrawSystemGlyph(Bitmap& aDestination,
         for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
         {
             const int destinationX = aX + glyphX;
-            if (multiClip && !SymbianRenderDamage::ContainsDirtyPoint(destinationX, destinationY))
-                continue;
             const uint8_t mask = GlyphAlpha(glyphRow, glyphX, glyphBpp);
             const uint32_t sourcePixel = ReadColorPixel(source, sourceX + glyphX, systemBpp);
             if (mask == 255)
