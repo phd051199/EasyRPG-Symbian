@@ -62,7 +62,6 @@ elif ! patch -R -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$PLAYER_WINDOW_PATCH" 
 fi
 SOURCES=(
     "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
-    "$PROJECT_DIR/src/core/CoreZipCrypto.cpp"
     "$LIBLCF_ROOT/reader_lcf.cpp"
     "$LIBLCF_ROOT/data.cpp"
     "$LIBLCF_ROOT/rpg_setup.cpp"
@@ -320,10 +319,11 @@ for source in "${SOURCES[@]}"; do
     # by the original S60 CSL assembler so its ELF/EABI format is linkable by
     # the SDK's arm-none-symbianelf-ld and elf2e32.
     source_define=
+    stdio_read_define='-Dfopen=EasyRpgFopen -Dfclose=EasyRpgFclose -Dfread=EasyRpgFread -Dfseek=EasyRpgFseek -Dftell=EasyRpgFtell -Dfeof=EasyRpgFeof -Dferror=EasyRpgFerror -Dungetc=EasyRpgUngetc -Dfgets=EasyRpgFgets'
     if [[ $source == "$PLAYER_ROOT/filefinder.cpp" || $source == "$PLAYER_VENDOR_ROOT/filefinder.cpp" ]]; then
-        source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
+        source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
     elif [[ $source == "$PLAYER_ROOT/"* || $source == "$PLAYER_VENDOR_ROOT/"* ]]; then
-        source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
+        source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
     elif [[ $source == "$PROJECT_DIR/src/core/Ui.cpp" ||
             $source == "$PROJECT_DIR/src/core/RenderDamage.cpp" ||
             $source == "$PROJECT_DIR/src/core/AsyncHandler.cpp" ||
@@ -333,9 +333,9 @@ for source in "${SOURCES[@]}"; do
             $source == "$PROJECT_DIR/src/core/Image.cpp" ||
             $source == "$PROJECT_DIR/src/core/Text.cpp" ||
             $source == "$PROJECT_DIR/src/core/Font.cpp" ]]; then
-        source_define='-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -Dfopen=EasyRpgFopen'
+        source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
     elif [[ $source == "$LIBLCF_ROOT/"* || $source == "$GENERATED_READER_STRUCT" ]]; then
-        source_define='-Dfopen=EasyRpgFopen'
+        source_define="$stdio_read_define"
     fi
     language_flag=-xc++
     standard_flag=-std=c++11
@@ -352,13 +352,13 @@ for source in "${SOURCES[@]}"; do
 
     "$CLANGXX" \
         --target=arm-none-eabi \
-        -march=armv6 \
-        -mtune=arm1136jf-s \
+        -mcpu=arm1136jf-s \
         -mfloat-abi=soft \
         -fshort-wchar \
         $language_flag \
         $standard_flag \
         -O3 \
+        -fomit-frame-pointer \
         -ffreestanding \
         -fno-exceptions \
         -fno-rtti \
@@ -407,7 +407,7 @@ for source in "${SOURCES[@]}"; do
         "$assembly_raw" > "$assembly"
 
     WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
-        "$WINE_BIN" "$ASSEMBLER" -march=armv6 -o "$win_object" "$win_assembly"
+        "$WINE_BIN" "$ASSEMBLER" -mcpu=arm1136jf-s -o "$win_object" "$win_assembly"
 
     objects+=("$object")
     win_objects+=("$win_object")
@@ -429,7 +429,7 @@ done
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgCoreWinZipAesDecrypt EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
+for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "Modern core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2

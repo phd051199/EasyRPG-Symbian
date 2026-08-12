@@ -253,9 +253,17 @@ void TilemapLayer::Draw(int z_order) {
 	if (offset_y != 0)
 		++tiles_y;
 #ifdef EASYRPG_SYMBIAN
+	if (SymbianRenderDamage::IsFullPaintRecording() && layer == 0) {
+		symbian_recorded_animation_step_ab = animation_step_ab;
+		symbian_recorded_animation_step_c = animation_step_c;
+	}
 	if (SymbianRenderDamage::IsRecording()) {
 		SymbianRenderDamage::Record(SymbianSignature(z_order), Rect(0, 0, display_width, display_height));
-		if (layer == 0 && (symbian_has_animated_ab || symbian_has_animated_c)) {
+		const bool dirty_ab = layer == 0 && symbian_has_animated_ab &&
+			symbian_recorded_animation_step_ab != animation_step_ab;
+		const bool dirty_c = layer == 0 && symbian_has_animated_c &&
+			symbian_recorded_animation_step_c != animation_step_c;
+		if (dirty_ab || dirty_c) {
 			const int first_map_y = WrapTileIndex(oy / TILE_SIZE, height);
 			int map_x = WrapTileIndex(ox / TILE_SIZE, width);
 			int map_draw_x = -offset_x;
@@ -265,17 +273,9 @@ void TilemapLayer::Draw(int z_order) {
 				for (int y = 0; y < tiles_y; ++y) {
 					const TileData& tile = data_cache[map_x][map_y];
 					if (tile.z == z_order &&
-						(tile.source == SourceAutotileAB || tile.source == SourceChipsetAnimatedC)) {
-						unsigned int signature = SymbianRenderDamage::HashSeed(
-							static_cast<unsigned int>(reinterpret_cast<size_t>(this)) ^ 0x74696c65u);
-						signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(z_order));
-						signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(static_cast<unsigned short>(tile.ID)));
-						signature = SymbianRenderDamage::HashValue(signature,
-							tile.source == SourceAutotileAB ? static_cast<unsigned int>(animation_step_ab) : static_cast<unsigned int>(animation_step_c));
-						signature = SymbianRenderDamage::HashValue(signature,
-							(static_cast<unsigned int>(map_x) << 16) ^ static_cast<unsigned int>(map_y));
-						SymbianRenderDamage::Record(signature, Rect(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE));
-					}
+						((dirty_ab && tile.source == SourceAutotileAB) ||
+						 (dirty_c && tile.source == SourceChipsetAnimatedC)))
+						SymbianRenderDamage::MarkDirty(Rect(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE));
 					++map_y;
 					if (map_y == height)
 						map_y = 0;
@@ -286,6 +286,8 @@ void TilemapLayer::Draw(int z_order) {
 					map_x = 0;
 				map_draw_x += TILE_SIZE;
 			}
+			symbian_recorded_animation_step_ab = animation_step_ab;
+			symbian_recorded_animation_step_c = animation_step_c;
 		}
 		return;
 	}
@@ -792,20 +794,23 @@ void TilemapLayer::SetMapData(const std::vector<short>& nmap_data) {
 		autotiles_d_map.clear();
 		autotiles_ab_next = 0;
 		autotiles_d_next = 0;
-		for (int y = 0; y < height; y++) {
-			for (int x = 0; x < width; x++) {
-
-				if (data_cache[x][y].ID < BLOCK_C) {
-					// If blocks A and B
-
-					GenerateAutotileAB(data_cache[x][y].ID, 0);
-					GenerateAutotileAB(data_cache[x][y].ID, 1);
-					GenerateAutotileAB(data_cache[x][y].ID, 2);
-				} else if (data_cache[x][y].ID >= BLOCK_D && data_cache[x][y].ID < BLOCK_E) {
-					// If block D
-
-					GenerateAutotileD(data_cache[x][y].ID);
-				}
+		std::vector<uint8_t> seen_ab(BLOCK_C, 0);
+		std::vector<uint8_t> seen_d(BLOCK_E - BLOCK_D, 0);
+		for (std::vector<short>::const_iterator it = nmap_data.begin(); it != nmap_data.end(); ++it) {
+			const int id = *it;
+			if (id >= 0 && id < BLOCK_C) {
+				if (seen_ab[id])
+					continue;
+				seen_ab[id] = 1;
+				GenerateAutotileAB(static_cast<short>(id), 0);
+				GenerateAutotileAB(static_cast<short>(id), 1);
+				GenerateAutotileAB(static_cast<short>(id), 2);
+			} else if (id >= BLOCK_D && id < BLOCK_E) {
+				const int index = id - BLOCK_D;
+				if (seen_d[index])
+					continue;
+				seen_d[index] = 1;
+				GenerateAutotileD(static_cast<short>(id));
 			}
 		}
 		autotiles_ab_screen = GenerateAutotiles(autotiles_ab_next, autotiles_ab_map);

@@ -18,7 +18,6 @@ public:
         EKeyDecision = 0x00000010,
         EKeyCancel = 0x00000020,
         EKeyShift = 0x00000040,
-        EKeyDebug = 0x00000080,
         EKeyN0 = 0x00000100,
         EKeyN1 = 0x00000200,
         EKeyN2 = 0x00000400,
@@ -33,7 +32,8 @@ public:
         EKeyMinus = 0x00080000,
         EKeyMultiply = 0x00100000,
         EKeyDivide = 0x00200000,
-        EKeyPeriod = 0x00400000
+        EKeyPeriod = 0x00400000,
+        EKeyDebug = 0x00800000
     };
 
     static CPlayerRuntime* NewL(CZipVfs* aResources,

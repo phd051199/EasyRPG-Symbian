@@ -1,11 +1,10 @@
 #include "LcfProbe.h"
+#include "DirentBridge.h"
 #include "UpstreamLmuBridge.h"
 #include "ZipVfs.h"
 
 namespace
 {
-const TInt KMaxProbeFileSize = 4 * 1024 * 1024;
-
 enum TLcfProbeFileType
 {
     ELcfDatabase = 1,
@@ -119,33 +118,20 @@ TInt TLcfProbe::InspectFile(CZipVfs& aResources,
                             TInt aFileType,
                             TLcfProjectSummary& aSummary)
 {
-    TFileName materializedPath;
-    TPtrC cacheName;
-    switch (aFileType)
-    {
-    case ELcfDatabase:
-        cacheName.Set(_L("RPG_RT.ldb"));
-        break;
-    case ELcfMapTree:
-        cacheName.Set(_L("RPG_RT.lmt"));
-        break;
-    case ELcfMapUnit:
-        cacheName.Set(_L("active.lmu"));
-        break;
-    default:
+    if (aFileType != ELcfDatabase &&
+        aFileType != ELcfMapTree &&
+        aFileType != ELcfMapUnit)
         return KErrArgument;
-    }
+    if (!aResources.Exists(aFileName))
+        return KErrNotFound;
 
-    TRAPD(materializeError,
-          aResources.MaterializeFileL(aFileName,
-                                      cacheName,
-                                      materializedPath,
-                                      KMaxProbeFileSize));
-    if (materializeError != KErrNone)
-        return materializeError;
+    TFileName virtualPath;
+    TRAPD(pathError, EasyRpgBuildVirtualPathL(aFileName, virtualPath));
+    if (pathError != KErrNone)
+        return pathError;
 
     TBuf8<KMaxFileName + 1> narrowPath;
-    const TInt narrowError = NarrowAsciiPath(materializedPath, narrowPath);
+    const TInt narrowError = NarrowAsciiPath(virtualPath, narrowPath);
     if (narrowError != KErrNone)
         return narrowError;
 

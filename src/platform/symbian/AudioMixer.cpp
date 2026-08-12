@@ -1,7 +1,5 @@
 #include "AudioMixer.h"
 
-static const TInt KMasterVolumePercent = 20;
-
 CAudioMixer* CAudioMixer::NewL()
 {
     CAudioMixer* self = new (ELeave) CAudioMixer;
@@ -21,7 +19,8 @@ CAudioMixer::CAudioMixer()
       iClipUseSerial(0),
       iReady(EFalse),
       iShuttingDown(EFalse),
-      iLastError(KErrNone)
+      iLastError(KErrNone),
+      iMasterVolume(50)
 {
     TInt i;
     for (i = 0; i < KMaxCachedClips; ++i)
@@ -450,6 +449,13 @@ void CAudioMixer::SetStreamVolume(TStreamBus aBus, TInt aVolume)
     iStreams[aBus].iVolume = ClampVolume(aVolume);
 }
 
+void CAudioMixer::SetMasterVolume(TInt aVolume)
+{
+    iMasterVolume = ClampVolume(aVolume);
+    if (iStream && iReady)
+        iStream->SetVolume(iStream->MaxVolume() * iMasterVolume / 100);
+}
+
 TInt CAudioMixer::StreamFreeFrames(TStreamBus aBus) const
 {
     if (aBus < 0 || aBus >= EStreamBusCount)
@@ -708,7 +714,8 @@ void CAudioMixer::QueueOutputBuffers()
 {
     if (!iStream || !iReady || iShuttingDown)
         return;
-    while (iQueuedOutputBufferCount < KOutputQueueDepth)
+    TInt filled = 0;
+    while (iQueuedOutputBufferCount < KOutputQueueDepth && filled < 2)
     {
         if (!CanFillOutputBuffer())
             return;
@@ -742,6 +749,7 @@ void CAudioMixer::QueueOutputBuffers()
         }
         iOutputBufferQueued[bufferIndex] = ETrue;
         ++iQueuedOutputBufferCount;
+        ++filled;
     }
 }
 
@@ -817,7 +825,7 @@ void CAudioMixer::MaoscOpenComplete(TInt aError)
             iLastError = propertyError;
             return;
         }
-        iStream->SetVolume(iStream->MaxVolume() * KMasterVolumePercent / 100);
+        iStream->SetVolume(iStream->MaxVolume() * iMasterVolume / 100);
         iReady = ETrue;
         QueueOutputBuffers();
     }

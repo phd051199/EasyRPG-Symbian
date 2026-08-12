@@ -1,5 +1,4 @@
 #include "App.hrh"
-#include "EasyRPG.rsg"
 #include "Strings.rls"
 #include <appinfo.rh>
 
@@ -10,7 +9,7 @@ RESOURCE APP_REGISTRATION_INFO
 {
     app_file = "EasyRPG";
     localisable_resource_file = qtn_loc_resource_file_1;
-    localisable_resource_id = R_LOCALISABLE_APP_INFO;
+    localisable_resource_id = KEasyRpgLocalisableAppInfoResourceId;
     embeddability = KAppNotEmbeddable;
     newfile = KAppDoesNotSupportNewFile;
 }

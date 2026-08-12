@@ -26,7 +26,6 @@ private:
         KLogicFps = 60,
         KRenderFps = 30,
         KLogicTicksPerRender = 2,
-        KMaxCatchUpFrames = 2,
         KMaxTimerDelayMicroseconds = 33334
     };
 

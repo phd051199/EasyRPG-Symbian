@@ -25,6 +25,9 @@ int EasyRpgClosedir(EasyRpgDir* dir);
 class CZipVfs;
 void EasyRpgSetVirtualProject(CZipVfs* aVfs, const TDesC& aRoot);
 void EasyRpgClearVirtualProject();
+void EasyRpgBuildVirtualPathL(const TDesC& aRelativePath, TDes& aPath);
+TBool EasyRpgIsVirtualPath(const TDesC& aPath);
+HBufC8* EasyRpgReadVirtualFileLC(const TDesC& aPath, TInt aMaxBytes);
 #endif
 #endif
 

@@ -47,6 +47,7 @@ LIBRARY           euser.lib
 LIBRARY           apparc.lib
 LIBRARY           cone.lib
 LIBRARY           fbscli.lib
+LIBRARY           gdi.lib
 LIBRARY           hal.lib
 LIBRARY           eikcore.lib
 LIBRARY           eikcoctl.lib
@@ -59,6 +60,7 @@ LIBRARY           libm.lib
 LIBRARY           libz.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
+LIBRARY           midiclient.lib
 STATICLIBRARY     EasyRpgModernCore.lib
 
 LANG              SC

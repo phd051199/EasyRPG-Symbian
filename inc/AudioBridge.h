@@ -14,6 +14,7 @@ void EasyRpgAudioStopBgm(void);
 void EasyRpgAudioPauseBgm(void);
 void EasyRpgAudioResumeBgm(void);
 void EasyRpgAudioSetBgmVolume(int volume);
+void EasyRpgAudioSetMasterVolume(int volume);
 void EasyRpgAudioSetBgmPitch(int pitch);
 void EasyRpgAudioFadeBgm(int fade);
 int EasyRpgAudioIsBgmPlaying(void);

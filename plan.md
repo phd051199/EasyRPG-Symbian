@@ -199,7 +199,7 @@ The staging validator currently selects 865 game files / 18,893,078 bytes after 
 
 257 selected paths require NFC normalization. A large number of Japanese filenames are currently decomposed (NFD), while CP932 database strings resolve to precomposed names (NFC). This is a real compatibility problem for asset lookup.
 
-The device runtime now mounts the original ZIP directly. Central-directory scanning happens once at startup; resource loads use hash lookup + positional `RFile::Read`, WinZip AES authentication/decryption when needed, and raw DEFLATE inflation. No external extraction or Japanese filename rename step is required, and ZIP scanning is not part of the per-frame render path.
+The device runtime mounts the converted ZIP directly. Runtime archives must use ZIP `STORE` for every file and must not be encrypted. Central-directory scanning happens once at startup; resource loads use hash lookup plus positional `RFile::Read` directly against each stored member range. No extraction cache, runtime DEFLATE path, password handling, or ZIP crypto path exists, and ZIP scanning is not part of the per-frame render path.
 
 ## 6. EasyRPG core integration plan
 

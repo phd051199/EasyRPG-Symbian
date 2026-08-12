@@ -27,10 +27,7 @@ set "SIS_DIR=%PROJECT_DIR%\sis"
 set "PACKAGE_DEF=%SIS_DIR%\EasyRPG.pkg"
 set "STAGE_DIR=%SIS_DIR%\stage"
 set "DEVICE_EXE=EasyRPG.exe"
-set "ICON_SOURCE=%PROJECT_DIR%\build\vendor\easyrpg-player-0.5.0\src\icon.h"
-set "ICON_GENERATOR=%PROJECT_DIR%\tools\generate_app_icon.pl"
-set "ICON_SVG=%STAGE_DIR%\EasyRPG.svg"
-set "ICON_MIF=%STAGE_DIR%\EasyRPG.mif"
+set "APP_ICON_RESOURCE=%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG_0xE31EA5A1.mif"
 
 if /I "%BUILD_PROFILE%"=="debug" (
     set "EASYRPG_BUILD_TARGET=udeb"
@@ -77,26 +74,29 @@ echo ABLD returned %RESULT%
 popd
 if not "%RESULT%"=="0" goto build_error
 
+if exist "%APP_ICON_RESOURCE%" del /q "%APP_ICON_RESOURCE%" >nul 2>&1
+if exist "%APP_ICON_RESOURCE%" goto icon_resource_cleanup_error
+pushd "%GROUP_DIR%" >nul 2>&1
+if errorlevel 1 goto group_error
+call abld -v resource gcce %EASYRPG_BUILD_TARGET% icons_scalable_dc
+set "RESULT=%ERRORLEVEL%"
+popd
+if not "%RESULT%"=="0" goto build_error
+
 if not exist "%GCCE_EXE%" goto exe_error
+if not exist "%APP_ICON_RESOURCE%" goto icon_resource_error
 if not exist "%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.rsc" goto resource_error
 if not exist "%SDK_ROOT%\epoc32\data\z\private\10003a3f\apps\EasyRPG_reg.rsc" goto registration_error
 if not exist "%PACKAGE_DEF%" goto package_error
 
 if not exist "%STAGE_DIR%" mkdir "%STAGE_DIR%"
 if errorlevel 1 goto stage_error
-if not exist "%ICON_SOURCE%" goto icon_source_error
-if not exist "%ICON_GENERATOR%" goto icon_generator_error
-if exist "%ICON_SVG%" del /q "%ICON_SVG%" >nul 2>&1
-if exist "%ICON_MIF%" del /q "%ICON_MIF%" >nul 2>&1
-perl "%ICON_GENERATOR%" "%ICON_SOURCE%" "%ICON_SVG%"
-if errorlevel 1 goto icon_generate_error
-mifconv "%ICON_MIF%" /T"%STAGE_DIR%" /S"%SDK_ROOT%\epoc32\tools" /c32,8 "%ICON_SVG%"
-if errorlevel 1 goto icon_compile_error
-if not exist "%ICON_MIF%" goto icon_compile_error
-del /q "%ICON_SVG%" >nul 2>&1
+for %%F in (EasyRPG.mbm EasyRPG.mif EasyRPG_icon.bmp EasyRPG_mask.bmp) do if exist "%STAGE_DIR%\%%F" del /q "%STAGE_DIR%\%%F" >nul 2>&1
 copy /b /y "%GCCE_EXE%" "%STAGE_DIR%\%DEVICE_EXE%" >nul
 if errorlevel 1 goto stage_error
 copy /b /y "%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.rsc" "%STAGE_DIR%\EasyRPG.rsc" >nul
+if errorlevel 1 goto stage_error
+copy /b /y "%APP_ICON_RESOURCE%" "%STAGE_DIR%\EasyRPG_0xE31EA5A1.mif" >nul
 if errorlevel 1 goto stage_error
 copy /b /y "%SDK_ROOT%\epoc32\data\z\private\10003a3f\apps\EasyRPG_reg.rsc" "%STAGE_DIR%\EasyRPG_reg.rsc" >nul
 if errorlevel 1 goto stage_error
@@ -169,17 +169,11 @@ exit /b 1
 :package_error
 echo Package definition missing. >&2
 exit /b 1
-:icon_source_error
-echo EasyRPG Player icon source missing: %ICON_SOURCE% >&2
+:icon_resource_cleanup_error
+echo Cannot remove stale EasyRPG application icon resource: %APP_ICON_RESOURCE% >&2
 exit /b 1
-:icon_generator_error
-echo Icon generator missing: %ICON_GENERATOR% >&2
-exit /b 1
-:icon_generate_error
-echo EasyRPG application icon SVG generation failed. >&2
-exit /b 1
-:icon_compile_error
-echo EasyRPG application icon MIF compilation failed. >&2
+:icon_resource_error
+echo EasyRPG application icon resource was not produced: %APP_ICON_RESOURCE% >&2
 exit /b 1
 :stage_error
 echo Cannot stage GCCE executable/resources for makesis. >&2

@@ -25,6 +25,9 @@ public:
 
     void SetForeground(TBool aForeground);
     void UpdateLayout();
+    TBool IsGameRunning() const;
+    void HandleLeftSoftkeyL();
+    void HandleRightSoftkeyL();
 
 private:
     CGameView();
@@ -47,6 +50,11 @@ private:
     void StartSelectedGameL();
     void StopGame();
     void ShowLoadErrorL(TInt aError);
+    void SetKeyMapVisible(TBool aVisible);
+    void ToggleFpsOverlayL();
+    void AdjustMasterVolume(TInt aDelta);
+    void DrawKeyMapOverlay(CWindowGc& aGc) const;
+    void DrawVolumeOverlay(CWindowGc& aGc, const TPoint& aDestination) const;
     TUint32 MapPlayerKey(const TKeyEvent& aKeyEvent) const;
 
 private:
@@ -61,7 +69,15 @@ private:
     CFrameTimer* iFrameTimer;
     CAsyncCallBack* iStartGameCallback;
     TBool iForeground;
+    TBool iKeyMapVisible;
+    TBool iPendingCancelPulse;
+    TBool iPendingDecisionPulse;
+    TBool iVolumeUpHeld;
+    TBool iVolumeDownHeld;
     mutable TBool iFrameDrawPending;
+    mutable TBool iVolumeOverlayErasePending;
+    TInt iMasterVolume;
+    TInt iVolumeOverlayTicks;
     TFileName iGameRoot;
 };
 

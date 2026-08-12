@@ -1,6 +1,7 @@
 #include <e32base.h>
 #include <badesca.h>
 #include <f32file.h>
+#include <stddef.h>
 #include "Encoding.h"
 #include "DirentBridge.h"
 #include "ZipVfs.h"
@@ -8,6 +9,14 @@
 struct __sFILE;
 typedef struct __sFILE FILE;
 extern "C" FILE* wfopen(const wchar_t* aName, const wchar_t* aMode);
+extern "C" int fclose(FILE* aStream);
+extern "C" size_t fread(void* aBuffer, size_t aSize, size_t aCount, FILE* aStream);
+extern "C" int fseek(FILE* aStream, long aOffset, int aOrigin);
+extern "C" long ftell(FILE* aStream);
+extern "C" int feof(FILE* aStream);
+extern "C" int ferror(FILE* aStream);
+extern "C" int ungetc(int aCharacter, FILE* aStream);
+extern "C" char* fgets(char* aBuffer, int aCount, FILE* aStream);
 
 struct EasyRpgDir
 {
@@ -37,10 +46,60 @@ struct EasyRpgDir
     char iName[1024];
 };
 
+class CVirtualFile : public CBase
+{
+public:
+    CVirtualFile(CZipVfs* aVfs,
+                 TInt aDataOffset,
+                 TInt aFileSize,
+                 HBufC8* aBuffer)
+        : iVfs(aVfs),
+          iBuffer(aBuffer),
+          iDataOffset(aDataOffset),
+          iFileSize(aFileSize),
+          iPosition(0),
+          iError(KErrNone),
+          iEof(EFalse),
+          iHasPushback(EFalse),
+          iPushback(0)
+    {
+    }
+
+    ~CVirtualFile()
+    {
+        delete iBuffer;
+        iBuffer = NULL;
+    }
+
+    CZipVfs* iVfs;
+    HBufC8* iBuffer;
+    TInt iDataOffset;
+    TInt iFileSize;
+    TInt iPosition;
+    TInt iError;
+    TBool iEof;
+    TBool iHasPushback;
+    TUint8 iPushback;
+};
+
 namespace
 {
 CZipVfs* gVirtualVfs = NULL;
 TFileName gVirtualRoot;
+const TInt KMaxVirtualFiles = 32;
+const TInt KVirtualBufferMaxBytes = 1024 * 1024;
+CVirtualFile* gVirtualFiles[KMaxVirtualFiles] = {NULL};
+
+TBool ShouldBufferVirtualFile(const TDesC& aRelative, TInt aFileSize)
+{
+    if (aFileSize <= 0 || aFileSize > KVirtualBufferMaxBytes)
+        return EFalse;
+    if (aRelative.Length() >= 6 && aRelative.Left(6).CompareF(_L("Music/")) == 0)
+        return EFalse;
+    if (aRelative.Length() >= 6 && aRelative.Left(6).CompareF(_L("Movie/")) == 0)
+        return EFalse;
+    return ETrue;
+}
 
 TInt CStringLength(const char* aText)
 {
@@ -194,18 +253,15 @@ EasyRpgDir* OpenDirL(const char* aPath)
     return dir;
 }
 
-TBool VirtualRelativePathL(const char* aPath, TDes& aRelative)
+TBool VirtualRelativePathL(const TDesC& aPath, TDes& aRelative)
 {
     if (!gVirtualVfs || gVirtualRoot.Length() == 0)
         return EFalse;
-
-    TFileName path;
-    Utf8PathL(aPath, path);
-    if (path.Length() < gVirtualRoot.Length() ||
-        path.Left(gVirtualRoot.Length()).CompareF(gVirtualRoot) != 0)
+    if (aPath.Length() < gVirtualRoot.Length() ||
+        aPath.Left(gVirtualRoot.Length()).CompareF(gVirtualRoot) != 0)
         return EFalse;
 
-    aRelative.Copy(path.Mid(gVirtualRoot.Length()));
+    aRelative.Copy(aPath.Mid(gVirtualRoot.Length()));
     while (aRelative.Length() > 0 &&
            (aRelative[0] == '\\' || aRelative[0] == '/'))
         aRelative.Delete(0, 1);
@@ -217,32 +273,36 @@ TBool VirtualRelativePathL(const char* aPath, TDes& aRelative)
     return aRelative.Length() > 0;
 }
 
-TUint32 HashVirtualPath(const TDesC& aPath, TUint32 hash)
+TBool VirtualRelativePathL(const char* aPath, TDes& aRelative)
 {
-    for (TInt index = 0; index < aPath.Length(); ++index)
-    {
-        TUint16 value = aPath[index];
-        if (value == '\\')
-            value = '/';
-        if (value >= 'A' && value <= 'Z')
-            value = static_cast<TUint16>(value + ('a' - 'A'));
-        hash ^= static_cast<TUint8>(value & 0xffu);
-        hash *= 16777619u;
-        hash ^= static_cast<TUint8>((value >> 8) & 0xffu);
-        hash *= 16777619u;
-    }
-    return hash;
+    TFileName path;
+    Utf8PathL(aPath, path);
+    return VirtualRelativePathL(path, aRelative);
 }
 
-void CacheNameL(const TDesC& aRelative, TDes& aCacheName)
+CVirtualFile* FindVirtualFile(FILE* aStream, TInt* aIndex)
 {
-    TUint32 hash = HashVirtualPath(gVirtualVfs->ArchivePath(), 2166136261u);
-    hash = HashVirtualPath(aRelative, hash);
-    aCacheName.Format(_L("vfs_%08x"), hash);
-    const TInt slash = aRelative.LocateReverse('/');
-    const TInt dot = aRelative.LocateReverse('.');
-    if (dot != KErrNotFound && dot > slash && aRelative.Length() - dot <= 12)
-        aCacheName.Append(aRelative.Mid(dot));
+    for (TInt index = 0; index < KMaxVirtualFiles; ++index)
+    {
+        if (reinterpret_cast<FILE*>(gVirtualFiles[index]) != aStream)
+            continue;
+        if (aIndex)
+            *aIndex = index;
+        return gVirtualFiles[index];
+    }
+    return NULL;
+}
+
+void RegisterVirtualFileL(CVirtualFile* aFile)
+{
+    for (TInt index = 0; index < KMaxVirtualFiles; ++index)
+    {
+        if (gVirtualFiles[index])
+            continue;
+        gVirtualFiles[index] = aFile;
+        return;
+    }
+    User::Leave(KErrTooBig);
 }
 
 FILE* OpenFileL(const char* aPath, const char* aMode)
@@ -253,14 +313,24 @@ FILE* OpenFileL(const char* aPath, const char* aMode)
     if (aMode && aMode[0] == 'r')
     {
         TFileName relative;
-        if (VirtualRelativePathL(aPath, relative) && gVirtualVfs->Exists(relative))
+        if (VirtualRelativePathL(path, relative))
         {
-            TFileName cacheName;
-            CacheNameL(relative, cacheName);
-            gVirtualVfs->MaterializeFileL(relative,
-                                          cacheName,
-                                          path,
-                                          KMaxTInt);
+            TInt dataOffset = 0;
+            TInt fileSize = 0;
+            gVirtualVfs->OpenStoredFileL(relative, dataOffset, fileSize);
+            HBufC8* buffer = NULL;
+            if (ShouldBufferVirtualFile(relative, fileSize))
+                buffer = gVirtualVfs->ReadFileLC(relative, KVirtualBufferMaxBytes);
+            CVirtualFile* file = new (ELeave) CVirtualFile(gVirtualVfs,
+                                                           dataOffset,
+                                                           fileSize,
+                                                           buffer);
+            if (buffer)
+                CleanupStack::Pop(buffer);
+            CleanupStack::PushL(file);
+            RegisterVirtualFileL(file);
+            CleanupStack::Pop(file);
+            return reinterpret_cast<FILE*>(file);
         }
     }
 
@@ -296,8 +366,43 @@ void EasyRpgSetVirtualProject(CZipVfs* aVfs, const TDesC& aRoot)
 
 void EasyRpgClearVirtualProject()
 {
+    for (TInt index = 0; index < KMaxVirtualFiles; ++index)
+    {
+        delete gVirtualFiles[index];
+        gVirtualFiles[index] = NULL;
+    }
     gVirtualVfs = NULL;
     gVirtualRoot.Zero();
+}
+
+void EasyRpgBuildVirtualPathL(const TDesC& aRelativePath, TDes& aPath)
+{
+    if (!gVirtualVfs || gVirtualRoot.Length() == 0 || aRelativePath.Length() == 0)
+        User::Leave(KErrNotReady);
+    if (gVirtualRoot.Length() + aRelativePath.Length() > aPath.MaxLength())
+        User::Leave(KErrOverflow);
+
+    aPath.Copy(gVirtualRoot);
+    aPath.Append(aRelativePath);
+    for (TInt index = gVirtualRoot.Length(); index < aPath.Length(); ++index)
+    {
+        if (aPath[index] == '/')
+            aPath[index] = '\\';
+    }
+}
+
+TBool EasyRpgIsVirtualPath(const TDesC& aPath)
+{
+    TFileName relative;
+    return VirtualRelativePathL(aPath, relative);
+}
+
+HBufC8* EasyRpgReadVirtualFileLC(const TDesC& aPath, TInt aMaxBytes)
+{
+    TFileName relative;
+    if (!VirtualRelativePathL(aPath, relative))
+        User::Leave(KErrNotFound);
+    return gVirtualVfs->ReadFileLC(relative, aMaxBytes);
 }
 
 extern "C" FILE* EasyRpgFopen(const char* aPath, const char* aMode)
@@ -305,6 +410,171 @@ extern "C" FILE* EasyRpgFopen(const char* aPath, const char* aMode)
     FILE* result = NULL;
     TRAPD(error, result = OpenFileL(aPath, aMode));
     return error == KErrNone ? result : NULL;
+}
+
+extern "C" int EasyRpgFclose(FILE* aStream)
+{
+    TInt index = -1;
+    CVirtualFile* file = FindVirtualFile(aStream, &index);
+    if (!file)
+        return fclose(aStream);
+    gVirtualFiles[index] = NULL;
+    delete file;
+    return 0;
+}
+
+extern "C" size_t EasyRpgFread(void* aBuffer,
+                                size_t aSize,
+                                size_t aCount,
+                                FILE* aStream)
+{
+    CVirtualFile* file = FindVirtualFile(aStream, NULL);
+    if (!file)
+        return fread(aBuffer, aSize, aCount, aStream);
+    if (!aBuffer || aSize == 0 || aCount == 0)
+        return 0;
+    if (aCount > static_cast<size_t>(KMaxTInt) / aSize)
+    {
+        file->iError = KErrTooBig;
+        return 0;
+    }
+
+    const TInt requested = static_cast<TInt>(aSize * aCount);
+    TInt written = 0;
+    TUint8* output = static_cast<TUint8*>(aBuffer);
+    if (file->iHasPushback && requested > 0)
+    {
+        output[0] = file->iPushback;
+        file->iHasPushback = EFalse;
+        ++file->iPosition;
+        ++written;
+    }
+
+    if (written < requested && file->iPosition < file->iFileSize)
+    {
+        const TInt remaining = file->iFileSize - file->iPosition;
+        const TInt wanted = Min(requested - written, remaining);
+        if (file->iBuffer)
+        {
+            Mem::Copy(output + written,
+                      file->iBuffer->Ptr() + file->iPosition,
+                      wanted);
+            file->iPosition += wanted;
+            written += wanted;
+        }
+        else
+        {
+            TPtr8 bytes(output + written, 0, wanted);
+            TRAPD(error,
+                  file->iVfs->ReadStoredFileL(file->iDataOffset,
+                                              file->iFileSize,
+                                              file->iPosition,
+                                              bytes));
+            if (error != KErrNone)
+            {
+                file->iError = error;
+                return static_cast<size_t>(written) / aSize;
+            }
+            file->iPosition += bytes.Length();
+            written += bytes.Length();
+        }
+    }
+
+    file->iEof = written < requested;
+    return static_cast<size_t>(written) / aSize;
+}
+
+extern "C" int EasyRpgFseek(FILE* aStream, long aOffset, int aOrigin)
+{
+    CVirtualFile* file = FindVirtualFile(aStream, NULL);
+    if (!file)
+        return fseek(aStream, aOffset, aOrigin);
+
+    TInt64 base = 0;
+    if (aOrigin == 0)
+        base = 0;
+    else if (aOrigin == 1)
+        base = file->iPosition;
+    else if (aOrigin == 2)
+        base = file->iFileSize;
+    else
+    {
+        file->iError = KErrArgument;
+        return -1;
+    }
+
+    const TInt64 position = base + static_cast<TInt64>(aOffset);
+    if (position < 0 || position > KMaxTInt)
+    {
+        file->iError = KErrArgument;
+        return -1;
+    }
+    file->iPosition = static_cast<TInt>(position);
+    file->iEof = EFalse;
+    file->iHasPushback = EFalse;
+    return 0;
+}
+
+extern "C" long EasyRpgFtell(FILE* aStream)
+{
+    CVirtualFile* file = FindVirtualFile(aStream, NULL);
+    if (!file)
+        return ftell(aStream);
+    return static_cast<long>(file->iPosition);
+}
+
+extern "C" int EasyRpgFeof(FILE* aStream)
+{
+    CVirtualFile* file = FindVirtualFile(aStream, NULL);
+    if (!file)
+        return feof(aStream);
+    return file->iEof ? 1 : 0;
+}
+
+extern "C" int EasyRpgFerror(FILE* aStream)
+{
+    CVirtualFile* file = FindVirtualFile(aStream, NULL);
+    if (!file)
+        return ferror(aStream);
+    return file->iError == KErrNone ? 0 : 1;
+}
+
+extern "C" int EasyRpgUngetc(int aCharacter, FILE* aStream)
+{
+    CVirtualFile* file = FindVirtualFile(aStream, NULL);
+    if (!file)
+        return ungetc(aCharacter, aStream);
+    if (aCharacter < 0 || aCharacter > 255 || file->iHasPushback || file->iPosition <= 0)
+        return -1;
+    --file->iPosition;
+    file->iPushback = static_cast<TUint8>(aCharacter);
+    file->iHasPushback = ETrue;
+    file->iEof = EFalse;
+    return aCharacter;
+}
+
+extern "C" char* EasyRpgFgets(char* aBuffer, int aCount, FILE* aStream)
+{
+    CVirtualFile* file = FindVirtualFile(aStream, NULL);
+    if (!file)
+        return fgets(aBuffer, aCount, aStream);
+    if (!aBuffer || aCount <= 1)
+        return NULL;
+
+    TInt length = 0;
+    while (length < aCount - 1)
+    {
+        unsigned char value = 0;
+        if (EasyRpgFread(&value, 1, 1, aStream) != 1)
+            break;
+        aBuffer[length++] = static_cast<char>(value);
+        if (value == '\n')
+            break;
+    }
+    if (length == 0)
+        return NULL;
+    aBuffer[length] = 0;
+    return aBuffer;
 }
 
 extern "C" EasyRpgDir* EasyRpgOpendir(const char* aPath)

@@ -221,13 +221,6 @@ namespace {
 
 		std::string const& rtp_name = translate_rtp(dir, name);
 
-#ifdef EASYRPG_SYMBIAN
-		if (rtp_name != name) {
-			std::string const ret_rtp_game = FindFile(*tree, dir, rtp_name, exts);
-			if (!ret_rtp_game.empty()) { return ret_rtp_game; }
-		}
-#endif
-
 		for(search_path_list::const_iterator i = search_paths.begin(); i != search_paths.end(); ++i) {
 			if (! *i) { continue; }
 

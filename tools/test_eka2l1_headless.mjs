@@ -10,14 +10,23 @@ const defaultChrome = process.platform === 'darwin'
     ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
     : 'google-chrome';
 
+function defaultGame() {
+    const directory = path.join(rootDir, 'games');
+    const games = fs.readdirSync(directory)
+        .filter(name => name.toLowerCase().endsWith('.zip'))
+        .sort((left, right) => left.localeCompare(right));
+    if (games.length === 0) throw new Error(`No ZIP games found in ${directory}`);
+    return path.join(directory, games[0]);
+}
+
 function parseArgs(argv) {
     const out = {
         site: 'https://eka2l1.zixing.fun/',
         chrome: process.env.EKA2L1_CHROME || defaultChrome,
-        rom: path.join(rootDir, '.games', 'E5 (S60v3)', 'E5.rom'),
-        rpkg: path.join(rootDir, '.games', 'E5 (S60v3)', 'SYM.RPKG'),
+        rom: path.join(rootDir, 'games', 'E5 (S60v3)', 'E5.rom'),
+        rpkg: path.join(rootDir, 'games', 'E5 (S60v3)', 'SYM.RPKG'),
         sis: path.join(rootDir, 'sis', 'EasyRPG.sis'),
-        game: path.join(rootDir, '.games', 'NobihazaVH.zip'),
+        game: defaultGame(),
         profile: path.join(rootDir, 'build', 'eka2l1-headless-profile'),
         output: path.join(rootDir, 'build', 'eka2l1-headless'),
         uid: 0xE31EA5A1,

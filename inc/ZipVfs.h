@@ -15,19 +15,20 @@ public:
     };
 
     static CZipVfs* OpenL(RFs& aFs,
-                          const TDesC& aArchivePath,
-                          const TDesC8& aPassword);
+                          const TDesC& aArchivePath);
     ~CZipVfs();
 
     TBool Exists(const TDesC& aRelativePath) const;
 
     HBufC8* ReadFileLC(const TDesC& aRelativePath,
                        TInt aMaxBytes = KDefaultMaxFileBytes) const;
-
-    void MaterializeFileL(const TDesC& aRelativePath,
-                          const TDesC& aCacheFileName,
-                          TDes& aMaterializedPath,
-                          TInt aMaxBytes = KDefaultMaxFileBytes) const;
+    void OpenStoredFileL(const TDesC& aRelativePath,
+                         TInt& aDataOffset,
+                         TInt& aFileSize) const;
+    void ReadStoredFileL(TInt aDataOffset,
+                         TInt aFileSize,
+                         TInt aPosition,
+                         TDes8& aBuffer) const;
 
     const TDesC& ArchivePath() const;
     const TDesC& ProjectPrefix() const;
@@ -43,25 +44,17 @@ private:
     };
 
     CZipVfs(RFs& aFs);
-    void ConstructL(const TDesC& aArchivePath, const TDesC8& aPassword);
+    void ConstructL(const TDesC& aArchivePath);
     void BuildIndexL();
     void ResolveProjectRootL();
     void AddEntryL(const TDesC& aPath,
-                   TUint16 aFlags,
-                   TUint16 aMethod,
-                   TUint32 aCrc32,
-                   TUint32 aCompressedSize,
-                   TUint32 aUncompressedSize,
-                   TUint32 aLocalHeaderOffset,
-                   TUint8 aAesStrength,
-                   TUint16 aAesMethod);
+                   TUint32 aFileSize,
+                   TUint32 aLocalHeaderOffset);
 
     const CZipVfsEntry* FindEntry(const TDesC& aRelativePath) const;
     const CZipVfsEntry* FindFullPath(const TDesC& aFullPath) const;
     void BuildFullPathL(const TDesC& aRelativePath, TDes& aFullPath) const;
     TInt EntryDataOffsetL(const CZipVfsEntry& aEntry) const;
-    void MaterializeEntryL(const CZipVfsEntry& aEntry, RFile& aOutput, TInt aMaxBytes) const;
-    HBufC8* DecodeEntryLC(const CZipVfsEntry& aEntry, TInt aMaxBytes) const;
 
     static TUint32 HashPath(const TDesC& aPath);
     static TBool PathEquals(const TDesC& aLeft, const TDesC& aRight);
@@ -72,7 +65,6 @@ private:
     RFs& iFs;
     RFile iArchive;
     TFileName iArchivePath;
-    HBufC8* iPassword;
     HBufC* iProjectPrefix;
     RPointerArray<CZipVfsEntry> iEntries;
     RArray<TInt> iBuckets[KBucketCount];

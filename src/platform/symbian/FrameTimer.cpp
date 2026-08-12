@@ -13,7 +13,7 @@ CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 }
 
 CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
-    : CActive(CActive::EPriorityHigh),
+    : CActive(CActive::EPriorityStandard),
       iObserver(aObserver),
       iCounterFrequency(0),
       iCounterCountsUp(ETrue),
@@ -136,42 +136,33 @@ void CFrameTimer::RunL()
 
     UpdateElapsedCounter(User::FastCounter());
 
-    TInt framesToRun = 0;
-    while (iElapsedCounter >= iNextDeadlineCounter && framesToRun < KMaxCatchUpFrames)
-    {
-        ++framesToRun;
-        AdvanceDeadline();
-    }
-
-    if (framesToRun <= 0)
+    if (iElapsedCounter < iNextDeadlineCounter)
     {
         QueueToDeadline();
         return;
     }
 
-    if (framesToRun == KMaxCatchUpFrames && iElapsedCounter >= iNextDeadlineCounter)
+    AdvanceDeadline();
+    if (iElapsedCounter >= iNextDeadlineCounter)
     {
         iNextDeadlineCounter = iElapsedCounter;
         iFrameRemainderAccumulator = 0;
         AdvanceDeadline();
     }
 
-    for (TInt frame = 0; frame < framesToRun; ++frame)
+    for (TInt tick = 0; tick < KLogicTicksPerRender; ++tick)
     {
-        for (TInt tick = 0; tick < KLogicTicksPerRender; ++tick)
+        ++iLogicFrame;
+        const TBool renderFrame = tick == KLogicTicksPerRender - 1;
+        TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
+        if (error != KErrNone)
         {
-            ++iLogicFrame;
-            const TBool renderFrame = frame == framesToRun - 1 && tick == KLogicTicksPerRender - 1;
-            TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
-            if (error != KErrNone)
-            {
-                Stop();
-                iObserver.FrameError(error);
-                return;
-            }
-            if (!iRunning)
-                return;
+            Stop();
+            iObserver.FrameError(error);
+            return;
         }
+        if (!iRunning)
+            return;
     }
 
     UpdateElapsedCounter(User::FastCounter());

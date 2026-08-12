@@ -26,6 +26,7 @@ public:
     TInt WriteStreamPcm16(TStreamBus aBus, const TInt16* aSamples, TInt aFrameCount);
     void ClearStream(TStreamBus aBus);
     void SetStreamVolume(TStreamBus aBus, TInt aVolume);
+    void SetMasterVolume(TInt aVolume);
     TInt StreamFreeFrames(TStreamBus aBus) const;
     TInt StreamQueuedFrames(TStreamBus aBus) const;
     void CommitStreams();
@@ -129,6 +130,7 @@ private:
     TBool iReady;
     TBool iShuttingDown;
     TInt iLastError;
+    TInt iMasterVolume;
 
     void MaoscOpenComplete(TInt aError);
     void MaoscBufferCopied(TInt aError, const TDesC8& aBuffer);

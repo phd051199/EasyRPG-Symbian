@@ -171,6 +171,8 @@ private:
 	uint32_t symbian_revision = 1;
 	bool symbian_has_animated_ab = false;
 	bool symbian_has_animated_c = false;
+	int symbian_recorded_animation_step_ab = -1;
+	int symbian_recorded_animation_step_c = -1;
 	void SymbianTouch();
 	unsigned int SymbianSignature(int z_order) const;
 #endif

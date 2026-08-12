@@ -21,12 +21,10 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
-#include <set>
 
 #include "async_handler.h"
 #include "system.h"
 #include "battle_animation.h"
-#include "cache.h"
 #include "game_battle.h"
 #include "game_battler.h"
 #include "game_map.h"
@@ -196,158 +194,6 @@ namespace {
 		return value < 0 ? value + size : value;
 	}
 
-	const int KMapWarmSeLimit = 16;
-	const int KMapWarmCharsetLimit = 12;
-	const int KMapWarmPictureLimit = 8;
-	std::map<std::string, FileRequestBinding> map_charset_warm_requests;
-	std::map<std::pair<std::string, bool>, FileRequestBinding> map_picture_warm_requests;
-
-	void WarmCharsetReady(FileRequestResult* result) {
-		map_charset_warm_requests.erase(result->file);
-		if (result->success)
-			Cache::Charset(result->file);
-	}
-
-	void WarmPictureReady(FileRequestResult* result, bool transparent) {
-		map_picture_warm_requests.erase(std::make_pair(result->file, transparent));
-		if (result->success)
-			Cache::Picture(result->file, transparent);
-	}
-
-	void WarmCharset(const std::string& name) {
-		if (name.empty() || map_charset_warm_requests.find(name) != map_charset_warm_requests.end())
-			return;
-		FileRequestAsync* request = AsyncHandler::RequestFile("CharSet", name);
-		map_charset_warm_requests[name] = request->Bind(&WarmCharsetReady);
-		request->Start();
-	}
-
-	void WarmPicture(const std::string& name, bool transparent) {
-		if (name.empty())
-			return;
-		const std::pair<std::string, bool> key(name, transparent);
-		if (map_picture_warm_requests.find(key) != map_picture_warm_requests.end())
-			return;
-		FileRequestAsync* request = AsyncHandler::RequestFile("Picture", name);
-		map_picture_warm_requests[key] = request->Bind(std::bind(&WarmPictureReady, std::placeholders::_1, transparent));
-		request->Start();
-	}
-
-	void WarmEventCommands(const std::vector<RPG::EventCommand>& commands,
-		std::set<std::pair<std::string, int> >& warmed,
-		std::set<int>& visited_common,
-		int& warm_count) {
-		for (std::vector<RPG::EventCommand>::const_iterator it = commands.begin();
-			it != commands.end() && warm_count < KMapWarmSeLimit; ++it) {
-			if (it->code == RPG::EventCommand::Code::PlaySound && it->parameters.size() >= 2) {
-				RPG::Sound sound;
-				sound.name = it->string;
-				sound.volume = it->parameters[0];
-				sound.tempo = it->parameters[1];
-				sound.balance = it->parameters.size() >= 3 ? it->parameters[2] : 50;
-				int tempo = sound.tempo;
-				if (tempo < 50 || tempo > 200)
-					tempo = 100;
-				const std::pair<std::string, int> key(sound.name, tempo);
-				if (warmed.insert(key).second) {
-					Game_System::SeWarm(sound);
-					++warm_count;
-				}
-			} else if (it->code == RPG::EventCommand::Code::CallCommonEvent && !it->parameters.empty()) {
-				const int id = it->parameters[0];
-				if (!visited_common.insert(id).second)
-					continue;
-				for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
-					common != Data::commonevents.end(); ++common) {
-					if (common->ID == id) {
-						WarmEventCommands(common->event_commands, warmed, visited_common, warm_count);
-						break;
-					}
-				}
-			}
-		}
-	}
-
-	void WarmImageCommands(const std::vector<RPG::EventCommand>& commands,
-		std::set<std::pair<std::string, bool> >& warmed,
-		std::set<int>& visited_common,
-		int& warm_count) {
-		for (std::vector<RPG::EventCommand>::const_iterator it = commands.begin();
-			it != commands.end() && warm_count < KMapWarmPictureLimit; ++it) {
-			if (it->code == RPG::EventCommand::Code::ShowPicture && it->parameters.size() >= 8) {
-				const bool transparent = it->parameters[7] > 0;
-				const std::pair<std::string, bool> key(it->string, transparent);
-				if (warmed.insert(key).second) {
-					WarmPicture(it->string, transparent);
-					++warm_count;
-				}
-			} else if (it->code == RPG::EventCommand::Code::CallCommonEvent && !it->parameters.empty()) {
-				const int id = it->parameters[0];
-				if (!visited_common.insert(id).second)
-					continue;
-				for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
-					common != Data::commonevents.end(); ++common) {
-					if (common->ID == id) {
-						WarmImageCommands(common->event_commands, warmed, visited_common, warm_count);
-						break;
-					}
-				}
-			}
-		}
-	}
-
-	void WarmMapImages() {
-		std::set<std::string> warmed_charsets;
-		int charset_count = 0;
-		for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
-			event != map->events.end() && charset_count < KMapWarmCharsetLimit; ++event) {
-			for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
-				page != event->pages.end() && charset_count < KMapWarmCharsetLimit; ++page) {
-				if (!page->character_name.empty() && warmed_charsets.insert(page->character_name).second) {
-					WarmCharset(page->character_name);
-					++charset_count;
-				}
-			}
-		}
-
-		std::set<std::pair<std::string, bool> > warmed_pictures;
-		std::set<int> visited_common;
-		int picture_count = 0;
-		for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
-			event != map->events.end() && picture_count < KMapWarmPictureLimit; ++event) {
-			for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
-				page != event->pages.end() && picture_count < KMapWarmPictureLimit; ++page)
-				WarmImageCommands(page->event_commands, warmed_pictures, visited_common, picture_count);
-		}
-		for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
-			common != Data::commonevents.end() && picture_count < KMapWarmPictureLimit; ++common) {
-			if (common->trigger == RPG::EventPage::Trigger_parallel ||
-				common->trigger == RPG::EventPage::Trigger_auto_start) {
-				if (visited_common.insert(common->ID).second)
-					WarmImageCommands(common->event_commands, warmed_pictures, visited_common, picture_count);
-			}
-		}
-	}
-
-	void WarmMapSounds() {
-		std::set<std::pair<std::string, int> > warmed;
-		std::set<int> visited_common;
-		int warm_count = 0;
-		for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
-			event != map->events.end() && warm_count < KMapWarmSeLimit; ++event) {
-			for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
-				page != event->pages.end() && warm_count < KMapWarmSeLimit; ++page)
-				WarmEventCommands(page->event_commands, warmed, visited_common, warm_count);
-		}
-		for (std::vector<RPG::CommonEvent>::const_iterator common = Data::commonevents.begin();
-			common != Data::commonevents.end() && warm_count < KMapWarmSeLimit; ++common) {
-			if (common->trigger == RPG::EventPage::Trigger_parallel ||
-				common->trigger == RPG::EventPage::Trigger_auto_start) {
-				if (visited_common.insert(common->ID).second)
-					WarmEventCommands(common->event_commands, warmed, visited_common, warm_count);
-			}
-		}
-	}
 }
 
 void Game_Map::Init() {
@@ -395,8 +241,6 @@ void Game_Map::Init() {
 }
 
 void Game_Map::Dispose() {
-	map_charset_warm_requests.clear();
-	map_picture_warm_requests.clear();
 	event_cell_heads.clear();
 	event_next.clear();
 	event_prev.clear();
@@ -537,8 +381,6 @@ void Game_Map::SetupCommon(int _id) {
 		Output::ErrorStr(LcfReader::GetError());
 	}
 
-	WarmMapSounds();
-	WarmMapImages();
 	refresh_type = Refresh_All;
 
 	scroll_direction = 2;

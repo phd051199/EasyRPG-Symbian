@@ -86,6 +86,7 @@ void Game_System::Init() {
 	data.Setup();
 	se_preload_request_ids.clear();
 	se_warm_request_ids.clear();
+#ifndef EASYRPG_SYMBIAN
 	PreloadSystemSe(data.cursor_se);
 	PreloadSystemSe(data.decision_se);
 	PreloadSystemSe(data.cancel_se);
@@ -98,6 +99,7 @@ void Game_System::Init() {
 	PreloadSystemSe(data.dodge_se);
 	PreloadSystemSe(data.enemy_death_se);
 	PreloadSystemSe(data.item_se);
+#endif
 }
 
 int Game_System::GetSaveCount() {
@@ -414,13 +416,31 @@ void Game_System::OnBgmReady(FileRequestResult* result) {
 	}
 
 	if (Utils::EndsWith(result->file, ".link")) {
+		std::string line;
+#ifdef EASYRPG_SYMBIAN
+		FILE* stream = FileFinder::fopenUTF8(path, "rb");
+		if (!stream) {
+			Output::Warning("Ineluki link read error: %s", path.c_str());
+			return;
+		}
+		char buffer[1024];
+		if (!fgets(buffer, sizeof(buffer), stream)) {
+			fclose(stream);
+			Output::Warning("Ineluki link read error: %s", path.c_str());
+			return;
+		}
+		fclose(stream);
+		line = buffer;
+		while (!line.empty() && (line[line.size() - 1] == '\r' || line[line.size() - 1] == '\n'))
+			line.erase(line.size() - 1);
+#else
 		std::shared_ptr<std::fstream> stream = FileFinder::openUTF8(path, std::ios_base::in);
 		if (!stream) {
 			Output::Warning("Ineluki link read error: %s", path.c_str());
 			return;
 		}
-
-		std::string line = Utils::ReadLine(*stream.get());
+		line = Utils::ReadLine(*stream.get());
+#endif
 		line = ReaderUtil::Recode(line, Player::encoding);
 		
 		Output::Debug("Ineluki link file: %s -> %s", path.c_str(), line.c_str());

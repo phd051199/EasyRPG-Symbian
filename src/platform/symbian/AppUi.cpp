@@ -42,6 +42,20 @@ void CEasyRpgAppUi::ExitGameFullscreen()
 
 void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 {
+    if (iGameView && iGameView->IsGameRunning())
+    {
+        if (aCommand == EAknSoftkeyOptions)
+        {
+            iGameView->HandleLeftSoftkeyL();
+            return;
+        }
+        if (aCommand == EAknSoftkeyExit)
+        {
+            iGameView->HandleRightSoftkeyL();
+            return;
+        }
+    }
+
     switch (aCommand)
     {
     case EEikCmdExit:

@@ -5,7 +5,6 @@
 
 namespace
 {
-const TInt KDirtyTileSize = 16;
 const TInt KDirtyRegionCapacity = 16;
 const TInt KMaximumPresentRegions = 4;
 const TInt KDirtyRegionFixedCostDivisor = 12;
@@ -97,98 +96,6 @@ void OptimizeDirtyRegions(TRect* aRegions, TInt& aRegionCount, const TRect& aFra
         aRegions[0] = aFrameRect;
         aRegionCount = 1;
     }
-}
-
-TBool TileChanged(const unsigned short* aSource,
-                  TInt aSourceStridePixels,
-                  const TUint8* aDestination,
-                  TInt aDestinationStride,
-                  TInt aX,
-                  TInt aY,
-                  TInt aWidth,
-                  TInt aHeight)
-{
-    for (TInt row = 0; row < aHeight; ++row)
-    {
-        const unsigned short* source = aSource + (aY + row) * aSourceStridePixels + aX;
-        const TUint16* destination = reinterpret_cast<const TUint16*>(
-            aDestination + (aY + row) * aDestinationStride) + aX;
-        for (TInt column = 0; column < aWidth; ++column)
-        {
-            if (source[column] != destination[column])
-                return ETrue;
-        }
-    }
-    return EFalse;
-}
-
-void AddDirtyRun(TRect* aRegions,
-                 TInt& aRegionCount,
-                 TInt aX1,
-                 TInt aY1,
-                 TInt aX2,
-                 TInt aY2)
-{
-    for (TInt index = 0; index < aRegionCount; ++index)
-    {
-        TRect& region = aRegions[index];
-        if (region.iTl.iX == aX1 && region.iBr.iX == aX2 && region.iBr.iY == aY1)
-        {
-            region.iBr.iY = aY2;
-            return;
-        }
-    }
-
-    if (aRegionCount < KDirtyRegionCapacity)
-        aRegions[aRegionCount++] = TRect(aX1, aY1, aX2, aY2);
-}
-
-void DetectDirtyRegions(const unsigned short* aSource,
-                        TInt aSourceStridePixels,
-                        const TUint8* aDestination,
-                        TInt aDestinationStride,
-                        const TSize& aSize,
-                        TRect* aRegions,
-                        TInt& aRegionCount)
-{
-    const TRect frameRect(TPoint(0, 0), aSize);
-    aRegionCount = 0;
-
-    for (TInt y = 0; y < aSize.iHeight; y += KDirtyTileSize)
-    {
-        const TInt tileHeight = Min(KDirtyTileSize, aSize.iHeight - y);
-        TInt runStart = -1;
-        for (TInt x = 0; x < aSize.iWidth; x += KDirtyTileSize)
-        {
-            const TInt tileWidth = Min(KDirtyTileSize, aSize.iWidth - x);
-            const TBool changed = TileChanged(aSource,
-                                              aSourceStridePixels,
-                                              aDestination,
-                                              aDestinationStride,
-                                              x,
-                                              y,
-                                              tileWidth,
-                                              tileHeight);
-            if (changed && runStart < 0)
-                runStart = x;
-
-            const TBool runEnds = runStart >= 0 && (!changed || x + tileWidth >= aSize.iWidth);
-            if (runEnds)
-            {
-                const TInt runEnd = changed ? x + tileWidth : x;
-                AddDirtyRun(aRegions, aRegionCount, runStart, y, runEnd, y + tileHeight);
-                if (aRegionCount >= KDirtyRegionCapacity)
-                {
-                    aRegions[0] = frameRect;
-                    aRegionCount = 1;
-                    return;
-                }
-                runStart = -1;
-            }
-        }
-    }
-
-    OptimizeDirtyRegions(aRegions, aRegionCount, frameRect);
 }
 
 void CopyRegion(const unsigned short* aSource,
@@ -374,13 +281,8 @@ void CDisplaySurface::PresentL()
         }
         else
         {
-            DetectDirtyRegions(source,
-                               sourceStridePixels,
-                               destination,
-                               destinationStride,
-                               iSize,
-                               currentDirty,
-                               currentDirtyCount);
+            currentDirty[0] = frameRect;
+            currentDirtyCount = 1;
         }
     }
     else if (coreDirtyCount > KDirtyRegionCapacity)
@@ -390,13 +292,8 @@ void CDisplaySurface::PresentL()
     }
     else
     {
-        DetectDirtyRegions(source,
-                           sourceStridePixels,
-                           destination,
-                           destinationStride,
-                           iSize,
-                           currentDirty,
-                           currentDirtyCount);
+        currentDirty[0] = frameRect;
+        currentDirtyCount = 1;
     }
 
     for (TInt index = 0; index < currentDirtyCount; ++index)
