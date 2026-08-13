@@ -55,8 +55,9 @@ done
 PLAYER_WINDOW_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-window-symbian.patch"
 PLAYER_GAMEPLAY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-gameplay.patch"
 PLAYER_PARITY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-parity.patch"
+PLAYER_E72_PARITY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-e72-parity.patch"
 PLAYER_VENDOR_BASE=$(dirname "$PLAYER_VENDOR_ROOT")
-for player_patch in "$PLAYER_WINDOW_PATCH" "$PLAYER_GAMEPLAY_PATCH" "$PLAYER_PARITY_PATCH"; do
+for player_patch in "$PLAYER_WINDOW_PATCH" "$PLAYER_GAMEPLAY_PATCH" "$PLAYER_PARITY_PATCH" "$PLAYER_E72_PARITY_PATCH"; do
     if patch --batch --forward -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$player_patch" >/dev/null 2>&1; then
         patch --batch --forward -p1 -d "$PLAYER_VENDOR_BASE" < "$player_patch"
     elif ! patch --batch -R -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$player_patch" >/dev/null 2>&1; then
@@ -98,6 +99,8 @@ SOURCES=(
     "$PROJECT_DIR/src/core/GameBattleAlgorithmEffects.cpp"
     "$PROJECT_DIR/src/core/AsyncHandler.cpp"
     "$PROJECT_DIR/src/core/Audio.cpp"
+    "$PROJECT_DIR/src/core/MidiLite.cpp"
+    "$PLAYER_VENDOR_ROOT/midisequencer.cpp"
     "$PROJECT_DIR/src/core/Output.cpp"
     "$PROJECT_DIR/src/core/Aeabi.cpp"
     "$PROJECT_DIR/src/core/Image.cpp"
@@ -326,7 +329,9 @@ for source in "${SOURCES[@]}"; do
     # the SDK's arm-none-symbianelf-ld and elf2e32.
     source_define=
     stdio_read_define='-Dfopen=EasyRpgFopen -Dfclose=EasyRpgFclose -Dfread=EasyRpgFread -Dfseek=EasyRpgFseek -Dftell=EasyRpgFtell -Dfeof=EasyRpgFeof -Dferror=EasyRpgFerror -Dungetc=EasyRpgUngetc -Dfgets=EasyRpgFgets'
-    if [[ $source == "$PLAYER_ROOT/filefinder.cpp" || $source == "$PLAYER_VENDOR_ROOT/filefinder.cpp" ]]; then
+    if [[ $source == "$PLAYER_VENDOR_ROOT/midisequencer.cpp" || $source == "$PROJECT_DIR/src/core/MidiLite.cpp" ]]; then
+        source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -DWANT_FMMIDI=1 $stdio_read_define"
+    elif [[ $source == "$PLAYER_ROOT/filefinder.cpp" || $source == "$PLAYER_VENDOR_ROOT/filefinder.cpp" ]]; then
         source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
     elif [[ $source == "$PLAYER_ROOT/"* || $source == "$PLAYER_VENDOR_ROOT/"* ]]; then
         source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
@@ -438,7 +443,7 @@ done
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
+for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor EasyRpgMidiLiteCreate EasyRpgMidiLiteRender EasyRpgMidiLiteDestroy _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "Modern core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2

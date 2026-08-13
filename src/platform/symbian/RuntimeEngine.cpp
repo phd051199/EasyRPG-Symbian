@@ -18,6 +18,10 @@ const TInt KGameWidth = 320;
 const TInt KGameHeight = 240;
 const TInt KDefaultMasterVolume = 50;
 const TInt KVolumeStep = 10;
+const TInt KLogicFps = 60;
+const TInt KDirectionLeaseGraceFrames = 3;
+const TInt KDefaultInitialRepeatMicroseconds = 500000;
+const TInt KDefaultRepeatMicroseconds = 100000;
 _LIT(KSettingsDirectory, "C:\\Data\\EasyRPG\\");
 _LIT(KSettingsPath, "C:\\Data\\EasyRPG\\settings.ini");
 _LIT8(KMasterVolumeSetting, "master_volume=");
@@ -40,6 +44,17 @@ TInt ClampVolume(TInt aVolume)
     if (aVolume > 100)
         return 100;
     return aVolume;
+}
+
+TUint32 RepeatLeaseFrames(TInt aMicroseconds, TInt aFallbackMicroseconds)
+{
+    TInt microseconds = aMicroseconds > 0 ? aMicroseconds : aFallbackMicroseconds;
+    TInt64 frames = (static_cast<TInt64>(microseconds) * KLogicFps + 999999) / 1000000;
+    if (frames < 1)
+        frames = 1;
+    if (frames > KLogicFps * 2)
+        frames = KLogicFps * 2;
+    return static_cast<TUint32>(frames);
 }
 
 TInt LoadMasterVolume(RFs& aFs)
@@ -251,14 +266,20 @@ private:
     CRuntimeEngine& iEngine;
 };
 
-class CRawDirectScreenAccess : public CBase
+class CRawDirectScreenAccess : public CBase,
+                               public MDirectScreenAccess
 {
 public:
-    static CRawDirectScreenAccess* NewL(RWindowBase& aWindow,
-                                        TDisplayMode aDisplayMode)
+    static CRawDirectScreenAccess* NewL(RWsSession& aWs,
+                                        CWsScreenDevice& aScreenDevice,
+                                        RWindowBase& aWindow)
     {
-        CRawDirectScreenAccess* self = new (ELeave) CRawDirectScreenAccess(aWindow, aDisplayMode);
+        CRawDirectScreenAccess* self = new (ELeave) CRawDirectScreenAccess;
         CleanupStack::PushL(self);
+        self->iAccess = CDirectScreenAccess::NewL(aWs,
+                                                  aScreenDevice,
+                                                  aWindow,
+                                                  *self);
         self->StartL();
         CleanupStack::Pop(self);
         return self;
@@ -266,54 +287,73 @@ public:
 
     ~CRawDirectScreenAccess()
     {
-        Cancel();
+        if (iAccess)
+            iAccess->Cancel();
+        delete iAccess;
+        iAccess = NULL;
     }
 
     void StartL()
     {
-        if (iScreen)
+        if (!iAccess || iActive)
             return;
-        iScreen = CFbsScreenDevice::NewL(0, iDisplayMode);
-        User::LeaveIfError(iScreen->CreateContext(iGc));
-        iScreen->SetAutoUpdate(EFalse);
-        iGc->CancelClippingRegion();
-        iGc->SetClippingRect(TRect(TPoint(0, 0), iScreen->SizeInPixels()));
-        iGc->SetOrigin(iWindow.AbsPosition());
+        iAccess->StartL();
+        iActive = ETrue;
     }
 
     void Cancel()
     {
-        delete iGc;
-        iGc = NULL;
-        delete iScreen;
-        iScreen = NULL;
+        if (iAccess)
+            iAccess->Cancel();
+        iActive = EFalse;
     }
 
-    CFbsBitGc* Gc() const
+    TBool IsActive() const
     {
-        return iGc;
+        return iActive;
     }
 
-    CFbsScreenDevice* ScreenDevice() const
+    TBool ConsumeAbort()
     {
-        return iScreen;
+        const TBool aborted = iAborted;
+        iAborted = EFalse;
+        return aborted;
+    }
+
+    CFbsBitGc* Gc()
+    {
+        return iAccess && iActive ? iAccess->Gc() : NULL;
+    }
+
+    CFbsScreenDevice* ScreenDevice()
+    {
+        return iAccess && iActive ? iAccess->ScreenDevice() : NULL;
     }
 
 private:
-    CRawDirectScreenAccess(RWindowBase& aWindow,
-                           TDisplayMode aDisplayMode)
-        : iWindow(aWindow),
-          iDisplayMode(aDisplayMode),
-          iScreen(NULL),
-          iGc(NULL)
+    CRawDirectScreenAccess()
+        : iAccess(NULL),
+          iActive(EFalse),
+          iAborted(EFalse)
     {
     }
 
+    void AbortNow(RDirectScreenAccess::TTerminationReasons)
+    {
+        iActive = EFalse;
+        iAborted = ETrue;
+    }
+
+    void Restart(RDirectScreenAccess::TTerminationReasons)
+    {
+        TRAPD(error, iAccess->StartL());
+        iActive = error == KErrNone;
+    }
+
 private:
-    RWindowBase& iWindow;
-    TDisplayMode iDisplayMode;
-    CFbsScreenDevice* iScreen;
-    CFbsBitGc* iGc;
+    CDirectScreenAccess* iAccess;
+    TBool iActive;
+    TBool iAborted;
 };
 
 CRuntimeEngine* CRuntimeEngine::NewL()
@@ -347,6 +387,11 @@ CRuntimeEngine::CRuntimeEngine()
       iHeldPlayerKeys(0),
       iPendingPlayerPulses(0),
       iDynamicPlayerScanCount(0),
+      iDirectionCaptureCount(0),
+      iCurrentLogicFrame(0),
+      iDirectionInitialLeaseFrames(RepeatLeaseFrames(0, KDefaultInitialRepeatMicroseconds)),
+      iDirectionRepeatLeaseFrames(RepeatLeaseFrames(0, KDefaultRepeatMicroseconds)),
+      iDirectScreenRetryFrame(0),
       iMasterVolume(KDefaultMasterVolume),
       iAudibleVolume(KDefaultMasterVolume),
       iVolumeOverlayTicks(0),
@@ -355,12 +400,15 @@ CRuntimeEngine::CRuntimeEngine()
       iPreviousThreadPriority(EPriorityNormal),
       iFrameError(KErrNone)
 {
+    Mem::FillZ(iDirectionDeadlines, sizeof(iDirectionDeadlines));
 }
 
 void CRuntimeEngine::ConstructL()
 {
+    const TInt KGamePathParameterSlot = 1;
     User::LeaveIfError(iFs.Connect());
-    User::CommandLine(iGamePath);
+    if (User::GetDesParameter(KGamePathParameterSlot, iGamePath) != KErrNone)
+        User::CommandLine(iGamePath);
     if (iGamePath.Length() <= 0)
         User::Leave(KErrArgument);
     iMasterVolume = LoadMasterVolume(iFs);
@@ -369,6 +417,11 @@ void CRuntimeEngine::ConstructL()
     EasyRpgAudioSetMasterVolume(iMasterVolume);
 
     User::LeaveIfError(iWs.Connect(iFs));
+    TTimeIntervalMicroSeconds32 initialRepeat;
+    TTimeIntervalMicroSeconds32 repeat;
+    iWs.GetKeyboardRepeatRate(initialRepeat, repeat);
+    iDirectionInitialLeaseFrames = RepeatLeaseFrames(initialRepeat.Int(), KDefaultInitialRepeatMicroseconds);
+    iDirectionRepeatLeaseFrames = RepeatLeaseFrames(repeat.Int(), KDefaultRepeatMicroseconds);
     iScreenDevice = new (ELeave) CWsScreenDevice(iWs);
     User::LeaveIfError(iScreenDevice->Construct(0));
 
@@ -378,6 +431,7 @@ void CRuntimeEngine::ConstructL()
     iWindowGroup->EnableReceiptOfFocus(ETrue);
     iWindowGroup->AutoForeground(ETrue);
     iWindowGroup->SetOrdinalPosition(0);
+    CaptureInitialDirectionKeys();
 
     iWindow = new (ELeave) RWindow(iWs);
     User::LeaveIfError(iWindow->Construct(*iWindowGroup, handle + 1));
@@ -424,6 +478,7 @@ CRuntimeEngine::~CRuntimeEngine()
     }
     if (iWindowGroup)
     {
+        CancelDirectionCaptures();
         iWindowGroup->Close();
         delete iWindowGroup;
         iWindowGroup = NULL;
@@ -444,8 +499,9 @@ void CRuntimeEngine::StartDirectScreenL()
     if (!iForeground || iDirectScreenActive || EasyRpgMovieIsActive())
         return;
     if (!iDirectScreen)
-        iDirectScreen = CRawDirectScreenAccess::NewL(*iWindow,
-                                                     iScreenDevice->DisplayMode());
+        iDirectScreen = CRawDirectScreenAccess::NewL(iWs,
+                                                     *iScreenDevice,
+                                                     *iWindow);
     else
         iDirectScreen->StartL();
     iDirectScreenActive = ETrue;
@@ -474,6 +530,11 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
     if (!iDirectScreenActive || !iDirectScreen || !iDisplaySurface ||
         !iDisplaySurface->HasFrame())
         return;
+    if (!iDirectScreen->IsActive())
+    {
+        iDirectScreenActive = EFalse;
+        return;
+    }
 
     CFbsBitGc* gc = iDirectScreen->Gc();
     CFbsScreenDevice* screen = iDirectScreen->ScreenDevice();
@@ -583,10 +644,7 @@ void CRuntimeEngine::OpenMenu()
 {
     if (iPaused || !iRuntime)
         return;
-    iRuntime->ReleaseAllKeys();
-    iHeldPlayerKeys = 0;
-    iPendingPlayerPulses = 0;
-    iDynamicPlayerScanCount = 0;
+    ClearPlayerInput();
     iPaused = ETrue;
     iKeyMapVisible = EFalse;
     iRuntime->Suspend();
@@ -603,9 +661,7 @@ void CRuntimeEngine::CloseMenu()
         return;
     iKeyMapVisible = EFalse;
     iPaused = EFalse;
-    iHeldPlayerKeys = 0;
-    iPendingPlayerPulses = 0;
-    iDynamicPlayerScanCount = 0;
+    ClearPlayerInput();
     iRuntime->Resume();
     iNeedsFullRedraw = ETrue;
     if (!iDirectScreenActive)
@@ -931,6 +987,8 @@ void CRuntimeEngine::RememberDynamicScanKey(TInt aScanCode, TUint32 aPlayerKey)
 {
     if (aScanCode == 0)
         return;
+    if (IsDirectionKey(aPlayerKey))
+        CaptureDirectionScanKey(aScanCode);
     for (TInt index = 0; index < iDynamicPlayerScanCount; ++index)
     {
         if (iDynamicPlayerScanCodes[index] == aScanCode)
@@ -960,6 +1018,139 @@ void CRuntimeEngine::ForgetDynamicScanKey(TInt aScanCode)
         --iDynamicPlayerScanCount;
         return;
     }
+}
+
+void CRuntimeEngine::ClearPlayerInput()
+{
+    iHeldPlayerKeys = 0;
+    iPendingPlayerPulses = 0;
+    iDynamicPlayerScanCount = 0;
+    iLeftSoftHeld = EFalse;
+    iRightSoftHeld = EFalse;
+    Mem::FillZ(iDirectionDeadlines, sizeof(iDirectionDeadlines));
+    if (iRuntime)
+        iRuntime->ReleaseAllKeys();
+}
+
+TBool CRuntimeEngine::IsDirectionKey(TUint32 aKey) const
+{
+    return aKey == CPlayerRuntime::EKeyUp ||
+           aKey == CPlayerRuntime::EKeyDown ||
+           aKey == CPlayerRuntime::EKeyLeft ||
+           aKey == CPlayerRuntime::EKeyRight;
+}
+
+TInt CRuntimeEngine::DirectionIndex(TUint32 aKey) const
+{
+    if (aKey == CPlayerRuntime::EKeyUp)
+        return 0;
+    if (aKey == CPlayerRuntime::EKeyDown)
+        return 1;
+    if (aKey == CPlayerRuntime::EKeyLeft)
+        return 2;
+    if (aKey == CPlayerRuntime::EKeyRight)
+        return 3;
+    return KErrNotFound;
+}
+
+void CRuntimeEngine::RefreshDirectionLease(TUint32 aKey, TBool aRepeat)
+{
+    const TInt index = DirectionIndex(aKey);
+    if (index < 0)
+        return;
+    const TUint32 leaseFrames = aRepeat ? iDirectionRepeatLeaseFrames : iDirectionInitialLeaseFrames;
+    iDirectionDeadlines[index] = iCurrentLogicFrame + leaseFrames + KDirectionLeaseGraceFrames;
+}
+
+void CRuntimeEngine::ClearDirectionLease(TUint32 aKey)
+{
+    const TInt index = DirectionIndex(aKey);
+    if (index >= 0)
+        iDirectionDeadlines[index] = 0;
+}
+
+void CRuntimeEngine::ReleaseOtherDirections(TUint32 aKey)
+{
+    const TUint32 keys[4] =
+    {
+        CPlayerRuntime::EKeyUp,
+        CPlayerRuntime::EKeyDown,
+        CPlayerRuntime::EKeyLeft,
+        CPlayerRuntime::EKeyRight
+    };
+    for (TInt index = 0; index < 4; ++index)
+    {
+        if (keys[index] == aKey)
+            continue;
+        iDirectionDeadlines[index] = 0;
+        iHeldPlayerKeys &= ~keys[index];
+        iPendingPlayerPulses &= ~keys[index];
+        if (iRuntime)
+            iRuntime->SetKeyState(keys[index], EFalse);
+    }
+}
+
+void CRuntimeEngine::ReleaseExpiredDirections(TUint32 aLogicFrame)
+{
+    const TUint32 keys[4] =
+    {
+        CPlayerRuntime::EKeyUp,
+        CPlayerRuntime::EKeyDown,
+        CPlayerRuntime::EKeyLeft,
+        CPlayerRuntime::EKeyRight
+    };
+    for (TInt index = 0; index < 4; ++index)
+    {
+        const TUint32 deadline = iDirectionDeadlines[index];
+        if (deadline == 0 || static_cast<TInt32>(aLogicFrame - deadline) < 0)
+            continue;
+        iDirectionDeadlines[index] = 0;
+        iHeldPlayerKeys &= ~keys[index];
+        iPendingPlayerPulses &= ~keys[index];
+        if (iRuntime)
+            iRuntime->SetKeyState(keys[index], EFalse);
+    }
+}
+
+void CRuntimeEngine::CaptureDirectionScanKey(TInt aScanCode)
+{
+    if (!iWindowGroup || aScanCode == 0)
+        return;
+    for (TInt index = 0; index < iDirectionCaptureCount; ++index)
+    {
+        if (iDirectionCaptureScanCodes[index] == aScanCode)
+            return;
+    }
+    if (iDirectionCaptureCount >= 16)
+        return;
+    const TInt32 handle = iWindowGroup->CaptureKeyUpAndDowns(aScanCode, 0, 0);
+    if (handle < 0)
+        return;
+    iDirectionCaptureScanCodes[iDirectionCaptureCount] = aScanCode;
+    iDirectionCaptureHandles[iDirectionCaptureCount] = handle;
+    ++iDirectionCaptureCount;
+    iWs.Flush();
+}
+
+void CRuntimeEngine::CaptureInitialDirectionKeys()
+{
+    CaptureDirectionScanKey(EStdKeyUpArrow);
+    CaptureDirectionScanKey(EStdKeyDownArrow);
+    CaptureDirectionScanKey(EStdKeyLeftArrow);
+    CaptureDirectionScanKey(EStdKeyRightArrow);
+    CaptureDirectionScanKey('W');
+    CaptureDirectionScanKey('S');
+    CaptureDirectionScanKey('A');
+    CaptureDirectionScanKey('D');
+}
+
+void CRuntimeEngine::CancelDirectionCaptures()
+{
+    if (!iWindowGroup)
+        return;
+    for (TInt index = 0; index < iDirectionCaptureCount; ++index)
+        iWindowGroup->CancelCaptureKeyUpAndDowns(iDirectionCaptureHandles[index]);
+    iDirectionCaptureCount = 0;
 }
 
 void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
@@ -1122,13 +1313,26 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
         return;
     }
 
-    TUint32 playerKey = MapScanKey(aKey);
+    const TUint32 scanKey = MapScanKey(aKey);
+    TUint32 playerKey = MapCharacterKey(aKey.iCode);
+    if (playerKey == 0)
+        playerKey = scanKey;
     if (playerKey == 0)
         playerKey = FindDynamicScanKey(aKey.iScanCode);
 
     if (aType == EEventKeyDown && playerKey != 0)
     {
+        if (aKey.iScanCode != 0 && scanKey == 0)
+            RememberDynamicScanKey(aKey.iScanCode, playerKey);
+        else if (IsDirectionKey(playerKey) && aKey.iScanCode != 0)
+            CaptureDirectionScanKey(aKey.iScanCode);
+        if (IsDirectionKey(playerKey))
+        {
+            ReleaseOtherDirections(playerKey);
+            RefreshDirectionLease(playerKey, EFalse);
+        }
         iHeldPlayerKeys |= playerKey;
+        iPendingPlayerPulses &= ~playerKey;
         iRuntime->SetKeyState(playerKey, ETrue);
         return;
     }
@@ -1136,6 +1340,9 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
     if (aType == EEventKeyUp && playerKey != 0)
     {
         iHeldPlayerKeys &= ~playerKey;
+        iPendingPlayerPulses &= ~playerKey;
+        if (IsDirectionKey(playerKey))
+            ClearDirectionLease(playerKey);
         iRuntime->SetKeyState(playerKey, EFalse);
         ForgetDynamicScanKey(aKey.iScanCode);
         return;
@@ -1144,11 +1351,19 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
     if (aType == EEventKey)
     {
         if (playerKey == 0)
-            playerKey = MapCharacterKey(aKey.iCode);
-        if (playerKey == 0)
             return;
-        if (aKey.iScanCode != 0 && MapScanKey(aKey) == 0)
+        if (aKey.iScanCode != 0)
             RememberDynamicScanKey(aKey.iScanCode, playerKey);
+        if (IsDirectionKey(playerKey))
+        {
+            if (aKey.iRepeats == 0)
+                ReleaseOtherDirections(playerKey);
+            iHeldPlayerKeys |= playerKey;
+            iPendingPlayerPulses &= ~playerKey;
+            RefreshDirectionLease(playerKey, aKey.iRepeats > 0);
+            iRuntime->SetKeyState(playerKey, ETrue);
+            return;
+        }
         if ((iHeldPlayerKeys & playerKey) == 0)
             iPendingPlayerPulses |= playerKey;
     }
@@ -1160,9 +1375,7 @@ void CRuntimeEngine::HandleWindowEvent(const TWsEvent& aEvent)
     {
     case EEventFocusLost:
         iForeground = EFalse;
-        iHeldPlayerKeys = 0;
-        iPendingPlayerPulses = 0;
-        iDynamicPlayerScanCount = 0;
+        ClearPlayerInput();
         iRuntime->Suspend();
         EasyRpgMovieSetForeground(EFalse);
         StopDirectScreen();
@@ -1229,6 +1442,14 @@ void CRuntimeEngine::SetPlayerKeyMask(TUint32 aMask, TBool aPressed)
 
 void CRuntimeEngine::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
 {
+    iCurrentLogicFrame = aLogicFrame;
+    ReleaseExpiredDirections(aLogicFrame);
+    if (iDirectScreen && iDirectScreen->ConsumeAbort())
+    {
+        iDirectScreenActive = EFalse;
+        ClearPlayerInput();
+        iDirectScreenRetryFrame = aLogicFrame + 1;
+    }
     if (!iForeground || iPaused || !iRuntime)
         return;
 
@@ -1249,9 +1470,19 @@ void CRuntimeEngine::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
         if (iDirectScreenActive)
             StopDirectScreen();
     }
-    else if (!iDirectScreenActive)
+    else if (!iDirectScreenActive && aLogicFrame >= iDirectScreenRetryFrame)
     {
-        StartDirectScreenL();
+        TRAPD(startError, StartDirectScreenL());
+        if (startError != KErrNone)
+        {
+            DestroyDirectScreen();
+            ClearPlayerInput();
+            iDirectScreenRetryFrame = aLogicFrame + 30;
+        }
+        else
+        {
+            iDirectScreenRetryFrame = 0;
+        }
     }
 
     if (EasyRpgMovieConsumeRedraw())
@@ -1263,7 +1494,15 @@ void CRuntimeEngine::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
             iPerfOverlay->FrameRendered();
         const TBool overlayDirty = iPerfOverlay && iPerfOverlay->IsDirty();
         if (iDisplaySurface->HasDirtyRegions() || overlayDirty || iNeedsFullRedraw)
-            PresentDirectL(EFalse);
+        {
+            TRAPD(presentError, PresentDirectL(EFalse));
+            if (presentError != KErrNone)
+            {
+                DestroyDirectScreen();
+                ClearPlayerInput();
+                iDirectScreenRetryFrame = aLogicFrame + 30;
+            }
+        }
     }
 
     if (!iRuntime->IsRunning())

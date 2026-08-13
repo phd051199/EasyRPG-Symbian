@@ -23,7 +23,7 @@ private:
     CLauncherView();
     void ConstructL(const TRect& aRect);
     void BuildGameListL();
-    void LaunchArchiveL(const TDesC& aArchivePath);
+    void LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion);
     void SizeChanged();
     TInt CountComponentControls() const;
     CCoeControl* ComponentControl(TInt aIndex) const;
@@ -35,6 +35,7 @@ private:
     CAknDoubleStyleListBox* iListBox;
     CDesCArrayFlat* iListItems;
     CDesCArrayFlat* iArchivePaths;
+    RArray<TInt> iEngineVersions;
 };
 
 #endif

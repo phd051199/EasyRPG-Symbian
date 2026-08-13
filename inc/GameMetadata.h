@@ -4,6 +4,18 @@
 #include <e32base.h>
 #include <f32file.h>
 
+enum TGameEngineVersion
+{
+    EGameEngineUnknown = 0,
+    EGameEngineRpgXp = 1,
+    EGameEngineRpgVx = 2,
+    EGameEngineRpgVxAce = 3,
+    EGameEngineRpg2000 = 2000,
+    EGameEngineRpg2003 = 2003
+};
+
+TInt DetectGameEngineL(RFs& aFs,
+                       const TDesC& aArchivePath);
 void ReadGameMetadataL(RFs& aFs,
                        const TDesC& aArchivePath,
                        TDes& aTitle,

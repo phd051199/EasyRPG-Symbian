@@ -30,6 +30,7 @@
 #include "output.h"
 #include "player.h"
 #include "data.h"
+#include "UpstreamPlayerBridge.h"
 
 namespace {
 	typedef std::pair<std::string,std::string> string_pair;
@@ -47,20 +48,37 @@ namespace {
 	std::string system_name;
 	uint32_t next_cleanup_tick = 0;
 	int loads_since_cleanup = 0;
+	const int low_memory_bytes = 24 * 1024 * 1024;
+	const int critical_memory_bytes = 12 * 1024 * 1024;
+
+	size_t CleanupBudget(int free_ram) {
+		if (free_ram >= 0 && free_ram < critical_memory_bytes)
+			return cache.size();
+		if (free_ram >= 0 && free_ram < low_memory_bytes)
+			return 12;
+		return 4;
+	}
 
 	void FreeBitmapMemory() {
 		++loads_since_cleanup;
 		const uint32_t cur_ticks = DisplayUi->GetTicks();
-		if (loads_since_cleanup < 8 && static_cast<int32_t>(cur_ticks - next_cleanup_tick) < 0)
+		const int free_ram = EasyRpgPlatformFreeRamBytes();
+		const bool aggressive = free_ram >= 0 && free_ram < critical_memory_bytes;
+		if (!aggressive && loads_since_cleanup < 8 && static_cast<int32_t>(cur_ticks - next_cleanup_tick) < 0)
 			return;
 		loads_since_cleanup = 0;
 		next_cleanup_tick = cur_ticks + 2000;
+		const size_t budget = CleanupBudget(free_ram);
+		size_t freed = 0;
 		for (auto& i : cache) {
 			if (i.second.bitmap.use_count() != 1)
 				continue;
-			if (static_cast<int32_t>(cur_ticks - i.second.last_access) < 5000)
+			if (!aggressive && static_cast<int32_t>(cur_ticks - i.second.last_access) < 5000)
 				continue;
 			i.second.bitmap.reset();
+			++freed;
+			if (freed >= budget)
+				break;
 		}
 	}
 
@@ -69,6 +87,7 @@ namespace {
 		string_pair const key(folder_name, filename);
 		cache_type::iterator const it = cache.find(key);
 		if (it == cache.end() || !it->second.bitmap) {
+			FreeBitmapMemory();
 			std::string const path = FileFinder::FindImage(folder_name, filename);
 			BitmapRef bmp = BitmapRef();
 			if (path.empty()) {
@@ -78,7 +97,6 @@ namespace {
 				if (!bmp)
 					Output::Warning("Invalid image: %s/%s", folder_name.c_str(), filename.c_str());
 			}
-			FreeBitmapMemory();
 			return (cache[key] = {bmp, DisplayUi->GetTicks()}).bitmap;
 		} else {
 			it->second.last_access = DisplayUi->GetTicks();
@@ -288,6 +306,39 @@ void Cache::Clear() {
 	cache_tiles.clear();
 	next_cleanup_tick = 0;
 	loads_since_cleanup = 0;
+}
+
+void Cache::TrimUnused() {
+	const int free_ram = EasyRpgPlatformFreeRamBytes();
+	const size_t budget = CleanupBudget(free_ram);
+	const bool aggressive = free_ram >= 0 && free_ram < critical_memory_bytes;
+	size_t freed = 0;
+	cache_type::iterator bitmap_it = cache.begin();
+	while (bitmap_it != cache.end()) {
+		cache_type::iterator current = bitmap_it++;
+		if (!current->second.bitmap) {
+			cache.erase(current);
+			continue;
+		}
+		if (current->second.bitmap.use_count() != 1)
+			continue;
+		cache.erase(current);
+		++freed;
+		if (freed >= budget)
+			break;
+	}
+
+	if (aggressive) {
+		cache_tiles_type::iterator tile_it = cache_tiles.begin();
+		while (tile_it != cache_tiles.end()) {
+			cache_tiles_type::iterator current = tile_it++;
+			if (current->second.expired())
+				cache_tiles.erase(current);
+		}
+	}
+
+	loads_since_cleanup = 0;
+	next_cleanup_tick = DisplayUi->GetTicks() + 2000;
 }
 
 void Cache::SetSystemName(std::string const& filename) {

@@ -76,3 +76,23 @@ RESOURCE LOCALISABLE_APP_INFO r_localisable_app_info
             icon_file = "";
         };
 }
+
+RESOURCE DIALOG r_easyrpg_loading_wait_note
+{
+    flags = EAknWaitNoteFlags;
+    buttons = R_AVKON_SOFTKEYS_EMPTY;
+    items =
+    {
+        DLG_LINE
+        {
+            type = EAknCtNote;
+            id = EGeneralNote;
+            control = AVKON_NOTE
+            {
+                layout = EWaitLayout;
+                singular_label = qtn_loading;
+                animation = R_QGN_GRAF_WAIT_BAR_ANIM;
+            };
+        }
+    };
+}

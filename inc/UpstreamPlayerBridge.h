@@ -23,6 +23,7 @@ int EasyRpgUpstreamPlayerTick(unsigned int ticks,
                               unsigned int keys_3,
                               int render_frame);
 int EasyRpgUpstreamPlayerShouldRender(void);
+int EasyRpgPlatformFreeRamBytes(void);
 int EasyRpgUpstreamPlayerDirtyRegionCount(void);
 int EasyRpgUpstreamPlayerDirtyRegion(int index,
                                      int* x,

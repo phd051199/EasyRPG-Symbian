@@ -1,4 +1,6 @@
 #include <f32file.h>
+#include <hal.h>
+#include <hal_data.h>
 
 #include "PlayerRuntime.h"
 #include "DisplaySurface.h"
@@ -143,6 +145,29 @@ TBool ResolveUpstreamKey(TUint32 aKey, TInt& aWord, TUint32& aMask)
     }
     return ETrue;
 }
+}
+
+extern "C" int EasyRpgPlatformFreeRamBytes(void)
+{
+    TInt biggestBlock = 0;
+    const TInt committedFree = User::Available(biggestBlock);
+    const RHeap& heap = User::Heap();
+    const TInt expandable = Max(0, heap.MaxLength() - heap.Size());
+    TInt heapFree = committedFree;
+    if (heapFree >= 0)
+    {
+        if (heapFree > KMaxTInt - expandable)
+            heapFree = KMaxTInt;
+        else
+            heapFree += expandable;
+    }
+    TInt systemFree = 0;
+    const TInt systemError = HAL::Get(HALData::EMemoryRAMFree, systemFree);
+    if (heapFree < 0)
+        return systemError == KErrNone && systemFree >= 0 ? systemFree : -1;
+    if (systemError != KErrNone || systemFree < 0)
+        return heapFree;
+    return Min(heapFree, systemFree);
 }
 
 extern "C" int EasyRpgResolveResource(const char* aDirectory,

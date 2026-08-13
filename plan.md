@@ -461,3 +461,49 @@ Output:
 ## 12. Licensing
 
 EasyRPG Player/liblcf code brought into this repository must retain the upstream license/notices and satisfy the applicable GPL source-distribution requirements. Keep upstream-derived code clearly separated from original Symbian platform adapters and document the exact upstream revision used.
+
+## 13. RGSS runtime branch
+
+The XP/VX/VX Ace runtime is isolated from the RPG Maker 2000/2003 player. It uses a separate C ABI bridge and a separate ARM static core so Ruby/RGSS memory, compatibility work, and failures cannot affect `EasyRPGGame.exe`.
+
+### RGSS foundation — IMPLEMENTED
+
+- [x] pure C ABI in `RgssCoreBridge.h`
+- [x] RGSS1/2/3 logical resolution profiles
+- [x] XP 640x480 logical space maps exactly to E72 320x240
+- [x] VX/VX Ace preserve aspect ratio inside the 320x240 output viewport
+- [x] RGB565 framebuffer contract
+- [x] logical point/dirty-rect mapping without a 640x480 post-scale framebuffer
+- [x] project detector for `Scripts.rxdata`, `Scripts.rvdata`, and `Scripts.rvdata2`
+- [x] host C++03 regression test
+- [x] separate `EasyRpgRgssCore.lib` build for ARMV5 UREL/UDEB
+- [x] VM host ABI for streaming file access, ticks, input, dirty regions, GC and heap reporting
+- [x] ZIP project-root detection for `Game.ini` plus RGSS1/2/3 script archives
+- [x] launcher metadata labels for XP, VX and VX Ace
+- [x] separate `EasyRPGRgss.exe` process and SIS packaging
+- [x] launcher dispatches XP/VX/VX Ace to `EasyRPGRgss.exe` and keeps 2000/2003 on `EasyRPGGame.exe`
+- [x] ARMV5 UREL full build and SIS packaging with the RGSS process
+- [x] ARMV5 UDEB full build and debug SIS packaging with the RGSS process
+- [x] dedicated RGSS RGB565 framebuffer, DSA presenter and dirty-region path
+- [x] dedicated RGSS window/event/focus/input lifecycle
+- [x] RGSS scheduler keeps XP logic at 40 Hz and RGSS2/3 logic at 60 Hz while presenting at 30 Hz
+- [x] logical-resolution RGSS Bitmap core with RGB565+A8 storage and scaled framebuffer blit
+- [x] native S60 Image Conversion decode from stored ZIP resources into RGSS Bitmap handles
+- [x] ARMV5 UREL/UDEB builds link `imageconversion.lib` and package the image path
+- [x] native RGSS Sprite registry with cached z-order, src rect, origin, zoom, mirror, opacity and blend modes
+- [x] 30 Hz native sprite compositor separated from 40/60 Hz VM logic
+- [x] RGSS ARM assembly normalization produces warning-free new core objects
+- [x] RGSS VM worker thread yields at `Graphics.update` while Window Server/DSA stays on the main thread
+- [x] XP 40 Hz and VX/VX Ace 60 Hz worker frames use a 30 Hz presentation accumulator without slowing game logic
+- [x] native RGSS Graphics frame-rate/frame-count/update/wait contract backed by worker frame sync
+- [x] native RGSS Viewport registry with clipping, origin translation, visibility and z propagation
+- [x] global allocation-free render registry merges renderables by effective z and creation order
+- [x] native RGSS Plane tiled compositor with zoom, origin scrolling, opacity, blend and viewport support
+- [x] native RGSS Table and Input state cores for future MRI bindings
+- [ ] vendor MRI source directly into `third_party`
+- [ ] boot MRI with a minimal embedded script on ARMV5
+- [ ] RGSS1 Marshal and `Scripts.rxdata` loading
+- [ ] RGSS1 native Graphics/Input/Audio bindings
+- [x] RGSS runtime input/framebuffer/dirty-region platform loop
+- [ ] RGSS2 compatibility layer
+- [ ] RGSS3 compatibility layer

@@ -42,6 +42,7 @@
 #include "filefinder.h"
 #include "player.h"
 #include "input.h"
+#include "UpstreamPlayerBridge.h"
 
 namespace {
 	RPG::SaveMapInfo& map_info = Main_Data::game_data.map_info;
@@ -137,9 +138,36 @@ namespace {
 			event_prev[next] = event_index;
 	}
 
-	void RebuildEventUpdateLists() {
+	template <typename T>
+	void TrimClearedVector(std::vector<T>& values, size_t desired_size, size_t minimum_capacity) {
+		if (!values.empty())
+			return;
+		const size_t retained_limit = std::max(minimum_capacity, desired_size * 2);
+		if (values.capacity() > retained_limit)
+			std::vector<T>().swap(values);
+	}
+
+	bool PrepareEventStorage(size_t event_count) {
+		const int free_ram = EasyRpgPlatformFreeRamBytes();
+		const bool trim_storage = free_ram >= 0 && free_ram < 24 * 1024 * 1024;
+		if (!trim_storage)
+			return false;
+		TrimClearedVector(events, event_count, 64);
+		TrimClearedVector(event_parallel_updates, event_count, 64);
+		TrimClearedVector(event_trigger_checks, event_count, 64);
+		TrimClearedVector(event_next, event_count, 64);
+		TrimClearedVector(event_prev, event_count, 64);
+		TrimClearedVector(pending, event_count + 4, 16);
+		return true;
+	}
+
+	void RebuildEventUpdateLists(bool trim_storage = false) {
 		event_parallel_updates.clear();
 		event_trigger_checks.clear();
+		if (trim_storage) {
+			TrimClearedVector(event_parallel_updates, events.size(), 64);
+			TrimClearedVector(event_trigger_checks, events.size(), 64);
+		}
 		event_parallel_updates.reserve(events.size());
 		event_trigger_checks.reserve(events.size());
 		for (Game_Event& event : events) {
@@ -152,7 +180,7 @@ namespace {
 		}
 	}
 
-	void RebuildEventSpatialIndex() {
+	void RebuildEventSpatialIndex(bool trim_storage = false) {
 		if (!map) {
 			event_cell_heads.clear();
 			event_next.clear();
@@ -160,12 +188,20 @@ namespace {
 			event_index_by_id.clear();
 			return;
 		}
-		event_cell_heads.assign(map->width * map->height, -1);
+		const size_t cell_count = static_cast<size_t>(map->width) * static_cast<size_t>(map->height);
+		if (trim_storage) {
+			TrimClearedVector(event_cell_heads, cell_count, 256);
+			TrimClearedVector(event_next, events.size(), 64);
+			TrimClearedVector(event_prev, events.size(), 64);
+		}
+		event_cell_heads.assign(cell_count, -1);
 		event_next.assign(events.size(), -1);
 		event_prev.assign(events.size(), -1);
 		int max_id = 0;
 		for (const Game_Event& event : events)
 			max_id = std::max(max_id, event.GetId());
+		if (trim_storage)
+			TrimClearedVector(event_index_by_id, static_cast<size_t>(max_id + 1), 64);
 		event_index_by_id.assign(max_id + 1, -1);
 		for (size_t index = 0; index < events.size(); ++index) {
 			Game_Event& event = events[index];
@@ -282,12 +318,13 @@ void Game_Map::Setup(int _id) {
 
 	SetChipset(map->chipset_id);
 
+	const bool trim_storage = PrepareEventStorage(map->events.size());
 	events.reserve(map->events.size());
 	for (const RPG::Event& ev : map->events) {
 		events.emplace_back(location.map_id, ev);
 	}
-	RebuildEventSpatialIndex();
-	RebuildEventUpdateLists();
+	RebuildEventSpatialIndex(trim_storage);
+	RebuildEventUpdateLists(trim_storage);
 
 	location.pan_state = 1;
 	location.pan_finish_x = pan_origin_x;
@@ -324,6 +361,7 @@ void Game_Map::SetupFromSave() {
 	// Make main interpreter "busy" if save contained events to prevent auto-events from starting
 	interpreter->SetupFromSave(Main_Data::game_data.events.commands, 0);
 
+	const bool trim_storage = PrepareEventStorage(map->events.size());
 	events.reserve(map->events.size());
 	for (size_t i = 0; i < map->events.size(); ++i) {
 		if (i < map_info.events.size()) {
@@ -336,8 +374,8 @@ void Game_Map::SetupFromSave() {
 		if (events.back().IsMoveRouteOverwritten())
 			pending.push_back(&events.back());
 	}
-	RebuildEventSpatialIndex();
-	RebuildEventUpdateLists();
+	RebuildEventSpatialIndex(trim_storage);
+	RebuildEventUpdateLists(trim_storage);
 
 	for (size_t i = 0; i < Main_Data::game_data.common_events.size() && i < common_events.size(); ++i) {
 		common_events[i].SetSaveData(Main_Data::game_data.common_events[i].event_data);

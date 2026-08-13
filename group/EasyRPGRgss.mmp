@@ -1,0 +1,47 @@
+TARGET            EasyRPGRgss.exe
+TARGETTYPE        exe
+UID               0x100039CE 0xE31EA5A3
+
+EPOCHEAPSIZE      0x100000 0x2000000
+EPOCSTACKSIZE     0x10000
+OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
+MACRO             EASYRPG_LAUNCHER_PROCESS
+
+SOURCEPATH        ..\src\platform\symbian
+SOURCE            RgssRuntimeMain.cpp
+SOURCE            RgssEngine.cpp
+SOURCE            RgssRuntime.cpp
+SOURCE            RgssVmWorker.cpp
+SOURCE            RgssDisplaySurface.cpp
+SOURCE            RgssImageLoader.cpp
+SOURCE            FrameTimer.cpp
+SOURCE            ZipVfs.cpp
+SOURCE            Encoding.cpp
+
+USERINCLUDE       ..\inc
+SYSTEMINCLUDE     \epoc32\include
+SYSTEMINCLUDE     \epoc32\include\stdapis
+SYSTEMINCLUDE     \epoc32\include\libc
+
+LIBRARY           euser.lib
+LIBRARY           apparc.lib
+LIBRARY           apgrfx.lib
+LIBRARY           fbscli.lib
+LIBRARY           bitgdi.lib
+LIBRARY           gdi.lib
+LIBRARY           hal.lib
+LIBRARY           efsrv.lib
+LIBRARY           charconv.lib
+LIBRARY           imageconversion.lib
+LIBRARY           ws32.lib
+STATICLIBRARY     EasyRpgRgssCore.lib
+
+LANG              SC
+
+VENDORID          0
+SECUREID          0xE31EA5A3
+CAPABILITY        None
+
+#ifdef ENABLE_ABIV2_MODE
+DEBUGGABLE_UDEBONLY
+#endif

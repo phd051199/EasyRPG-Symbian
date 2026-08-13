@@ -2445,6 +2445,8 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
 	bool show = com.parameters[6] > 0;
 
 	Game_Actor* actor = Game_Actors::GetActor(actor_id);
+	if (!actor || class_id <= 0 || class_id > static_cast<int>(Data::classes.size()))
+		return true;
 
 	int cur_lvl = actor->GetLevel();
 	int cur_exp = actor->GetExp();
@@ -2495,6 +2497,21 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
 	actor->SetBaseAgi(cur_agi);
 
 	int level = actor->GetLevel();
+	bool show_message = false;
+
+	if (show && level > cur_lvl) {
+		std::stringstream ss;
+		ss << actor->GetName() << " ";
+		if (Player::IsRPG2k3E()) {
+			ss << Data::terms.level_up << " ";
+			ss << Data::terms.level << " " << level;
+		} else {
+			ss << Data::terms.level << " " << level;
+			ss << Data::terms.level_up;
+		}
+		Game_Message::texts.push_back(ss.str());
+		show_message = true;
+	}
 
 	switch (skill_mode) {
 	case 0:
@@ -2511,16 +2528,22 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
 		std::vector<RPG::Learning>::const_iterator it;
 		for (it = klass.skills.begin(); it != klass.skills.end(); ++it) {
 			const RPG::Learning& learn = *it;
-			if (level >= learn.level)
-				actor->LearnSkill(learn.skill_id);
+			if (learn.skill_id > 0 && learn.skill_id <= static_cast<int>(Data::skills.size()) &&
+				level >= learn.level && actor->LearnSkill(learn.skill_id) && show) {
+				std::stringstream ss;
+				ss << Data::skills[learn.skill_id - 1].name;
+				ss << (Player::IsRPG2k3E() ? " " : "") << Data::terms.skill_learned;
+				Game_Message::texts.push_back(ss.str());
+				show_message = true;
+			}
 		}
 		break;
 	}
 	}
 
-	if (show && level > cur_lvl) {
-		// TODO
-		// Show message increase level
+	if (show_message) {
+		Game_Message::texts.back().append("\f");
+		Game_Message::message_waiting = true;
 	}
 
 	return true;

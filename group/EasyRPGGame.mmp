@@ -2,7 +2,7 @@ TARGET            EasyRPGGame.exe
 TARGETTYPE        exe
 UID               0x100039CE 0xE31EA5A2
 
-EPOCHEAPSIZE      0x100000 0x2800000
+EPOCHEAPSIZE      0x100000 0x2000000
 EPOCSTACKSIZE     0x10000
 OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
 
@@ -40,7 +40,6 @@ LIBRARY           libm.lib
 LIBRARY           libz.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
-LIBRARY           midiclient.lib
 LIBRARY           mediaclientvideo.lib
 LIBRARY           ws32.lib
 STATICLIBRARY     EasyRpgModernCore.lib

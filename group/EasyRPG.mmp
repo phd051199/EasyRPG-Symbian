@@ -48,6 +48,7 @@ LIBRARY           avkon.lib
 LIBRARY           bafl.lib
 LIBRARY           efsrv.lib
 LIBRARY           charconv.lib
+LIBRARY           form.lib
 
 LANG              SC
 

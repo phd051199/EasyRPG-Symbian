@@ -54,5 +54,9 @@
  bool Scene_Battle_Rpg2k3::CheckFlee() {
 --- a/src/scene_map.cpp
 +++ b/src/scene_map.cpp
-@@ -223,0 +224 @@
+@@ -39,0 +40 @@
++#include "cache.h"
+@@ -223,0 +225 @@
 +	spriteset.reset();
+@@ -229,0 +232 @@
++	Cache::TrimUnused();

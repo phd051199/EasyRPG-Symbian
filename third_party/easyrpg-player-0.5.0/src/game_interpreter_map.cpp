@@ -187,7 +187,6 @@ bool Game_Interpreter_Map::ExecuteCommand() {
 		case Cmd::ToggleAtbMode:
 			return CommandToggleAtbMode(com);
 		case Cmd::OpenVideoOptions:
-			Output::Warning("OpenVideoOptions: Command not supported");
 			return true;
 		default:
 			return Game_Interpreter::ExecuteCommand();

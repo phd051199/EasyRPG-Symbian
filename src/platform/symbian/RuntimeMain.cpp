@@ -1,6 +1,7 @@
 #include <apacmdln.h>
 #include <apgcli.h>
 #include <e32base.h>
+#include <f32file.h>
 #include <fbs.h>
 
 #include "RuntimeEngine.h"
@@ -19,8 +20,13 @@ void LaunchMainL()
     RApaLsSession session;
     User::LeaveIfError(session.Connect());
     CleanupClosePushL(session);
+    const TFileName currentExecutable = RProcess().FileName();
+    const TParsePtrC currentParse(currentExecutable);
+    TFileName launcherPath(currentParse.DriveAndPath());
+    launcherPath.Append(KEasyRpgExecutable);
+
     CApaCommandLine* commandLine = CApaCommandLine::NewLC();
-    commandLine->SetExecutableNameL(KEasyRpgExecutable);
+    commandLine->SetExecutableNameL(launcherPath);
     commandLine->SetCommandL(EApaCommandRun);
     User::LeaveIfError(session.StartApp(*commandLine));
     CleanupStack::PopAndDestroy(commandLine);
@@ -54,6 +60,8 @@ GLDEF_C TInt E32Main()
     if (!cleanup)
         return KErrNoMemory;
     TRAPD(error, RunRuntimeL());
+    if (error != KErrNone)
+        TRAP_IGNORE(LaunchMainL());
     delete cleanup;
     return error;
 }

@@ -1,5 +1,6 @@
 #include <aknappui.h>
 #include <aknlists.h>
+#include <aknnotewrappers.h>
 #include <coemain.h>
 #include <e32std.h>
 #include <eikclbd.h>
@@ -79,6 +80,7 @@ CLauncherView::~CLauncherView()
     iListItems = NULL;
     delete iArchivePaths;
     iArchivePaths = NULL;
+    iEngineVersions.Close();
     iFs.Close();
 }
 
@@ -86,6 +88,7 @@ void CLauncherView::BuildGameListL()
 {
     iListItems->Reset();
     iArchivePaths->Reset();
+    iEngineVersions.Reset();
 
     CDesCArrayFlat* displayNames = new (ELeave) CDesCArrayFlat(16);
     CleanupStack::PushL(displayNames);
@@ -96,8 +99,16 @@ void CLauncherView::BuildGameListL()
         TBuf<KMaxFileName> title;
         CopyListText((*displayNames)[index], title);
 
-        TInt version = 0;
-        TRAP_IGNORE(ReadGameMetadataL(iFs, (*iArchivePaths)[index], title, version));
+        TInt version = EGameEngineUnknown;
+        TRAP_IGNORE(version = DetectGameEngineL(iFs, (*iArchivePaths)[index]));
+        TInt metadataVersion = version;
+        TRAP_IGNORE(ReadGameMetadataL(iFs,
+                                      (*iArchivePaths)[index],
+                                      title,
+                                      metadataVersion));
+        if (metadataVersion != EGameEngineUnknown)
+            version = metadataVersion;
+        User::LeaveIfError(iEngineVersions.Append(version));
 
         TBuf<64> subtitle;
         FormatGameSubtitle(iFs, (*iArchivePaths)[index], version, subtitle);
@@ -119,12 +130,34 @@ void CLauncherView::BuildGameListL()
     iListBox->SetCurrentItemIndex(0);
 }
 
-void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath)
+void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion)
 {
+    const TInt KGamePathParameterSlot = 1;
+    _LIT(KEasyRpgRuntime, "EasyRPGGame.exe");
+    _LIT(KEasyRpgRgssRuntime, "EasyRPGRgss.exe");
+    const TDesC* executable = &KEasyRpgRuntime;
+    if (aVersion == EGameEngineRpgXp ||
+        aVersion == EGameEngineRpgVx ||
+        aVersion == EGameEngineRpgVxAce)
+        executable = &KEasyRpgRgssRuntime;
+    else if (aVersion != EGameEngineRpg2000 &&
+             aVersion != EGameEngineRpg2003)
+        User::Leave(KErrNotSupported);
+
+    const TFileName currentExecutable = RProcess().FileName();
+    const TParsePtrC currentParse(currentExecutable);
+    TFileName executablePath(currentParse.DriveAndPath());
+    executablePath.Append(*executable);
+
     RProcess process;
-    const TInt error = process.Create(_L("EasyRPGGame.exe"), aArchivePath);
-    if (error != KErrNone)
-        User::Leave(error);
+    User::LeaveIfError(process.Create(executablePath, KNullDesC));
+    const TInt parameterError = process.SetParameter(KGamePathParameterSlot, aArchivePath);
+    if (parameterError != KErrNone)
+    {
+        process.Kill(parameterError);
+        process.Close();
+        User::Leave(parameterError);
+    }
     process.Resume();
     process.Close();
 
@@ -137,9 +170,17 @@ void CLauncherView::PlaySelectedGameL()
     if (!iListBox || !iArchivePaths)
         return;
     const TInt index = iListBox->CurrentItemIndex();
-    if (index < 0 || index >= iArchivePaths->Count())
+    if (index < 0 || index >= iArchivePaths->Count() ||
+        index >= iEngineVersions.Count())
         return;
-    LaunchArchiveL((*iArchivePaths)[index]);
+    TRAPD(error, LaunchArchiveL((*iArchivePaths)[index], iEngineVersions[index]));
+    if (error != KErrNone)
+    {
+        TBuf<48> message;
+        message.Format(_L("Start failed (%d)"), error);
+        CAknErrorNote* note = new (ELeave) CAknErrorNote;
+        note->ExecuteLD(message);
+    }
 }
 
 void CLauncherView::UpdateLayout()
@@ -173,6 +214,15 @@ TKeyResponse CLauncherView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCod
 {
     if (!iListBox)
         return EKeyWasNotConsumed;
+    if (aType == EEventKey &&
+        (aKeyEvent.iScanCode == EStdKeyEnter ||
+         aKeyEvent.iScanCode == EStdKeyDevice3 ||
+         aKeyEvent.iCode == EKeyEnter ||
+         aKeyEvent.iCode == EKeyDevice3))
+    {
+        PlaySelectedGameL();
+        return EKeyWasConsumed;
+    }
     return iListBox->OfferKeyEventL(aKeyEvent, aType);
 }
 

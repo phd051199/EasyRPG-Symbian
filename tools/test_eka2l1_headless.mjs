@@ -612,7 +612,7 @@ async function main() {
                 return true;
             })()`, true);
             pushLog('app: sent OK to launch selected game');
-            const handoffDeadline = Date.now() + 3000;
+            const handoffDeadline = Date.now() + options.launchTimeout * 1000;
             while (Date.now() < handoffDeadline) {
                 const exit = await evaluate('EKA2L1.module && EKA2L1.lastAppExit ? EKA2L1.lastAppExit() : null');
                 if (exit) {
@@ -678,14 +678,21 @@ async function main() {
                 exit: EKA2L1.module && EKA2L1.lastAppExit ? EKA2L1.lastAppExit() : null
             })`);
             if (state.exit && appExitKey(state.exit) !== handoffExitKey) {
-                result.appExit = state.exit;
-                throw new Error(`App exited during test: ${JSON.stringify(state.exit)}`);
+                const cleanLauncherHandoff = (state.exit.uid >>> 0) === (options.uid >>> 0) && state.exit.type === 0 && state.exit.reason === 0;
+                if (cleanLauncherHandoff && !handoffExitKey) {
+                    handoffExitKey = appExitKey(state.exit);
+                    pushLog(`app: launcher handed off to runtime late, exit=${state.exit.reason}`);
+                } else {
+                    result.appExit = state.exit;
+                    throw new Error(`App exited during test: ${JSON.stringify(state.exit)}`);
+                }
             }
             await sleep(500);
         }
         const sampleEnd = Date.now();
         const redrawEnd = await evaluate('EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0');
         result.redrawFps = (redrawEnd - redrawStart) * 1000 / Math.max(1, sampleEnd - sampleStart);
+        if (handoffExitKey && redrawEnd <= redrawStart) throw new Error('Runtime produced no redraws after launcher handoff');
         pushLog(`app: redraw rate ${result.redrawFps.toFixed(2)} fps over ${((sampleEnd - sampleStart) / 1000).toFixed(1)}s`);
         const midiProbe = await evaluate(`(() => {
             const target = '/eka2l1/drives/c/data/easyrpg/audio/bgm.mid';
