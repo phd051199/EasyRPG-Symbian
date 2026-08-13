@@ -12,6 +12,8 @@
 namespace
 {
 _LIT(KRgssVmThreadName, "EasyRPG-RGSS-VM");
+const char* const KAudioExtensions[] = { ".ogg", ".mp3", ".wav", ".mid", ".midi", ".wma" };
+const TInt KAudioExtensionCount = sizeof(KAudioExtensions) / sizeof(KAudioExtensions[0]);
 
 void* ScriptAllocate(void*, unsigned int aBytes)
 {
@@ -68,6 +70,8 @@ CRgssVmWorker::CRgssVmWorker(TInt aVersion)
       iScriptFileSize(0),
       iScriptEntries(NULL),
       iScriptCount(0),
+      iAudioCommandCount(0),
+      iAudioCommandRead(0),
       iStopRequested(EFalse),
       iStartSignaled(EFalse),
       iVmInitialized(EFalse),
@@ -111,6 +115,8 @@ void CRgssVmWorker::StartL()
     iScriptFileSize = 0;
     iScriptEntries = NULL;
     iScriptCount = 0;
+    iAudioCommandCount = 0;
+    iAudioCommandRead = 0;
     iStopRequested = EFalse;
     iStartSignaled = EFalse;
     iVmInitialized = EFalse;
@@ -197,6 +203,23 @@ void CRgssVmWorker::SetInputWord(TInt aWord, TUint32 aValue)
     if (aWord < 0 || aWord >= 4)
         return;
     iInputWords[aWord] = aValue;
+}
+
+TBool CRgssVmWorker::TakeAudioCommand(TRgssAudioCommand& aCommand)
+{
+    if (iAudioCommandRead >= iAudioCommandCount)
+    {
+        iAudioCommandRead = 0;
+        iAudioCommandCount = 0;
+        return EFalse;
+    }
+    aCommand = iAudioCommands[iAudioCommandRead++];
+    if (iAudioCommandRead >= iAudioCommandCount)
+    {
+        iAudioCommandRead = 0;
+        iAudioCommandCount = 0;
+    }
+    return ETrue;
 }
 
 TBool CRgssVmWorker::Running() const
@@ -319,6 +342,7 @@ void CRgssVmWorker::RunVmL()
     host.script_inflate = &CRgssVmWorker::VmScriptInflate;
     host.release = &CRgssVmWorker::VmRelease;
     host.dirty = &CRgssVmWorker::VmDirty;
+    host.audio = &CRgssVmWorker::VmAudio;
 
     const TInt initResult = EasyRpgRgssVmInitialize(iVersion, &host);
     if (initResult != ERgssVmOk)
@@ -407,6 +431,9 @@ TInt CRgssVmWorker::CopyVmPath(const char* aSource, TDes& aTarget)
 
     TPtrC8 source(reinterpret_cast<const TUint8*>(aSource), length);
     TRAPD(error, TEncoding::Utf8ToUnicodeL(source, aTarget));
+    if (error == KErrNone)
+        return KErrNone;
+    TRAP(error, TEncoding::ShiftJisToUnicodeL(source, aTarget));
     return error;
 }
 
@@ -630,6 +657,98 @@ int CRgssVmWorker::VmFrameSync(void* aContext,
 
 void CRgssVmWorker::VmDirty(void*, int, int, int, int)
 {
+}
+
+int CRgssVmWorker::VmAudio(void* aContext,
+                           int aCommand,
+                           const char* aRelativePath,
+                           int aVolume,
+                           int aPitch,
+                           int aDuration)
+{
+    if (!aContext)
+        return ERgssVmErrorInvalidArgument;
+    return static_cast<CRgssVmWorker*>(aContext)->QueueAudioCommand(aCommand,
+                                                                    aRelativePath,
+                                                                    aVolume,
+                                                                    aPitch,
+                                                                    aDuration);
+}
+
+TInt CRgssVmWorker::QueueAudioCommand(TInt aCommand,
+                                      const char* aRelativePath,
+                                      TInt aVolume,
+                                      TInt aPitch,
+                                      TInt aDuration)
+{
+    if (aCommand < ERgssAudioBgmPlay || aCommand > ERgssAudioSeStop)
+        return ERgssVmErrorInvalidArgument;
+    const TBool play = aCommand == ERgssAudioBgmPlay ||
+                       aCommand == ERgssAudioBgsPlay ||
+                       aCommand == ERgssAudioMePlay ||
+                       aCommand == ERgssAudioSePlay;
+    if (play && (aVolume < 0 || aVolume > 100 || aPitch < 50 || aPitch > 200))
+        return ERgssVmErrorInvalidArgument;
+    if ((aCommand == ERgssAudioBgmFade ||
+         aCommand == ERgssAudioBgsFade ||
+         aCommand == ERgssAudioMeFade) && aDuration < 0)
+        return ERgssVmErrorInvalidArgument;
+    if (iAudioCommandCount >= 32)
+        return ERgssVmErrorRuntime;
+
+    TRgssAudioCommand& command = iAudioCommands[iAudioCommandCount];
+    command.iCommand = aCommand;
+    command.iVolume = aVolume;
+    command.iPitch = aPitch;
+    command.iDuration = aDuration;
+    command.iPath.Zero();
+    if (play)
+    {
+        const TInt pathError = ResolveAudioPath(aRelativePath, command.iPath);
+        if (pathError != KErrNone)
+            return pathError == KErrNotFound ? ERgssVmErrorFile : ERgssVmErrorInvalidArgument;
+    }
+    ++iAudioCommandCount;
+    return ERgssVmOk;
+}
+
+TInt CRgssVmWorker::ResolveAudioPath(const char* aRelativePath, TDes8& aResolved) const
+{
+    if (!aRelativePath || !aRelativePath[0])
+        return KErrArgument;
+    const TInt length = User::StringLength(reinterpret_cast<const TUint8*>(aRelativePath));
+    if (length <= 0 || length > aResolved.MaxLength())
+        return KErrArgument;
+
+    TFileName path;
+    TInt error = CopyVmPath(aRelativePath, path);
+    if (error != KErrNone)
+        return error;
+    if (iResources && iResources->Exists(path))
+    {
+        aResolved.Copy(TPtrC8(reinterpret_cast<const TUint8*>(aRelativePath), length));
+        return KErrNone;
+    }
+
+    for (TInt index = 0; index < KAudioExtensionCount; ++index)
+    {
+        const char* extension = KAudioExtensions[index];
+        const TInt extensionLength = User::StringLength(reinterpret_cast<const TUint8*>(extension));
+        if (length + extensionLength > aResolved.MaxLength())
+            continue;
+        TFileName candidate;
+        candidate.Copy(path);
+        if (candidate.Length() + extensionLength > candidate.MaxLength())
+            continue;
+        for (TInt offset = 0; offset < extensionLength; ++offset)
+            candidate.Append(static_cast<TUint16>(extension[offset]));
+        if (!iResources || !iResources->Exists(candidate))
+            continue;
+        aResolved.Copy(TPtrC8(reinterpret_cast<const TUint8*>(aRelativePath), length));
+        aResolved.Append(TPtrC8(reinterpret_cast<const TUint8*>(extension), extensionLength));
+        return KErrNone;
+    }
+    return KErrNotFound;
 }
 
 TInt CRgssVmWorker::FileSize(const char* aRelativePath) const

@@ -182,19 +182,24 @@ private:
 	uint32_t symbian_revision = 1;
 	bool symbian_has_animated_ab = false;
 	bool symbian_has_animated_c = false;
-	int symbian_recorded_animation_step_ab = -1;
-	int symbian_recorded_animation_step_c = -1;
-	BitmapRef symbian_scroll_cache;
-	uint32_t symbian_scroll_cache_revision = 0;
-	int symbian_scroll_cache_ox = 0;
-	int symbian_scroll_cache_oy = 0;
-	int symbian_scroll_cache_animation_step_ab = -1;
-	int symbian_scroll_cache_animation_step_c = -1;
+	struct SymbianScrollCacheState {
+		BitmapRef bitmap;
+		uint32_t revision = 0;
+		int ox = 0;
+		int oy = 0;
+		int animation_step_ab = -1;
+		int animation_step_c = -1;
+		int recorded_animation_step_ab = -1;
+		int recorded_animation_step_c = -1;
+	};
+	SymbianScrollCacheState symbian_scroll_caches[2];
 	void SymbianTouch();
 	void SymbianScrollTouch();
+	int SymbianScrollCacheIndex(int z_order) const;
 	bool SymbianUseScrollCache(int z_order) const;
+	bool SymbianScrollCacheValid(int z_order, int display_width, int display_height) const;
 	bool SymbianPrepareScrollCache(int z_order, int display_width, int display_height);
-	void SymbianShiftScrollCache(int shift_x, int shift_y);
+	void SymbianShiftScrollCache(int z_order, int shift_x, int shift_y);
 	void SymbianRefreshScrollCacheRect(int z_order, const Rect& rect);
 	unsigned int SymbianSignature(int z_order) const;
 #endif

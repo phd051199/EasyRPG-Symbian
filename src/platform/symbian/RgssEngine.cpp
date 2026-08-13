@@ -196,7 +196,6 @@ void CRgssEngine::ConstructL()
 
     iForeground = iWs.GetFocusWindowGroup() == iWindowGroup->Identifier();
     iRuntime = CRgssRuntime::NewL(iGamePath);
-    iRuntime->StartVmL();
     iEventPump = CRgssWindowEventPump::NewL(iWs, *this);
     iFrameTimer = CFrameTimer::NewL(*this);
 }
@@ -234,6 +233,7 @@ CRgssEngine::~CRgssEngine()
 
 void CRgssEngine::RunL()
 {
+    iRuntime->StartVmL();
     StartDirectScreenL();
     iFrameTimer->Start();
     if (iFrameError != KErrNone)

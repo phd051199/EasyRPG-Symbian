@@ -638,6 +638,18 @@ int main()
     TFiles aceFiles = {aceNames, 2};
     assert(EasyRpgRgssDetectProject(FileExists, &aceFiles) == ERgssVersion3);
 
+    const char* packedXpNames[] = {"Game.ini", "Game.rgssad"};
+    TFiles packedXpFiles = {packedXpNames, 2};
+    assert(EasyRpgRgssDetectProject(FileExists, &packedXpFiles) == ERgssVersion1);
+
+    const char* packedVxNames[] = {"Game.ini", "Game.rgss2a"};
+    TFiles packedVxFiles = {packedVxNames, 2};
+    assert(EasyRpgRgssDetectProject(FileExists, &packedVxFiles) == ERgssVersion2);
+
+    const char* packedAceNames[] = {"Game.ini", "Game.rgss3a"};
+    TFiles packedAceFiles = {packedAceNames, 2};
+    assert(EasyRpgRgssDetectProject(FileExists, &packedAceFiles) == ERgssVersion3);
+
     const char* ambiguousNames[] = {"Data/Scripts.rxdata", "Data/Scripts.rvdata"};
     TFiles ambiguousFiles = {ambiguousNames, 2};
     assert(EasyRpgRgssDetectProject(FileExists, &ambiguousFiles) == ERgssErrorAmbiguousProject);

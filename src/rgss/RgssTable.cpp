@@ -10,6 +10,7 @@ struct TTableSlot
     int y_size;
     int z_size;
     int count;
+    unsigned int revision;
     unsigned short generation;
     unsigned char used;
 };
@@ -83,6 +84,7 @@ void ResetSlot(TTableSlot& slot)
     slot.y_size = 0;
     slot.z_size = 0;
     slot.count = 0;
+    slot.revision = 0;
     slot.used = 0;
 }
 
@@ -194,6 +196,7 @@ extern "C" int EasyRpgRgssTableCreate(int dimensions,
     slot.y_size = normalizedY;
     slot.z_size = normalizedZ;
     slot.count = count;
+    slot.revision = 1;
     slot.generation = generation;
     slot.used = 1;
     ++gTables.active_count;
@@ -269,7 +272,14 @@ extern "C" int EasyRpgRgssTableSet(int handle,
     int index = 0;
     if (!IndexOf(*slot, x, y, z, index))
         return ERgssTableErrorOutOfBounds;
-    slot->data[index] = static_cast<short>(value);
+    const short next = static_cast<short>(value);
+    if (slot->data[index] != next)
+    {
+        slot->data[index] = next;
+        ++slot->revision;
+        if (slot->revision == 0)
+            slot->revision = 1;
+    }
     return ERgssTableOk;
 }
 
@@ -320,6 +330,9 @@ extern "C" int EasyRpgRgssTableResize(int handle,
     slot->y_size = normalizedY;
     slot->z_size = normalizedZ;
     slot->count = count;
+    ++slot->revision;
+    if (slot->revision == 0)
+        slot->revision = 1;
     return ERgssTableOk;
 }
 
@@ -348,7 +361,16 @@ extern "C" int EasyRpgRgssTableLoadRaw(int handle,
         return ERgssTableErrorInvalidArgument;
     for (int index = 0; index < count; ++index)
         slot->data[index] = data[index];
+    ++slot->revision;
+    if (slot->revision == 0)
+        slot->revision = 1;
     return ERgssTableOk;
+}
+
+extern "C" unsigned int EasyRpgRgssTableRevision(int handle)
+{
+    TTableSlot* slot = FindSlot(handle);
+    return slot ? slot->revision : 0;
 }
 
 extern "C" int EasyRpgRgssTableCount(void)

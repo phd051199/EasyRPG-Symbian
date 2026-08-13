@@ -100,11 +100,21 @@ void DecodeArchiveNameL(const TDesC8& aRawName,
                 }
             }
 
-            TInt utf8Error = KErrCorrupt;
-            if (hasNonAscii)
+            if (!hasNonAscii)
+            {
+                if (aRawName.Length() > aDestination.MaxLength())
+                    User::Leave(KErrOverflow);
+                aDestination.Zero();
+                for (TInt index = 0; index < aRawName.Length(); ++index)
+                    aDestination.Append(static_cast<TUint16>(aRawName[index]));
+            }
+            else
+            {
+                TInt utf8Error = KErrCorrupt;
                 TRAP(utf8Error, TEncoding::Utf8ToUnicodeL(aRawName, aDestination));
-            if (!hasNonAscii || utf8Error != KErrNone)
-                TEncoding::ShiftJisToUnicodeL(aRawName, aDestination);
+                if (utf8Error != KErrNone)
+                    TEncoding::ShiftJisToUnicodeL(aRawName, aDestination);
+            }
         }
     }
 }
@@ -318,6 +328,9 @@ void CZipVfs::ResolveProjectRootL()
     _LIT(KXpScriptsName, "Data/Scripts.rxdata");
     _LIT(KVxScriptsName, "Data/Scripts.rvdata");
     _LIT(KVxaScriptsName, "Data/Scripts.rvdata2");
+    _LIT(KXpArchiveName, "Game.rgssad");
+    _LIT(KVxArchiveName, "Game.rgss2a");
+    _LIT(KVxaArchiveName, "Game.rgss3a");
 
     TInt index = 0;
     for (index = 0; index < iEntries.Count(); ++index)
@@ -380,6 +393,24 @@ void CZipVfs::ResolveProjectRootL()
         {
             scriptsPath.Copy(*prefix);
             scriptsPath.Append(KVxaScriptsName);
+            found = FindFullPath(scriptsPath) != NULL;
+        }
+        if (!found)
+        {
+            scriptsPath.Copy(*prefix);
+            scriptsPath.Append(KXpArchiveName);
+            found = FindFullPath(scriptsPath) != NULL;
+        }
+        if (!found)
+        {
+            scriptsPath.Copy(*prefix);
+            scriptsPath.Append(KVxArchiveName);
+            found = FindFullPath(scriptsPath) != NULL;
+        }
+        if (!found)
+        {
+            scriptsPath.Copy(*prefix);
+            scriptsPath.Append(KVxaArchiveName);
             found = FindFullPath(scriptsPath) != NULL;
         }
 

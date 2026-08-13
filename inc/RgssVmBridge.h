@@ -33,6 +33,21 @@ enum EasyRpgRgssVmResult
     ERgssVmErrorRuntime = -25
 };
 
+enum EasyRpgRgssAudioCommand
+{
+    ERgssAudioBgmPlay = 1,
+    ERgssAudioBgmStop,
+    ERgssAudioBgmFade,
+    ERgssAudioBgsPlay,
+    ERgssAudioBgsStop,
+    ERgssAudioBgsFade,
+    ERgssAudioMePlay,
+    ERgssAudioMeStop,
+    ERgssAudioMeFade,
+    ERgssAudioSePlay,
+    ERgssAudioSeStop
+};
+
 typedef int (*EasyRpgRgssVmFileSizeFn)(void* context,
                                        const char* relative_path);
 typedef int (*EasyRpgRgssVmFileReadFn)(void* context,
@@ -73,6 +88,12 @@ typedef void (*EasyRpgRgssVmDirtyFn)(void* context,
                                      int y,
                                      int width,
                                      int height);
+typedef int (*EasyRpgRgssVmAudioFn)(void* context,
+                                    int command,
+                                    const char* relative_path,
+                                    int volume,
+                                    int pitch,
+                                    int duration);
 
 typedef struct EasyRpgRgssVmHost
 {
@@ -90,6 +111,7 @@ typedef struct EasyRpgRgssVmHost
     EasyRpgRgssVmScriptInflateFn script_inflate;
     EasyRpgRgssVmReleaseFn release;
     EasyRpgRgssVmDirtyFn dirty;
+    EasyRpgRgssVmAudioFn audio;
 } EasyRpgRgssVmHost;
 
 int EasyRpgRgssVmAvailable(void);

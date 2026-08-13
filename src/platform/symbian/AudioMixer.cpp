@@ -849,7 +849,10 @@ void CAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
     {
         iReady = EFalse;
         iLastError = aError;
+        return;
     }
+    if (aError == KErrNone && !iShuttingDown)
+        QueueOutputBuffers();
 }
 
 void CAudioMixer::MaoscPlayComplete(TInt aError)
@@ -859,6 +862,7 @@ void CAudioMixer::MaoscPlayComplete(TInt aError)
     if (aError == KErrNone || aError == KErrUnderflow)
     {
         ResetOutputQueue();
+        QueueOutputBuffers();
     }
     else if (aError != KErrAbort)
     {

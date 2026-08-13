@@ -42,9 +42,9 @@ void RunRgssL()
     User::LeaveIfError(RFbsSession::Connect());
     CleanupStack::PushL(TCleanupItem(DisconnectFbs, NULL));
 
+    RProcess::Rendezvous(KErrNone);
     CRgssEngine* engine = CRgssEngine::NewL();
     CleanupStack::PushL(engine);
-    RProcess::Rendezvous(KErrNone);
     engine->RunL();
     CleanupStack::PopAndDestroy(engine);
 

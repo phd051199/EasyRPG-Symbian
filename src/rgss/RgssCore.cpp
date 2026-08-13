@@ -130,17 +130,20 @@ extern "C" int EasyRpgRgssDetectProject(EasyRpgRgssFileExistsFn exists_fn,
     int version = ERgssVersionUnknown;
     int matches = 0;
 
-    if (exists_fn(context, "Data/Scripts.rxdata"))
+    if (exists_fn(context, "Data/Scripts.rxdata") ||
+        exists_fn(context, "Game.rgssad"))
     {
         version = ERgssVersion1;
         ++matches;
     }
-    if (exists_fn(context, "Data/Scripts.rvdata"))
+    if (exists_fn(context, "Data/Scripts.rvdata") ||
+        exists_fn(context, "Game.rgss2a"))
     {
         version = ERgssVersion2;
         ++matches;
     }
-    if (exists_fn(context, "Data/Scripts.rvdata2"))
+    if (exists_fn(context, "Data/Scripts.rvdata2") ||
+        exists_fn(context, "Game.rgss3a"))
     {
         version = ERgssVersion3;
         ++matches;

@@ -1,9 +1,11 @@
 #include "RgssBitmapBridge.h"
+#include "RgssBootstrap.h"
 #include "RgssGraphicsBridge.h"
 #include "RgssInputBridge.h"
 #include "RgssPlaneBridge.h"
 #include "RgssSpriteBridge.h"
 #include "RgssTableBridge.h"
+#include "RgssTilemapBridge.h"
 #include "RgssViewportBridge.h"
 #include "RgssVmBridge.h"
 
@@ -17,7 +19,8 @@ enum THandleType
     EHandleSprite,
     EHandleViewport,
     EHandlePlane,
-    EHandleTable
+    EHandleTable,
+    EHandleTilemap
 };
 
 struct THandleToken
@@ -48,6 +51,7 @@ void ResetHost()
     gHost.script_inflate = 0;
     gHost.release = 0;
     gHost.dirty = 0;
+    gHost.audio = 0;
     gVersion = 0;
     gInitialized = 0;
     gNativeModule = Qnil;
@@ -74,6 +78,9 @@ void DestroyNativeHandle(THandleToken* token)
         break;
     case EHandleTable:
         EasyRpgRgssTableDestroy(token->handle);
+        break;
+    case EHandleTilemap:
+        EasyRpgRgssTilemapDestroy(token->handle);
         break;
     default:
         break;
@@ -343,7 +350,7 @@ VALUE NBitmapGetPixel(VALUE, VALUE token, VALUE x, VALUE y)
 
 VALUE NBitmapBlt(int argc, VALUE* argv, VALUE)
 {
-    if (argc != 10)
+    if (argc != 9)
         rb_raise(rb_eArgError, "wrong number of arguments");
     EasyRpgRgssRect source;
     source.x = NUM2INT(argv[4]);
@@ -419,7 +426,7 @@ VALUE NBitmapTextSize(int argc, VALUE* argv, VALUE)
 
 VALUE NBitmapDrawText(int argc, VALUE* argv, VALUE)
 {
-    if (argc != 16)
+    if (argc != 15)
         rb_raise(rb_eArgError, "wrong number of arguments");
     EasyRpgRgssRect rect;
     rect.x = NUM2INT(argv[1]);
@@ -827,6 +834,84 @@ VALUE NTableLoad(VALUE, VALUE packed)
     return NewHandle(EHandleTable, handle);
 }
 
+VALUE NTilemapCreate(VALUE, VALUE viewport)
+{
+    int handle = 0;
+    const int result = EasyRpgRgssTilemapCreate(OptionalHandle(viewport, EHandleViewport), &handle);
+    return result == ERgssTilemapOk ? NewHandle(EHandleTilemap, handle) : RaiseResult("Tilemap.new", result);
+}
+
+VALUE NTilemapSetViewport(VALUE, VALUE token, VALUE viewport)
+{
+    const int result = EasyRpgRgssTilemapSetViewport(Handle(token, EHandleTilemap), OptionalHandle(viewport, EHandleViewport));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.viewport=", result);
+}
+
+VALUE NTilemapSetTileset(VALUE, VALUE token, VALUE bitmap)
+{
+    const int result = EasyRpgRgssTilemapSetTileset(Handle(token, EHandleTilemap), OptionalHandle(bitmap, EHandleBitmap));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.tileset=", result);
+}
+
+VALUE NTilemapSetAutotile(VALUE, VALUE token, VALUE index, VALUE bitmap)
+{
+    const int result = EasyRpgRgssTilemapSetAutotile(Handle(token, EHandleTilemap), NUM2INT(index), OptionalHandle(bitmap, EHandleBitmap));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.autotiles[]=", result);
+}
+
+VALUE NTilemapSetMapData(VALUE, VALUE token, VALUE table)
+{
+    const int result = EasyRpgRgssTilemapSetMapData(Handle(token, EHandleTilemap), OptionalHandle(table, EHandleTable));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.map_data=", result);
+}
+
+VALUE NTilemapSetFlashData(VALUE, VALUE token, VALUE table)
+{
+    const int result = EasyRpgRgssTilemapSetFlashData(Handle(token, EHandleTilemap), OptionalHandle(table, EHandleTable));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.flash_data=", result);
+}
+
+VALUE NTilemapSetPriorities(VALUE, VALUE token, VALUE table)
+{
+    const int result = EasyRpgRgssTilemapSetPriorities(Handle(token, EHandleTilemap), OptionalHandle(table, EHandleTable));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.priorities=", result);
+}
+
+VALUE NTilemapSetOrigin(VALUE, VALUE token, VALUE x, VALUE y)
+{
+    const int result = EasyRpgRgssTilemapSetOrigin(Handle(token, EHandleTilemap), NUM2INT(x), NUM2INT(y));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.origin", result);
+}
+
+VALUE NTilemapSetVisible(VALUE, VALUE token, VALUE visible)
+{
+    const int result = EasyRpgRgssTilemapSetVisible(Handle(token, EHandleTilemap), RTEST(visible) ? 1 : 0);
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.visible=", result);
+}
+
+VALUE NTilemapUpdate(VALUE, VALUE token)
+{
+    const int result = EasyRpgRgssTilemapUpdate(Handle(token, EHandleTilemap));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.update", result);
+}
+
+VALUE NAudioCommand(VALUE, VALUE command, VALUE path, VALUE volume, VALUE pitch, VALUE duration)
+{
+    const char* audioPath = 0;
+    if (!NIL_P(path))
+    {
+        StringValue(path);
+        audioPath = RSTRING_PTR(path);
+    }
+    const int result = gHost.audio(gHost.context,
+                                   NUM2INT(command),
+                                   audioPath,
+                                   NUM2INT(volume),
+                                   NUM2INT(pitch),
+                                   NUM2INT(duration));
+    return result == ERgssVmOk ? Qnil : RaiseResult("Audio", result);
+}
+
 void DefineNativeMethod(const char* name, VALUE (*method)(ANYARGS), int arity)
 {
     rb_define_module_function(gNativeModule, name, method, arity);
@@ -901,9 +986,18 @@ void BindNative()
     DefineNativeMethod("table_resize", RUBY_METHOD_FUNC(NTableResize), -1);
     DefineNativeMethod("table_dump", RUBY_METHOD_FUNC(NTableDump), 1);
     DefineNativeMethod("table_load", RUBY_METHOD_FUNC(NTableLoad), 1);
+    DefineNativeMethod("tilemap_create", RUBY_METHOD_FUNC(NTilemapCreate), 1);
+    DefineNativeMethod("tilemap_set_viewport", RUBY_METHOD_FUNC(NTilemapSetViewport), 2);
+    DefineNativeMethod("tilemap_set_tileset", RUBY_METHOD_FUNC(NTilemapSetTileset), 2);
+    DefineNativeMethod("tilemap_set_autotile", RUBY_METHOD_FUNC(NTilemapSetAutotile), 3);
+    DefineNativeMethod("tilemap_set_map_data", RUBY_METHOD_FUNC(NTilemapSetMapData), 2);
+    DefineNativeMethod("tilemap_set_flash_data", RUBY_METHOD_FUNC(NTilemapSetFlashData), 2);
+    DefineNativeMethod("tilemap_set_priorities", RUBY_METHOD_FUNC(NTilemapSetPriorities), 2);
+    DefineNativeMethod("tilemap_set_origin", RUBY_METHOD_FUNC(NTilemapSetOrigin), 3);
+    DefineNativeMethod("tilemap_set_visible", RUBY_METHOD_FUNC(NTilemapSetVisible), 2);
+    DefineNativeMethod("tilemap_update", RUBY_METHOD_FUNC(NTilemapUpdate), 1);
+    DefineNativeMethod("audio_command", RUBY_METHOD_FUNC(NAudioCommand), 5);
 }
-
-extern const char KEasyRpgRgssBootstrap[];
 
 int EvalProtected(const char* source)
 {
@@ -925,7 +1019,8 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
         !host->file_size || !host->file_read || !host->ticks ||
         !host->input || !host->bitmap_load || !host->text_decode ||
         !host->frame_sync || !host->script_count || !host->script_info ||
-        !host->script_name || !host->script_inflate || !host->release || !host->dirty)
+        !host->script_name || !host->script_inflate || !host->release ||
+        !host->dirty || !host->audio)
         return ERgssVmErrorInvalidArgument;
     if (gInitialized)
         return ERgssVmErrorRuntime;

@@ -296,7 +296,8 @@ void Player::Update(bool update_scene) {
 #endif
 
 #ifdef EASYRPG_SYMBIAN
-	Graphics::Update(EasyRpgUpstreamPlayerShouldRender() != 0);
+	const bool symbian_render_frame = EasyRpgUpstreamPlayerShouldRender() != 0;
+	Scene* const symbian_scene_before_update = Scene::instance.get();
 #elif defined(EMSCRIPTEN)
 	// Ticks in emscripten are unreliable due to how the main loop works:
 	// This function is only called 60 times per second instead of theoretical
@@ -350,6 +351,10 @@ void Player::Update(bool update_scene) {
 	if (update_scene) {
 		Scene::instance->Update();
 	}
+#ifdef EASYRPG_SYMBIAN
+	if (Scene::instance.get() == symbian_scene_before_update)
+		Graphics::Update(symbian_render_frame);
+#endif
 
 #ifndef EASYRPG_SYMBIAN
 	start_time = next_frame;

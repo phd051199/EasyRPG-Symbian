@@ -79,8 +79,6 @@
 #define RETSIGTYPE void
 #define HAVE_ALLOCA 1
 #define alloca __builtin_alloca
-#define HAVE_FSEEKO 1
-#define HAVE_FTELLO 1
 #define HAVE_DUP2 1
 #define HAVE_MEMMOVE 1
 #define HAVE_STRCASECMP 1
@@ -101,14 +99,11 @@
 #define HAVE_FSYNC 1
 #define HAVE_GETCWD 1
 #define HAVE_FTRUNCATE 1
-#define HAVE_TIMES 1
 #define HAVE_FCNTL 1
 #define HAVE_LSTAT 1
 #define HAVE_GETPGRP 1
 #define HAVE_GETGROUPS 1
 #define HAVE_SYSCONF 1
-#define HAVE_SIGPROCMASK 1
-#define HAVE_SIGACTION 1
 #define HAVE_MKTIME 1
 #define HAVE_GETTIMEOFDAY 1
 #define HAVE_COSH 1

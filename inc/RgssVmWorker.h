@@ -8,6 +8,15 @@ class CZipVfs;
 class CRgssGlyphCache;
 struct EasyRpgRgssScriptEntry;
 
+struct TRgssAudioCommand
+{
+    TInt iCommand;
+    TInt iVolume;
+    TInt iPitch;
+    TInt iDuration;
+    TBuf8<256> iPath;
+};
+
 class CRgssVmWorker : public CBase
 {
 public:
@@ -19,6 +28,7 @@ public:
     TBool TakeFrame(TInt& aFrameRate, TInt& aFrameCount);
     void ResumeFrame();
     void SetInputWord(TInt aWord, TUint32 aValue);
+    TBool TakeAudioCommand(TRgssAudioCommand& aCommand);
     TBool Running() const;
     TInt ExitResult() const;
     TInt FrameRate() const;
@@ -78,6 +88,18 @@ private:
                         int aY,
                         int aWidth,
                         int aHeight);
+    static int VmAudio(void* aContext,
+                       int aCommand,
+                       const char* aRelativePath,
+                       int aVolume,
+                       int aPitch,
+                       int aDuration);
+    TInt QueueAudioCommand(TInt aCommand,
+                           const char* aRelativePath,
+                           TInt aVolume,
+                           TInt aPitch,
+                           TInt aDuration);
+    TInt ResolveAudioPath(const char* aRelativePath, TDes8& aResolved) const;
     TInt FileSize(const char* aRelativePath) const;
     TInt ReadFile(const char* aRelativePath,
                   TInt aOffset,
@@ -103,6 +125,9 @@ private:
     EasyRpgRgssScriptEntry* iScriptEntries;
     TInt iScriptCount;
     volatile TUint32 iInputWords[4];
+    TRgssAudioCommand iAudioCommands[32];
+    volatile TInt iAudioCommandCount;
+    TInt iAudioCommandRead;
     volatile TBool iStopRequested;
     volatile TBool iStartSignaled;
     volatile TBool iVmInitialized;

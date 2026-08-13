@@ -6,6 +6,30 @@ namespace
 const TInt KMaxMetadataLdbSize = 4 * 1024 * 1024;
 _LIT8(KLcfDatabaseHeader, "LcfDataBase");
 
+TInt DetectEngine(CZipVfs& aResources)
+{
+    const TBool hasLdb = aResources.Exists(_L("RPG_RT.ldb"));
+    const TBool hasLmt = aResources.Exists(_L("RPG_RT.lmt"));
+    const TBool hasXp = aResources.Exists(_L("Data/Scripts.rxdata")) ||
+                        aResources.Exists(_L("Game.rgssad"));
+    const TBool hasVx = aResources.Exists(_L("Data/Scripts.rvdata")) ||
+                        aResources.Exists(_L("Game.rgss2a"));
+    const TBool hasVxa = aResources.Exists(_L("Data/Scripts.rvdata2")) ||
+                         aResources.Exists(_L("Game.rgss3a"));
+    const TInt rgssMatches = static_cast<TInt>(hasXp) +
+                             static_cast<TInt>(hasVx) +
+                             static_cast<TInt>(hasVxa);
+    if (rgssMatches > 1 || (hasLdb && hasLmt && rgssMatches != 0))
+        return EGameEngineUnknown;
+    if (hasXp)
+        return EGameEngineRpgXp;
+    if (hasVx)
+        return EGameEngineRpgVx;
+    if (hasVxa)
+        return EGameEngineRpgVxAce;
+    return hasLdb && hasLmt ? EGameEngineRpg2000 : EGameEngineUnknown;
+}
+
 void CopyListText(const TDesC& aSource, TDes& aTarget)
 {
     aTarget.Copy(aSource.Left(aTarget.MaxLength()));
@@ -64,29 +88,6 @@ TInt DetectSystemEngine(const TDesC8& aBytes, TInt aStart, TInt aEnd)
         position = fieldEnd;
     }
     return 2000;
-}
-
-TInt DetectEngineSignature(const CZipVfs& aResources)
-{
-    const TBool hasLdb = aResources.Exists(_L("RPG_RT.ldb"));
-    const TBool hasLmt = aResources.Exists(_L("RPG_RT.lmt"));
-    const TBool hasXp = aResources.Exists(_L("Data/Scripts.rxdata"));
-    const TBool hasVx = aResources.Exists(_L("Data/Scripts.rvdata"));
-    const TBool hasVxa = aResources.Exists(_L("Data/Scripts.rvdata2"));
-    const TInt rgssMatches = static_cast<TInt>(hasXp) +
-                             static_cast<TInt>(hasVx) +
-                             static_cast<TInt>(hasVxa);
-    if (rgssMatches > 1 || ((hasLdb && hasLmt) && rgssMatches != 0))
-        return EGameEngineUnknown;
-    if (hasXp)
-        return EGameEngineRpgXp;
-    if (hasVx)
-        return EGameEngineRpgVx;
-    if (hasVxa)
-        return EGameEngineRpgVxAce;
-    if (hasLdb && hasLmt)
-        return EGameEngineRpg2000;
-    return EGameEngineUnknown;
 }
 
 TInt DetectRpgMakerVersionL(CZipVfs& aResources)
@@ -181,7 +182,7 @@ void ReadGameMetadataL(RFs& aFs,
 {
     CZipVfs* resources = CZipVfs::OpenL(aFs, aArchivePath);
     CleanupStack::PushL(resources);
-    aVersion = DetectEngineSignature(*resources);
+    aVersion = DetectEngine(*resources);
     if (aVersion == EGameEngineRpg2000)
         TRAP_IGNORE(aVersion = DetectRpgMakerVersionL(*resources));
     TRAP_IGNORE(ReadGameTitleL(*resources, aVersion, aTitle));

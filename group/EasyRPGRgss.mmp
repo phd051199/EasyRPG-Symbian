@@ -6,6 +6,7 @@ EPOCHEAPSIZE      0x100000 0x2000000
 EPOCSTACKSIZE     0x10000
 OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
 MACRO             EASYRPG_LAUNCHER_PROCESS
+MACRO             EASYRPG_RGSS_PROCESS
 
 SOURCEPATH        ..\src\platform\symbian
 SOURCE            RgssRuntimeMain.cpp
@@ -16,10 +17,20 @@ SOURCE            RgssGlyphCache.cpp
 SOURCE            RgssDisplaySurface.cpp
 SOURCE            RgssImageLoader.cpp
 SOURCE            FrameTimer.cpp
+SOURCE            AudioMixer.cpp
+SOURCE            AudioBridge.cpp
 SOURCE            ZipVfs.cpp
 SOURCE            Encoding.cpp
+SOURCE            Dirent.cpp
+
+SOURCEPATH        ..\src\rgss
+SOURCE            RgssVmMri.cpp
+SOURCE            RgssBootstrap.cpp
+SOURCE            RgssMriCompat.cpp
 
 USERINCLUDE       ..\inc
+USERINCLUDE       ..\src\rgss\mri
+USERINCLUDE       ..\build\vendor\ruby-1.8.7-p374
 SYSTEMINCLUDE     \epoc32\include
 SYSTEMINCLUDE     \epoc32\include\stdapis
 SYSTEMINCLUDE     \epoc32\include\libc
@@ -32,11 +43,17 @@ LIBRARY           bitgdi.lib
 LIBRARY           gdi.lib
 LIBRARY           hal.lib
 LIBRARY           efsrv.lib
+LIBRARY           bafl.lib
 LIBRARY           charconv.lib
 LIBRARY           imageconversion.lib
+LIBRARY           libc.lib
+LIBRARY           libm.lib
 LIBRARY           libz.lib
+LIBRARY           mediaclientaudio.lib
+LIBRARY           mediaclientaudiostream.lib
 LIBRARY           ws32.lib
 STATICLIBRARY     EasyRpgRgssCore.lib
+STATICLIBRARY     EasyRpgRuby187.lib
 
 LANG              SC
 

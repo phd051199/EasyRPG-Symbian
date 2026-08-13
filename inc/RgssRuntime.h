@@ -28,6 +28,7 @@ private:
     CRgssRuntime();
     void ConstructL(const TDesC& aGamePath);
     TInt DetectVersion() const;
+    void ProcessAudioCommands();
     static void* BitmapAllocate(void* aContext, unsigned int aBytes);
     static void BitmapRelease(void* aContext, void* aMemory);
 

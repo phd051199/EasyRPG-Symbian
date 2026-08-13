@@ -19,6 +19,7 @@ ARCHIVER="$CSL_BIN/arm-none-symbianelf-ar.exe"
 NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
 BUILD_DIR="$PROJECT_DIR/build/rgss-core/$SDK_CFG"
 SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
+LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/libcxx_compat"
 LIBRARY="$BUILD_DIR/EasyRpgRgssCore.lib"
 WIN_BUILD_DIR="C:\\work\\EasyRPG\\build\\rgss-core\\$SDK_CFG"
 WIN_LIBRARY="$WIN_BUILD_DIR\\EasyRpgRgssCore.lib"
@@ -33,7 +34,10 @@ SOURCES=(
     "$PROJECT_DIR/src/rgss/RgssSprite.cpp"
     "$PROJECT_DIR/src/rgss/RgssViewport.cpp"
     "$PROJECT_DIR/src/rgss/RgssTable.cpp"
-    "$PROJECT_DIR/src/rgss/RgssVmStub.cpp"
+    "$PROJECT_DIR/src/rgss/RgssTilemap.cpp"
+    "$PROJECT_DIR/src/rgss/RgssOutputCompat.cpp"
+    "$PROJECT_DIR/src/core/MidiLite.cpp"
+    "$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src/midisequencer.cpp"
     "$PROJECT_DIR/src/core/GohuFontData.cpp"
     "$PROJECT_DIR/src/core/Aeabi.cpp"
 )
@@ -86,6 +90,13 @@ for source in "${SOURCES[@]}"; do
     assembly="$BUILD_DIR/${name}.gcce.s"
     win_assembly="$WIN_BUILD_DIR\\${name}.gcce.s"
     win_object="$WIN_BUILD_DIR\\${name}.o"
+    standard_flag=-std=c++03
+    extra_flags=
+    if [[ $source == "$PROJECT_DIR/src/core/MidiLite.cpp" ||
+          $source == "$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src/midisequencer.cpp" ]]; then
+        standard_flag=-std=c++11
+        extra_flags="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -DWANT_FMMIDI=1 -D_LIBCPP_HAS_NO_THREADS -include $PROJECT_DIR/inc/UpstreamCompat.h -nostdinc++ -I $LIBCXX_COMPAT_INCLUDE -I $PROJECT_DIR/third_party/libcxx-4.0.1/include -I $PROJECT_DIR/inc/libc_compat -I $PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src"
+    fi
 
     "$CLANGXX" \
         --target=arm-none-eabi \
@@ -93,7 +104,8 @@ for source in "${SOURCES[@]}"; do
         -mfloat-abi=soft \
         -fshort-wchar \
         -xc++ \
-        -std=c++03 \
+        "$standard_flag" \
+        $extra_flags \
         -O3 \
         -DNDEBUG \
         -fomit-frame-pointer \
@@ -191,11 +203,15 @@ for required_symbol in \
     EasyRpgRgssTableCreate \
     EasyRpgRgssTableResize \
     EasyRpgRgssTableShutdown \
-    EasyRpgRgssVmAvailable \
-    EasyRpgRgssVmInitialize \
-    EasyRpgRgssVmLoadScripts \
-    EasyRpgRgssVmTick \
-    EasyRpgRgssVmShutdown; do
+    EasyRpgRgssTilemapInitialize \
+    EasyRpgRgssTilemapCreate \
+    EasyRpgRgssTilemapSetTileset \
+    EasyRpgRgssTilemapSetMapData \
+    EasyRpgRgssTilemapUpdate \
+    EasyRpgRgssTilemapShutdown \
+    EasyRpgMidiLiteCreate \
+    EasyRpgMidiLiteRender \
+    EasyRpgMidiLiteDestroy; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "RGSS core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2

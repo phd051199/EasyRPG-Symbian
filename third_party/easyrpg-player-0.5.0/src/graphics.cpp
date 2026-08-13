@@ -118,7 +118,9 @@ void Graphics::Update(bool time_left) {
 
 		if (fps == 0) {
 			Output::Debug("Framerate is 0 FPS!");
+#ifndef EASYRPG_SYMBIAN
 			DrawFrame();
+#endif
 		}
 
 		fps = 0;

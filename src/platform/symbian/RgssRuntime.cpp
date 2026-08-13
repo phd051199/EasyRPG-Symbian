@@ -1,12 +1,15 @@
+#include "RgssRuntime.h"
+#include "AudioBridge.h"
+#include "DirentBridge.h"
 #include "RgssBitmapBridge.h"
 #include "RgssCoreBridge.h"
 #include "RgssDisplaySurface.h"
 #include "RgssInputBridge.h"
 #include "RgssPlaneBridge.h"
 #include "RgssRenderBridge.h"
-#include "RgssRuntime.h"
 #include "RgssSpriteBridge.h"
 #include "RgssTableBridge.h"
+#include "RgssTilemapBridge.h"
 #include "RgssViewportBridge.h"
 #include "RgssVmWorker.h"
 #include "ZipVfs.h"
@@ -40,6 +43,8 @@ void CRgssRuntime::ConstructL(const TDesC& aGamePath)
 
     User::LeaveIfError(iFs.Connect());
     iResources = CZipVfs::OpenL(iFs, iGamePath);
+    _LIT(KRgssVirtualRoot, "C:\\Data\\EasyRPG\\RGSS\\");
+    EasyRpgSetVirtualProject(iResources, KRgssVirtualRoot);
     iVersion = DetectVersion();
     if (iVersion == ERgssVersionUnknown)
         User::Leave(KErrNotSupported);
@@ -133,6 +138,23 @@ void CRgssRuntime::ConstructL(const TDesC& aGamePath)
         User::Leave(tableResult == ERgssTableErrorNoMemory ? KErrNoMemory : KErrGeneral);
     }
 
+    EasyRpgRgssTilemapHost tilemapHost;
+    tilemapHost.context = this;
+    tilemapHost.allocate = &CRgssRuntime::BitmapAllocate;
+    tilemapHost.release = &CRgssRuntime::BitmapRelease;
+    tilemapHost.max_tilemaps = 8;
+    const TInt tilemapResult = EasyRpgRgssTilemapInitialize(&tilemapHost);
+    if (tilemapResult != ERgssTilemapOk)
+    {
+        EasyRpgRgssTableShutdown();
+        EasyRpgRgssSpriteShutdown();
+        EasyRpgRgssPlaneShutdown();
+        EasyRpgRgssViewportShutdown();
+        EasyRpgRgssRenderShutdown();
+        EasyRpgRgssBitmapShutdown();
+        User::Leave(tilemapResult == ERgssTilemapErrorNoMemory ? KErrNoMemory : KErrGeneral);
+    }
+
     iSurface = CRgssDisplaySurface::NewL(TSize(config.output_width, config.output_height));
 }
 
@@ -143,6 +165,9 @@ CRgssRuntime::~CRgssRuntime()
     delete iVmWorker;
     iVmWorker = NULL;
     iVmStarted = EFalse;
+    EasyRpgAudioShutdown();
+    EasyRpgClearVirtualProject();
+    EasyRpgRgssTilemapShutdown();
     EasyRpgRgssTableShutdown();
     EasyRpgRgssSpriteShutdown();
     EasyRpgRgssPlaneShutdown();
@@ -162,9 +187,12 @@ TInt CRgssRuntime::DetectVersion() const
     if (!iResources)
         return ERgssVersionUnknown;
 
-    const TBool xp = iResources->Exists(_L("Data/Scripts.rxdata"));
-    const TBool vx = iResources->Exists(_L("Data/Scripts.rvdata"));
-    const TBool vxa = iResources->Exists(_L("Data/Scripts.rvdata2"));
+    const TBool xp = iResources->Exists(_L("Data/Scripts.rxdata")) ||
+                     iResources->Exists(_L("Game.rgssad"));
+    const TBool vx = iResources->Exists(_L("Data/Scripts.rvdata")) ||
+                     iResources->Exists(_L("Game.rgss2a"));
+    const TBool vxa = iResources->Exists(_L("Data/Scripts.rvdata2")) ||
+                      iResources->Exists(_L("Game.rgss3a"));
     const TInt matches = static_cast<TInt>(xp) +
                          static_cast<TInt>(vx) +
                          static_cast<TInt>(vxa);
@@ -231,6 +259,9 @@ TBool CRgssRuntime::AdvanceVmFrameL(TBool aCompose)
     if (frameRate > 0)
         iLogicFps = Min(frameRate, 60);
 
+    ProcessAudioCommands();
+    EasyRpgAudioUpdate();
+
     TInt composeError = KErrNone;
     if (aCompose)
         TRAP(composeError, ComposeL());
@@ -263,6 +294,62 @@ void CRgssRuntime::ComposeL()
     if (renderResult != ERgssRenderOk)
         User::Leave(KErrGeneral);
     iSurface->MarkFullDirty();
+}
+
+void CRgssRuntime::ProcessAudioCommands()
+{
+    if (!iVmWorker)
+        return;
+    TRgssAudioCommand command;
+    while (iVmWorker->TakeAudioCommand(command))
+    {
+        TBuf8<257> path;
+        const char* audioPath = NULL;
+        if (command.iPath.Length() > 0)
+        {
+            path.Copy(command.iPath);
+            path.Append(0);
+            audioPath = reinterpret_cast<const char*>(path.Ptr());
+        }
+        switch (command.iCommand)
+        {
+        case ERgssAudioBgmPlay:
+            EasyRpgAudioPlayBgm(audioPath, command.iVolume, command.iPitch, 0);
+            break;
+        case ERgssAudioBgmStop:
+            EasyRpgAudioStopBgm();
+            break;
+        case ERgssAudioBgmFade:
+            EasyRpgAudioFadeBgm(command.iDuration);
+            break;
+        case ERgssAudioBgsPlay:
+            EasyRpgAudioPlayBgs(audioPath, command.iVolume, command.iPitch);
+            break;
+        case ERgssAudioBgsStop:
+            EasyRpgAudioStopBgs();
+            break;
+        case ERgssAudioBgsFade:
+            EasyRpgAudioFadeBgs(command.iDuration);
+            break;
+        case ERgssAudioMePlay:
+            EasyRpgAudioPlayMe(audioPath, command.iVolume, command.iPitch);
+            break;
+        case ERgssAudioMeStop:
+            EasyRpgAudioStopMe();
+            break;
+        case ERgssAudioMeFade:
+            EasyRpgAudioFadeMe(command.iDuration);
+            break;
+        case ERgssAudioSePlay:
+            EasyRpgAudioPlaySe(audioPath, command.iVolume, command.iPitch);
+            break;
+        case ERgssAudioSeStop:
+            EasyRpgAudioStopSe();
+            break;
+        default:
+            break;
+        }
+    }
 }
 
 void CRgssRuntime::SetInputWord(TInt aWord, TUint32 aValue)

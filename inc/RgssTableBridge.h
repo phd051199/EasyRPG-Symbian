@@ -60,6 +60,7 @@ int EasyRpgRgssTableLock(int handle,
 int EasyRpgRgssTableLoadRaw(int handle,
                             const short* data,
                             int count);
+unsigned int EasyRpgRgssTableRevision(int handle);
 int EasyRpgRgssTableCount(void);
 
 #ifdef __cplusplus
