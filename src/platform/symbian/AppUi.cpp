@@ -2,84 +2,46 @@
 #include <avkon.hrh>
 #include <eikbtgpc.h>
 #include <eikspane.h>
-#include <w32std.h>
-#include "App.hrh"
-#include "GameView.h"
-#include "AppUi.h"
 
-CEasyRpgAppUi::CEasyRpgAppUi() : iGameView(NULL) {}
+#include "App.hrh"
+#include "AppUi.h"
+#include "LauncherView.h"
+
+CEasyRpgAppUi::CEasyRpgAppUi()
+    : iLauncherView(NULL)
+{
+}
 
 void CEasyRpgAppUi::ConstructL()
 {
     BaseConstructL(CAknAppUi::EAknEnableSkin);
     SetFullScreenApp(EFalse);
-    if (StatusPane()) StatusPane()->MakeVisible(ETrue);
-    if (Cba()) Cba()->MakeVisible(ETrue);
-    iGameView = CGameView::NewL(ClientRect());
-    AddToStackL(iGameView);
+    if (StatusPane())
+        StatusPane()->MakeVisible(ETrue);
+    if (Cba())
+        Cba()->MakeVisible(ETrue);
+
+    iLauncherView = CLauncherView::NewL(ClientRect());
+    AddToStackL(iLauncherView);
 }
 
 CEasyRpgAppUi::~CEasyRpgAppUi()
 {
-    if (iGameView)
+    if (iLauncherView)
     {
-        RemoveFromStack(iGameView);
-        delete iGameView;
-        iGameView = NULL;
+        RemoveFromStack(iLauncherView);
+        delete iLauncherView;
+        iLauncherView = NULL;
     }
-}
-
-void CEasyRpgAppUi::EnterGameFullscreen()
-{
-    SetFullScreenApp(ETrue);
-    if (StatusPane()) StatusPane()->MakeVisible(EFalse);
-    if (Cba()) Cba()->MakeVisible(EFalse);
-}
-
-void CEasyRpgAppUi::ExitGameFullscreen()
-{
-    SetFullScreenApp(EFalse);
-    if (StatusPane()) StatusPane()->MakeVisible(ETrue);
-    if (Cba()) Cba()->MakeVisible(ETrue);
-}
-
-void CEasyRpgAppUi::HandleWsEventL(const TWsEvent& aEvent, CCoeControl* aDestination)
-{
-    if (iGameView && iGameView->IsGameRunning())
-    {
-        const TInt type = aEvent.Type();
-        if (type == EEventKeyDown || type == EEventKey || type == EEventKeyUp)
-        {
-            const TKeyEvent* keyEvent = aEvent.Key();
-            if (keyEvent &&
-                iGameView->HandleKeyEventL(*keyEvent, static_cast<TEventCode>(type)) == EKeyWasConsumed)
-                return;
-        }
-    }
-    CAknAppUi::HandleWsEventL(aEvent, aDestination);
 }
 
 void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 {
-    if (iGameView && iGameView->IsGameRunning())
-    {
-        if (aCommand == EAknSoftkeyOptions)
-        {
-            iGameView->HandleLeftSoftkeyL();
-            return;
-        }
-        if (aCommand == EAknSoftkeyExit)
-        {
-            iGameView->HandleRightSoftkeyL();
-            return;
-        }
-    }
-
     switch (aCommand)
     {
     case EEasyRpgCmdLauncherPlay:
-        if (iGameView)
-            iGameView->PlaySelectedGameL();
+        if (iLauncherView)
+            iLauncherView->PlaySelectedGameL();
         break;
     case EEasyRpgCmdLauncherAbout:
         {
@@ -98,11 +60,6 @@ void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
 
 void CEasyRpgAppUi::HandleStatusPaneSizeChange()
 {
-    if (iGameView) iGameView->UpdateLayout();
-}
-
-void CEasyRpgAppUi::HandleForegroundEventL(TBool aForeground)
-{
-    CAknAppUi::HandleForegroundEventL(aForeground);
-    if (iGameView) iGameView->SetForeground(aForeground);
+    if (iLauncherView)
+        iLauncherView->UpdateLayout();
 }

@@ -33,22 +33,22 @@ TBool RectsEqual(const TRect& aFirst, const TRect& aSecond)
         aFirst.iBr.iY == aSecond.iBr.iY;
 }
 
-void RemoveDirtyRegion(TRect* aRegions, TInt& aRegionCount, TInt aIndex)
+void RemoveDirtyRegion(TEasyRpgDirtyRegionSlot* aRegions, TInt& aRegionCount, TInt aIndex)
 {
     for (TInt index = aIndex + 1; index < aRegionCount; ++index)
-        aRegions[index - 1] = aRegions[index];
+        aRegions[index - 1].iRect = aRegions[index].iRect;
     --aRegionCount;
 }
 
-TInt DirtyRegionArea(const TRect* aRegions, TInt aRegionCount)
+TInt DirtyRegionArea(const TEasyRpgDirtyRegionSlot* aRegions, TInt aRegionCount)
 {
     TInt area = 0;
     for (TInt index = 0; index < aRegionCount; ++index)
-        area += RectArea(aRegions[index]);
+        area += RectArea(aRegions[index].iRect);
     return area;
 }
 
-void OptimizeDirtyRegions(TRect* aRegions, TInt& aRegionCount, const TRect& aFrameRect)
+void OptimizeDirtyRegions(TEasyRpgDirtyRegionSlot* aRegions, TInt& aRegionCount, const TRect& aFrameRect)
 {
     if (aRegionCount <= 0)
         return;
@@ -62,9 +62,9 @@ void OptimizeDirtyRegions(TRect* aRegions, TInt& aRegionCount, const TRect& aFra
         {
             for (TInt second = first + 1; second < aRegionCount; ++second)
             {
-                const TRect merged = UnionRects(aRegions[first], aRegions[second]);
+                const TRect merged = UnionRects(aRegions[first].iRect, aRegions[second].iRect);
                 const TInt increase = RectArea(merged) -
-                    RectArea(aRegions[first]) - RectArea(aRegions[second]);
+                    RectArea(aRegions[first].iRect) - RectArea(aRegions[second].iRect);
                 if (increase < selectedIncrease)
                 {
                     selectedFirst = first;
@@ -73,13 +73,13 @@ void OptimizeDirtyRegions(TRect* aRegions, TInt& aRegionCount, const TRect& aFra
                 }
             }
         }
-        aRegions[selectedFirst] = UnionRects(aRegions[selectedFirst], aRegions[selectedSecond]);
+        aRegions[selectedFirst].iRect = UnionRects(aRegions[selectedFirst].iRect, aRegions[selectedSecond].iRect);
         RemoveDirtyRegion(aRegions, aRegionCount, selectedSecond);
     }
 
-    TRect combined = aRegions[0];
+    TRect combined = aRegions[0].iRect;
     for (TInt index = 1; index < aRegionCount; ++index)
-        combined = UnionRects(combined, aRegions[index]);
+        combined = UnionRects(combined, aRegions[index].iRect);
 
     const TInt frameArea = RectArea(aFrameRect);
     const TInt fixedRegionCost = frameArea / KDirtyRegionFixedCostDivisor;
@@ -87,43 +87,17 @@ void OptimizeDirtyRegions(TRect* aRegions, TInt& aRegionCount, const TRect& aFra
         Max(0, aRegionCount - 1) * fixedRegionCost;
     if (RectArea(combined) <= separateCost)
     {
-        aRegions[0] = combined;
+        aRegions[0].iRect = combined;
         aRegionCount = 1;
     }
 
     if (DirtyRegionArea(aRegions, aRegionCount) * 100 > frameArea * KFullRedrawAreaPercent)
     {
-        aRegions[0] = aFrameRect;
+        aRegions[0].iRect = aFrameRect;
         aRegionCount = 1;
     }
 }
 
-void CopyRegion(const unsigned short* aSource,
-                TInt aSourceStridePixels,
-                TUint8* aDestination,
-                TInt aDestinationStride,
-                const TRect& aRegion)
-{
-    const TInt rowBytes = (aRegion.iBr.iX - aRegion.iTl.iX) * static_cast<TInt>(sizeof(unsigned short));
-    const TInt height = aRegion.iBr.iY - aRegion.iTl.iY;
-    if (aRegion.iTl.iX == 0 &&
-        rowBytes == aSourceStridePixels * static_cast<TInt>(sizeof(unsigned short)) &&
-        rowBytes == aDestinationStride)
-    {
-        Mem::Copy(aDestination + aRegion.iTl.iY * aDestinationStride,
-                  aSource + aRegion.iTl.iY * aSourceStridePixels,
-                  rowBytes * height);
-        return;
-    }
-
-    for (TInt y = aRegion.iTl.iY; y < aRegion.iBr.iY; ++y)
-    {
-        Mem::Copy(aDestination + y * aDestinationStride +
-                      aRegion.iTl.iX * static_cast<TInt>(sizeof(unsigned short)),
-                  aSource + y * aSourceStridePixels + aRegion.iTl.iX,
-                  rowBytes);
-    }
-}
 }
 
 CDisplaySurface* CDisplaySurface::NewL(const TSize& aSize)
@@ -137,6 +111,7 @@ CDisplaySurface* CDisplaySurface::NewL(const TSize& aSize)
 
 CDisplaySurface::CDisplaySurface()
     : iBitmap(NULL),
+      iBitmapLocked(EFalse),
       iSize(0, 0),
       iHasFrame(EFalse),
       iDirtyRegionCount(0)
@@ -156,6 +131,7 @@ void CDisplaySurface::ConstructL(const TSize& aSize)
 
 CDisplaySurface::~CDisplaySurface()
 {
+    EndRender();
     delete iBitmap;
     iBitmap = NULL;
 }
@@ -187,7 +163,7 @@ TInt CDisplaySurface::DirtyRegionCount() const
 
 const TRect& CDisplaySurface::DirtyRegion(TInt aIndex) const
 {
-    return iDirtyRegions[aIndex];
+    return iDirtyRegions[aIndex].iRect;
 }
 
 void CDisplaySurface::ClearDirtyRegions()
@@ -197,34 +173,44 @@ void CDisplaySurface::ClearDirtyRegions()
 
 void CDisplaySurface::ClearL()
 {
-    if (!iBitmap)
-        User::Leave(KErrNotReady);
-
-    iBitmap->LockHeap();
-    TUint8* destination = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
-    if (!destination)
-    {
-        iBitmap->UnlockHeap();
-        User::Leave(KErrNoMemory);
-    }
-
-    Mem::FillZ(destination, iBitmap->DataStride() * iSize.iHeight);
-    iBitmap->UnlockHeap();
+    TUint16* destination = BeginRenderL();
+    Mem::FillZ(destination, RenderStrideBytes() * iSize.iHeight);
+    EndRender();
     iHasFrame = EFalse;
     iDirtyRegionCount = 0;
+}
+
+TUint16* CDisplaySurface::BeginRenderL()
+{
+    if (!iBitmap || iBitmapLocked)
+        User::Leave(KErrNotReady);
+    iBitmap->LockHeap();
+    iBitmapLocked = ETrue;
+    TUint16* pixels = reinterpret_cast<TUint16*>(iBitmap->DataAddress());
+    if (!pixels)
+    {
+        EndRender();
+        User::Leave(KErrNoMemory);
+    }
+    return pixels;
+}
+
+void CDisplaySurface::EndRender()
+{
+    if (!iBitmap || !iBitmapLocked)
+        return;
+    iBitmap->UnlockHeap();
+    iBitmapLocked = EFalse;
+}
+
+TInt CDisplaySurface::RenderStrideBytes() const
+{
+    return iBitmap ? iBitmap->DataStride() : 0;
 }
 
 void CDisplaySurface::PresentL()
 {
     if (!iBitmap)
-        User::Leave(KErrNotReady);
-
-    const unsigned short* source = EasyRpgUpstreamPlayerPixels();
-    const TInt sourceWidth = EasyRpgUpstreamPlayerWidth();
-    const TInt sourceHeight = EasyRpgUpstreamPlayerHeight();
-    const TInt sourceStridePixels = EasyRpgUpstreamPlayerPitchPixels();
-    if (!source || sourceWidth != iSize.iWidth || sourceHeight != iSize.iHeight ||
-        sourceStridePixels < iSize.iWidth)
         User::Leave(KErrNotReady);
 
     const TInt coreDirtyCount = EasyRpgUpstreamPlayerDirtyRegionCount();
@@ -234,22 +220,13 @@ void CDisplaySurface::PresentL()
         return;
     }
 
-    iBitmap->LockHeap();
-    TUint8* destination = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
-    if (!destination)
-    {
-        iBitmap->UnlockHeap();
-        User::Leave(KErrNoMemory);
-    }
-
-    const TInt destinationStride = iBitmap->DataStride();
     const TRect frameRect(TPoint(0, 0), iSize);
-    TRect currentDirty[KDirtyRegionCapacity];
+    TEasyRpgDirtyRegionSlot currentDirty[KDirtyRegionCapacity];
     TInt currentDirtyCount = 0;
 
     if (!iHasFrame)
     {
-        currentDirty[0] = frameRect;
+        currentDirty[0].iRect = frameRect;
         currentDirtyCount = 1;
     }
     else if (coreDirtyCount >= 0 && coreDirtyCount <= KDirtyRegionCapacity)
@@ -272,7 +249,7 @@ void CDisplaySurface::PresentL()
             const TInt right = Min(iSize.iWidth, x + width);
             const TInt bottom = Min(iSize.iHeight, y + height);
             if (right > left && bottom > top)
-                currentDirty[currentDirtyCount++] = TRect(left, top, right, bottom);
+                currentDirty[currentDirtyCount++].iRect = TRect(left, top, right, bottom);
         }
 
         if (coreDirtyValid)
@@ -281,52 +258,48 @@ void CDisplaySurface::PresentL()
         }
         else
         {
-            currentDirty[0] = frameRect;
+            currentDirty[0].iRect = frameRect;
             currentDirtyCount = 1;
         }
     }
     else if (coreDirtyCount > KDirtyRegionCapacity)
     {
-        currentDirty[0] = frameRect;
+        currentDirty[0].iRect = frameRect;
         currentDirtyCount = 1;
     }
     else
     {
-        currentDirty[0] = frameRect;
+        currentDirty[0].iRect = frameRect;
         currentDirtyCount = 1;
     }
-
-    for (TInt index = 0; index < currentDirtyCount; ++index)
-        CopyRegion(source, sourceStridePixels, destination, destinationStride, currentDirty[index]);
 
     if (coreDirtyCount >= 0)
         EasyRpgUpstreamPlayerConsumeDirtyRegions();
 
-    iBitmap->UnlockHeap();
     iHasFrame = ETrue;
 
     if (currentDirtyCount <= 0)
         return;
 
-    if (currentDirtyCount == 1 && RectsEqual(currentDirty[0], frameRect))
+    if (currentDirtyCount == 1 && RectsEqual(currentDirty[0].iRect, frameRect))
     {
-        iDirtyRegions[0] = frameRect;
+        iDirtyRegions[0].iRect = frameRect;
         iDirtyRegionCount = 1;
         return;
     }
 
-    if (iDirtyRegionCount == 1 && RectsEqual(iDirtyRegions[0], frameRect))
+    if (iDirtyRegionCount == 1 && RectsEqual(iDirtyRegions[0].iRect, frameRect))
         return;
 
     for (TInt index = 0; index < currentDirtyCount; ++index)
     {
         if (iDirtyRegionCount >= KDirtyRegionCapacity)
         {
-            iDirtyRegions[0] = frameRect;
+            iDirtyRegions[0].iRect = frameRect;
             iDirtyRegionCount = 1;
             return;
         }
-        iDirtyRegions[iDirtyRegionCount++] = currentDirty[index];
+        iDirtyRegions[iDirtyRegionCount++].iRect = currentDirty[index].iRect;
     }
     OptimizeDirtyRegions(iDirtyRegions, iDirtyRegionCount, frameRect);
 }

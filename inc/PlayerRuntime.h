@@ -33,8 +33,7 @@ public:
         EKeyMultiply = 0x00100000,
         EKeyDivide = 0x00200000,
         EKeyPeriod = 0x00400000,
-        EKeyDebug = 0x00800000,
-        EKeyScreenshot = 0x01000000
+        EKeyDebug = 0x00800000
     };
 
     static CPlayerRuntime* NewL(CZipVfs* aResources,

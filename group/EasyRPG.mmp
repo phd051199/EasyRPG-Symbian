@@ -2,28 +2,21 @@ TARGET            EasyRPG.exe
 TARGETTYPE        exe
 UID               0x100039CE 0xE31EA5A1
 
-EPOCHEAPSIZE      0x100000 0x2800000
+EPOCHEAPSIZE      0x40000 0x00800000
 EPOCSTACKSIZE     0x10000
 OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
+MACRO             EASYRPG_LAUNCHER_PROCESS
 
 SOURCEPATH        ..\src\platform\symbian
 SOURCE            Main.cpp
 SOURCE            Application.cpp
 SOURCE            Document.cpp
 SOURCE            AppUi.cpp
-SOURCE            FrameTimer.cpp
-SOURCE            DisplaySurface.cpp
-SOURCE            PerfOverlay.cpp
-SOURCE            AudioMixer.cpp
-SOURCE            AudioBridge.cpp
-SOURCE            MovieBridge.cpp
+SOURCE            LauncherView.cpp
 SOURCE            GameLocator.cpp
+SOURCE            GameMetadata.cpp
 SOURCE            ZipVfs.cpp
-SOURCE            LcfProbe.cpp
 SOURCE            Encoding.cpp
-SOURCE            Dirent.cpp
-SOURCE            PlayerRuntime.cpp
-SOURCE            GameView.cpp
 
 SOURCEPATH        ..\platform\symbian\resources
 
@@ -46,25 +39,15 @@ SYSTEMINCLUDE     \epoc32\include\libc
 
 LIBRARY           euser.lib
 LIBRARY           apparc.lib
+LIBRARY           apgrfx.lib
 LIBRARY           cone.lib
-LIBRARY           fbscli.lib
-LIBRARY           gdi.lib
-LIBRARY           hal.lib
 LIBRARY           eikcore.lib
 LIBRARY           eikcoctl.lib
 LIBRARY           eikctl.lib
 LIBRARY           avkon.lib
 LIBRARY           bafl.lib
 LIBRARY           efsrv.lib
-LIBRARY           libc.lib
-LIBRARY           libm.lib
-LIBRARY           libz.lib
-LIBRARY           mediaclientaudio.lib
-LIBRARY           mediaclientaudiostream.lib
-LIBRARY           midiclient.lib
-LIBRARY           mediaclientvideo.lib
-LIBRARY           ws32.lib
-STATICLIBRARY     EasyRpgModernCore.lib
+LIBRARY           charconv.lib
 
 LANG              SC
 

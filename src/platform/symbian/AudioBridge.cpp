@@ -651,6 +651,7 @@ void PlayNativeSampledBgmL(const TDesC& aPath, TInt aVolume, TInt aPitch, TInt a
     EnsureNativeBgmL();
     if (EasyRpgIsVirtualPath(aPath))
     {
+        gNativeBgm->Stop();
         TFileName tempPath;
         BuildTempAudioPathL(aPath, _L("bgm"), tempPath);
         CopyAudioFileL(aPath, tempPath);
@@ -667,6 +668,7 @@ void PlayNativeMidiBgmL(const TDesC& aPath, TInt aVolume, TInt aPitch, TInt aFad
     EnsureNativeBgmL();
     if (EasyRpgIsVirtualPath(aPath))
     {
+        gNativeBgm->Stop();
         TFileName tempPath;
         BuildTempAudioPathL(aPath, _L("bgm"), tempPath);
         CopyAudioFileL(aPath, tempPath);

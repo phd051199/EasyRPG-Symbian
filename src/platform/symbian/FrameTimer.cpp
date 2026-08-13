@@ -13,8 +13,7 @@ CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 }
 
 CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
-    : CActive(CActive::EPriorityStandard),
-      iObserver(aObserver),
+    : iObserver(aObserver),
       iCounterFrequency(0),
       iCounterCountsUp(ETrue),
       iFramePeriodCounter(0),
@@ -31,7 +30,6 @@ CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
 
 void CFrameTimer::ConstructL()
 {
-    User::LeaveIfError(iTimer.CreateLocal());
     User::LeaveIfError(HAL::Get(HALData::EFastCounterFrequency, iCounterFrequency));
     TInt counterCountsUp = 0;
     User::LeaveIfError(HAL::Get(HALData::EFastCounterCountsUp, counterCountsUp));
@@ -40,13 +38,11 @@ void CFrameTimer::ConstructL()
         User::Leave(KErrNotSupported);
     iFramePeriodCounter = iCounterFrequency / KLogicFps;
     iFramePeriodRemainder = iCounterFrequency % KLogicFps;
-    CActiveScheduler::Add(this);
 }
 
 CFrameTimer::~CFrameTimer()
 {
     Stop();
-    iTimer.Close();
 }
 
 void CFrameTimer::Start()
@@ -60,13 +56,12 @@ void CFrameTimer::Start()
     iLastCounter = User::FastCounter();
     iNextDeadlineCounter = 0;
     AdvanceDeadline();
-    QueueToDeadline();
+    RunLoop();
 }
 
 void CFrameTimer::Stop()
 {
     iRunning = EFalse;
-    Cancel();
 }
 
 TBool CFrameTimer::Running() const
@@ -111,88 +106,90 @@ void CFrameTimer::UpdateElapsedCounter(TUint32 aCounter)
 TInt CFrameTimer::CounterTicksToMicroseconds(TInt64 aTicks) const
 {
     if (aTicks <= 0)
-        return 1;
+        return 0;
 
-    TInt64 microseconds = (aTicks * 1000000 + iCounterFrequency - 1) / iCounterFrequency;
-    if (microseconds < 1)
-        microseconds = 1;
-    if (microseconds > KMaxTimerDelayMicroseconds)
-        microseconds = KMaxTimerDelayMicroseconds;
+    TInt64 microseconds = (aTicks * 1000000) / iCounterFrequency;
+    if (microseconds <= KSleepGuardMicroseconds)
+        return 0;
+    microseconds -= KSleepGuardMicroseconds;
+    if (microseconds > KMaxSleepMicroseconds)
+        microseconds = KMaxSleepMicroseconds;
     return static_cast<TInt>(microseconds);
 }
 
-void CFrameTimer::QueueToDeadline()
+TBool CFrameTimer::PumpReady()
 {
-    if (!iRunning)
-        return;
-
-    iTimer.HighRes(iStatus,
-                   TTimeIntervalMicroSeconds32(
-                       CounterTicksToMicroseconds(iNextDeadlineCounter - iElapsedCounter)));
-    SetActive();
-}
-
-void CFrameTimer::RunL()
-{
-    if (!iRunning)
-        return;
-
-    if (iStatus.Int() != KErrNone)
+    TBool ranAny = EFalse;
+    for (TInt count = 0; count < KMaxReadyCallbacks && iRunning; ++count)
     {
-        const TInt error = iStatus.Int();
-        Stop();
-        iObserver.FrameError(error);
-        return;
-    }
-
-    UpdateElapsedCounter(User::FastCounter());
-
-    if (iElapsedCounter < iNextDeadlineCounter)
-    {
-        QueueToDeadline();
-        return;
-    }
-
-    TInt dueTicks = 0;
-    while (iElapsedCounter >= iNextDeadlineCounter && dueTicks < KMaxLogicCatchUpTicks)
-    {
-        AdvanceDeadline();
-        ++dueTicks;
-    }
-
-    const TBool stillBehind = iElapsedCounter >= iNextDeadlineCounter;
-    TBool renderDue = EFalse;
-    for (TInt tick = 0; tick < dueTicks; ++tick)
-    {
-        ++iLogicFrame;
-        const TBool scheduledRender = (iLogicFrame % KLogicTicksPerRender) == 0;
-        if (scheduledRender)
-            renderDue = ETrue;
-        const TBool renderFrame = iFrameSkipEnabled
-            ? (!stillBehind && renderDue && tick == dueTicks - 1)
-            : scheduledRender;
-        TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
+        TInt error = KErrNone;
+        const TBool ran = CActiveScheduler::RunIfReady(error, CActive::EPriorityIdle);
         if (error != KErrNone)
         {
-            Stop();
+            iRunning = EFalse;
             iObserver.FrameError(error);
-            return;
+            return EFalse;
         }
-        if (!iRunning)
-            return;
+        if (!ran)
+            break;
+        ranAny = ETrue;
     }
-
-    UpdateElapsedCounter(User::FastCounter());
-    QueueToDeadline();
+    return ranAny;
 }
 
-TInt CFrameTimer::RunError(TInt)
+void CFrameTimer::RunLoop()
 {
-    Stop();
-    return KErrNone;
-}
+    while (iRunning)
+    {
+        UpdateElapsedCounter(User::FastCounter());
+        if (iElapsedCounter < iNextDeadlineCounter)
+        {
+            if (PumpReady())
+                continue;
+            if (!iRunning)
+                return;
 
-void CFrameTimer::DoCancel()
-{
-    iTimer.Cancel();
+            UpdateElapsedCounter(User::FastCounter());
+            const TInt delay = CounterTicksToMicroseconds(
+                iNextDeadlineCounter - iElapsedCounter);
+            if (delay > 0)
+                User::AfterHighRes(TTimeIntervalMicroSeconds32(delay));
+            continue;
+        }
+
+        TInt dueTicks = 0;
+        while (iElapsedCounter >= iNextDeadlineCounter &&
+               dueTicks < KMaxLogicCatchUpTicks)
+        {
+            AdvanceDeadline();
+            ++dueTicks;
+        }
+
+        const TBool stillBehind = iElapsedCounter >= iNextDeadlineCounter;
+        TBool renderDue = EFalse;
+        for (TInt tick = 0; tick < dueTicks && iRunning; ++tick)
+        {
+            ++iLogicFrame;
+            const TBool scheduledRender =
+                (iLogicFrame % KLogicTicksPerRender) == 0;
+            if (scheduledRender)
+                renderDue = ETrue;
+            const TBool renderFrame = iFrameSkipEnabled
+                ? (!stillBehind && renderDue && tick == dueTicks - 1)
+                : scheduledRender;
+
+            TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
+            if (error != KErrNone)
+            {
+                iRunning = EFalse;
+                iObserver.FrameError(error);
+                return;
+            }
+            if (!iRunning)
+                return;
+
+            if (tick + 1 < dueTicks)
+                PumpReady();
+        }
+    }
 }

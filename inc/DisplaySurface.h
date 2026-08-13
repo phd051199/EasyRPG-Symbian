@@ -6,6 +6,12 @@
 
 class CUpstreamPlayer;
 
+struct TEasyRpgDirtyRegionSlot
+{
+    TEasyRpgDirtyRegionSlot() : iRect(0, 0, 0, 0) {}
+    TRect iRect;
+};
+
 class CDisplaySurface : public CBase
 {
 public:
@@ -13,6 +19,9 @@ public:
     ~CDisplaySurface();
 
     void ClearL();
+    TUint16* BeginRenderL();
+    void EndRender();
+    TInt RenderStrideBytes() const;
     void PresentL();
     const TSize& Size() const;
     const CFbsBitmap& Bitmap() const;
@@ -28,10 +37,11 @@ private:
 
 private:
     CFbsBitmap* iBitmap;
+    TBool iBitmapLocked;
     TSize iSize;
     TBool iHasFrame;
     enum { KMaxDirtyRegions = 16 };
-    TRect iDirtyRegions[KMaxDirtyRegions];
+    TEasyRpgDirtyRegionSlot iDirtyRegions[KMaxDirtyRegions];
     TInt iDirtyRegionCount;
 };
 

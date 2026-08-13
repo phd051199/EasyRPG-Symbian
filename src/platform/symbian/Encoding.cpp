@@ -1,5 +1,11 @@
-#include "CoreEncoding.h"
 #include "Encoding.h"
+
+#ifdef EASYRPG_LAUNCHER_PROCESS
+#include <charconv.h>
+#include <f32file.h>
+#else
+#include "CoreEncoding.h"
+#endif
 
 namespace
 {
@@ -83,6 +89,23 @@ void TEncoding::ShiftJisToUnicodeL(const TDesC8& aSource,
     if (aSource.Length() == 0)
         return;
 
+#ifdef EASYRPG_LAUNCHER_PROCESS
+    RFs fs;
+    User::LeaveIfError(fs.Connect());
+    CleanupClosePushL(fs);
+    CCnvCharacterSetConverter* converter = CCnvCharacterSetConverter::NewLC();
+    if (converter->PrepareToConvertToOrFromL(KCharacterSetIdentifierShiftJis, fs) !=
+        CCnvCharacterSetConverter::EAvailable)
+        User::Leave(KErrNotSupported);
+    TInt state = CCnvCharacterSetConverter::KStateDefault;
+    const TInt remaining = converter->ConvertToUnicode(aDestination, aSource, state);
+    if (remaining < 0)
+        User::Leave(remaining);
+    if (remaining != 0)
+        User::Leave(KErrOverflow);
+    CleanupStack::PopAndDestroy(converter);
+    CleanupStack::PopAndDestroy(&fs);
+#else
     unsigned int written = 0;
     TUint16* destination = const_cast<TUint16*>(aDestination.Ptr());
     const TInt result = EasyRpgCoreCp932ToUtf16(
@@ -100,6 +123,7 @@ void TEncoding::ShiftJisToUnicodeL(const TDesC8& aSource,
         User::Leave(KErrOverflow);
 
     aDestination.SetLength(static_cast<TInt>(written));
+#endif
     NormalizeJapaneseNfcInPlace(aDestination);
 }
 

@@ -70,7 +70,7 @@ namespace {
 	std::vector<int> event_next;
 	std::vector<int> event_prev;
 	std::vector<int> event_index_by_id;
-	std::vector<int> event_query_candidates;
+	const int event_query_stack_capacity = 64;
 
 	std::unique_ptr<RPG::Map> map;
 	int scroll_direction;
@@ -158,14 +158,11 @@ namespace {
 			event_next.clear();
 			event_prev.clear();
 			event_index_by_id.clear();
-			event_query_candidates.clear();
 			return;
 		}
 		event_cell_heads.assign(map->width * map->height, -1);
 		event_next.assign(events.size(), -1);
 		event_prev.assign(events.size(), -1);
-		event_query_candidates.clear();
-		event_query_candidates.reserve(events.size());
 		int max_id = 0;
 		for (const Game_Event& event : events)
 			max_id = std::max(max_id, event.GetId());
@@ -248,7 +245,6 @@ void Game_Map::Dispose() {
 	event_next.clear();
 	event_prev.clear();
 	event_index_by_id.clear();
-	event_query_candidates.clear();
 	event_parallel_updates.clear();
 	event_trigger_checks.clear();
 	events.clear();
@@ -711,22 +707,30 @@ bool Game_Map::MakeWay(int x, int y, int d, const Game_Character& self) {
 	if (old_cell >= 0 && new_cell >= 0 &&
 		old_cell < static_cast<int>(event_cell_heads.size()) &&
 		new_cell < static_cast<int>(event_cell_heads.size())) {
-		event_query_candidates.clear();
+		int event_query_candidates[event_query_stack_capacity];
+		int event_query_count = 0;
 		int old_index = event_cell_heads[old_cell];
 		int new_index = old_cell == new_cell ? -1 : event_cell_heads[new_cell];
-		while (old_index >= 0 || new_index >= 0) {
+		while ((old_index >= 0 || new_index >= 0) &&
+			event_query_count < event_query_stack_capacity) {
 			if (new_index < 0 || (old_index >= 0 && old_index < new_index)) {
-				event_query_candidates.push_back(old_index);
+				event_query_candidates[event_query_count++] = old_index;
 				old_index = event_next[old_index];
 			} else {
-				event_query_candidates.push_back(new_index);
+				event_query_candidates[event_query_count++] = new_index;
 				new_index = event_next[new_index];
 			}
 		}
-		for (std::vector<int>::const_iterator it = event_query_candidates.begin();
-			it != event_query_candidates.end(); ++it) {
-			if (!process_event(events[*it]))
-				return false;
+		if (old_index >= 0 || new_index >= 0) {
+			for (Game_Event& other : GetEvents()) {
+				if (!process_event(other))
+					return false;
+			}
+		} else {
+			for (int index = 0; index < event_query_count; ++index) {
+				if (!process_event(events[event_query_candidates[index]]))
+					return false;
+			}
 		}
 	} else {
 		for (Game_Event& other : GetEvents()) {

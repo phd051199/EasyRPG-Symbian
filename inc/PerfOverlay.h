@@ -14,29 +14,27 @@ public:
     void FrameRendered();
     TBool IsDirty() const;
     void ClearDirty();
+    void Compose(const CFbsBitmap& aFrameBitmap,
+                 TInt aX,
+                 TInt aY);
     const CFbsBitmap& Bitmap() const;
-    const CFbsBitmap& MaskBitmap() const;
 
 private:
     CPerfOverlay();
     void ConstructL();
     TUint32 ReadCounter() const;
     void ReadRam();
-    void RebuildBitmap();
+    void DrawMetrics();
     static TUint8 GlyphRow(TUint8 aCharacter, TInt aRow);
     static void DrawText(TUint8* aPixels,
                          TInt aStride,
                          TInt aX,
                          TInt aY,
                          const TDesC8& aText);
-    static void DrawMaskText(CFbsBitmap& aBitmap,
-                             TInt aX,
-                             TInt aY,
-                             const TDesC8& aText);
 
 private:
     CFbsBitmap* iBitmap;
-    CFbsBitmap* iMaskBitmap;
+    HBufC8* iPixels;
     RThread iThread;
     TInt iCounterPeriodUs;
     TBool iUseNanoCounter;

@@ -1,0 +1,166 @@
+#include "GameMetadata.h"
+#include "ZipVfs.h"
+
+namespace
+{
+const TInt KMaxMetadataLdbSize = 4 * 1024 * 1024;
+_LIT8(KLcfDatabaseHeader, "LcfDataBase");
+
+void CopyListText(const TDesC& aSource, TDes& aTarget)
+{
+    aTarget.Copy(aSource.Left(aTarget.MaxLength()));
+    for (TInt index = 0; index < aTarget.Length(); ++index)
+    {
+        if (aTarget[index] == '\t' || aTarget[index] == '\r' ||
+            aTarget[index] == '\n')
+            aTarget[index] = ' ';
+    }
+}
+
+TBool ReadLcfInt(const TDesC8& aBytes,
+                 TInt& aPosition,
+                 TInt aEnd,
+                 TInt& aValue)
+{
+    aValue = 0;
+    TInt count = 0;
+    while (aPosition < aEnd && count < 5)
+    {
+        const TUint8 value = aBytes[aPosition++];
+        if (aValue > (KMaxTInt >> 7))
+            return EFalse;
+        aValue = (aValue << 7) | (value & 0x7f);
+        ++count;
+        if ((value & 0x80) == 0)
+            return ETrue;
+    }
+    return EFalse;
+}
+
+TInt DetectSystemEngine(const TDesC8& aBytes, TInt aStart, TInt aEnd)
+{
+    TInt position = aStart;
+    while (position < aEnd)
+    {
+        TInt fieldId = 0;
+        if (!ReadLcfInt(aBytes, position, aEnd, fieldId))
+            return 0;
+        if (fieldId == 0)
+            return 2000;
+
+        TInt fieldLength = 0;
+        if (!ReadLcfInt(aBytes, position, aEnd, fieldLength) ||
+            fieldLength < 0 || position > aEnd - fieldLength)
+            return 0;
+
+        const TInt fieldEnd = position + fieldLength;
+        if (fieldId == 0x0a)
+        {
+            TInt ldbId = 0;
+            if (!ReadLcfInt(aBytes, position, fieldEnd, ldbId))
+                return 0;
+            return ldbId == 2003 ? 2003 : 2000;
+        }
+        position = fieldEnd;
+    }
+    return 2000;
+}
+
+TInt DetectRpgMakerVersionL(CZipVfs& aResources)
+{
+    HBufC8* data = aResources.ReadFileLC(_L("RPG_RT.ldb"), KMaxMetadataLdbSize);
+    const TPtrC8 bytes(*data);
+
+    TInt position = 0;
+    TInt headerLength = 0;
+    TInt version = 0;
+    if (ReadLcfInt(bytes, position, bytes.Length(), headerLength) &&
+        headerLength == KLcfDatabaseHeader().Length() &&
+        position <= bytes.Length() - headerLength &&
+        bytes.Mid(position, headerLength).Compare(KLcfDatabaseHeader) == 0)
+    {
+        position += headerLength;
+        while (position < bytes.Length())
+        {
+            TInt fieldId = 0;
+            if (!ReadLcfInt(bytes, position, bytes.Length(), fieldId) || fieldId == 0)
+                break;
+
+            TInt fieldLength = 0;
+            if (!ReadLcfInt(bytes, position, bytes.Length(), fieldLength) ||
+                fieldLength < 0 || position > bytes.Length() - fieldLength)
+                break;
+
+            const TInt fieldEnd = position + fieldLength;
+            if (fieldId == 0x16)
+            {
+                version = DetectSystemEngine(bytes, position, fieldEnd);
+                break;
+            }
+            position = fieldEnd;
+        }
+    }
+
+    CleanupStack::PopAndDestroy(data);
+    return version;
+}
+
+void ReadGameTitleL(CZipVfs& aResources, TDes& aTitle)
+{
+    HBufC8* data = aResources.ReadFileLC(_L("RPG_RT.ini"), 4096);
+    const TPtrC8 bytes(*data);
+    _LIT8(KGameTitleKey, "GameTitle=");
+    const TInt keyPosition = bytes.Find(KGameTitleKey);
+    if (keyPosition != KErrNotFound)
+    {
+        TBuf<KMaxFileName> title;
+        TInt position = keyPosition + KGameTitleKey().Length();
+        while (position < bytes.Length() && title.Length() < title.MaxLength())
+        {
+            const TUint8 value = bytes[position++];
+            if (value == '\r' || value == '\n')
+                break;
+            if (value < 0x20 || value > 0x7e)
+            {
+                title.Zero();
+                break;
+            }
+            title.Append(static_cast<TUint16>(value));
+        }
+        if (title.Length() > 0)
+            CopyListText(title, aTitle);
+    }
+    CleanupStack::PopAndDestroy(data);
+}
+}
+
+void ReadGameMetadataL(RFs& aFs,
+                       const TDesC& aArchivePath,
+                       TDes& aTitle,
+                       TInt& aVersion)
+{
+    CZipVfs* resources = CZipVfs::OpenL(aFs, aArchivePath);
+    CleanupStack::PushL(resources);
+    TRAP_IGNORE(ReadGameTitleL(*resources, aTitle));
+    TRAP_IGNORE(aVersion = DetectRpgMakerVersionL(*resources));
+    CleanupStack::PopAndDestroy(resources);
+}
+
+void FormatGameSubtitle(RFs& aFs,
+                        const TDesC& aArchivePath,
+                        TInt aVersion,
+                        TDes& aSubtitle)
+{
+    TEntry entry;
+    TInt64 bytes = 0;
+    if (aFs.Entry(aArchivePath, entry) == KErrNone && !entry.IsDir())
+        bytes = entry.iSize;
+
+    const TInt64 tenths = (bytes * 10 + 524288) / 1048576;
+    const TInt whole = static_cast<TInt>(tenths / 10);
+    const TInt fraction = static_cast<TInt>(tenths % 10);
+    if (aVersion == 2000 || aVersion == 2003)
+        aSubtitle.Format(_L("%d.%d MB (RPG Maker %d)"), whole, fraction, aVersion);
+    else
+        aSubtitle.Format(_L("%d.%d MB (RPG Maker 2000/2003)"), whole, fraction);
+}

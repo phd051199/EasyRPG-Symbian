@@ -139,7 +139,6 @@ TBool ResolveUpstreamKey(TUint32 aKey, TInt& aWord, TUint32& aMask)
     case CPlayerRuntime::EKeyPeriod: aWord = 2; aMask = 1u << 16; break;
     case CPlayerRuntime::EKeyDivide: aWord = 2; aMask = 1u << 17; break;
     case CPlayerRuntime::EKeyDebug: aWord = 2; aMask = 1u << 26; break;
-    case CPlayerRuntime::EKeyScreenshot: aWord = 2; aMask = 1u << 27; break;
     default: return EFalse;
     }
     return ETrue;
@@ -244,11 +243,25 @@ void CPlayerRuntime::ConstructL(const TDesC& aGameSource)
     if (EasyRpgModernCoreProbe(5) != 33 || EasyRpgUpstreamLmuLinkAnchor() != 0)
         User::Leave(KErrNotSupported);
 
+    TUint16* framebuffer = iDisplaySurface.BeginRenderL();
+    const TInt bindError = EasyRpgUpstreamPlayerBindFramebuffer(
+        framebuffer,
+        iDisplaySurface.Size().iWidth,
+        iDisplaySurface.Size().iHeight,
+        iDisplaySurface.RenderStrideBytes());
+    if (bindError != 0)
+    {
+        iDisplaySurface.EndRender();
+        EasyRpgClearVirtualProject();
+        User::Leave(KErrNotSupported);
+    }
+
     const TInt initError = EasyRpgUpstreamPlayerInit(
         reinterpret_cast<const char*>(projectPath.Ptr()),
         reinterpret_cast<const char*>(savePath.Ptr()),
         iDisplaySurface.Size().iWidth,
         iDisplaySurface.Size().iHeight);
+    iDisplaySurface.EndRender();
     if (initError != 0)
     {
         EasyRpgClearVirtualProject();
@@ -308,6 +321,18 @@ void CPlayerRuntime::TickL(TUint32 aLogicFrame, TBool aRenderFrame)
         return;
     static_cast<void>(aLogicFrame);
 
+    TUint16* framebuffer = iDisplaySurface.BeginRenderL();
+    const TInt bindError = EasyRpgUpstreamPlayerBindFramebuffer(
+        framebuffer,
+        iDisplaySurface.Size().iWidth,
+        iDisplaySurface.Size().iHeight,
+        iDisplaySurface.RenderStrideBytes());
+    if (bindError != 0)
+    {
+        iDisplaySurface.EndRender();
+        User::Leave(KErrNotSupported);
+    }
+
     const TInt tickResult = EasyRpgUpstreamPlayerTick(
         iTickMs,
         iUpstreamKeys0,
@@ -315,6 +340,7 @@ void CPlayerRuntime::TickL(TUint32 aLogicFrame, TBool aRenderFrame)
         iUpstreamKeys2,
         0,
         aRenderFrame ? 1 : 0);
+    iDisplaySurface.EndRender();
     iTickMs += 16;
     iTickRemainder += 40;
     if (iTickRemainder >= 60)

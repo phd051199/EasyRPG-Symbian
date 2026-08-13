@@ -3,10 +3,7 @@
 
 #include <aknappui.h>
 
-class CGameView;
-class CCoeControl;
-class CEikMenuPane;
-class TWsEvent;
+class CLauncherView;
 
 class CEasyRpgAppUi : public CAknAppUi
 {
@@ -15,15 +12,11 @@ public:
     ~CEasyRpgAppUi();
 
     void ConstructL();
-    void EnterGameFullscreen();
-    void ExitGameFullscreen();
     void HandleCommandL(TInt aCommand);
-    void HandleWsEventL(const TWsEvent& aEvent, CCoeControl* aDestination);
     void HandleStatusPaneSizeChange();
-    void HandleForegroundEventL(TBool aForeground);
 
 private:
-    CGameView* iGameView;
+    CLauncherView* iLauncherView;
 };
 
 #endif

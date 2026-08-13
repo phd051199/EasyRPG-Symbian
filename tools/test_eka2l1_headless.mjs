@@ -108,6 +108,11 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function appExitKey(exit) {
+    if (!exit) return '';
+    return `${exit.uid}:${exit.type}:${exit.reason}:${exit.category}:${exit.name}`;
+}
+
 async function freePort() {
     return await new Promise((resolve, reject) => {
         const server = net.createServer();
@@ -302,9 +307,19 @@ async function main() {
         ]);
 
         let crashed = false;
+        let monitorGuestFatal = false;
+        let guestFatal = '';
         cdp.on('Runtime.consoleAPICalled', params => {
             const text = params.args.map(remoteText).join(' ');
             pushLog(`console.${params.type}: ${text}`, false);
+            if (monitorGuestFatal && !guestFatal &&
+                (text.includes('Access violation reading address') ||
+                 text.includes('Panic context:') ||
+                 text.includes('Thread Main panicked') ||
+                 text.includes('KERN-EXEC') ||
+                 text.includes('E32USER-CBase'))) {
+                guestFatal = text;
+            }
         });
         cdp.on('Runtime.exceptionThrown', params => {
             const detail = params.exceptionDetails || {};
@@ -325,6 +340,7 @@ async function main() {
 
         const evaluate = async (expression, awaitPromise = false) => {
             if (crashed) throw new Error('Browser target crashed');
+            if (guestFatal) throw new Error(`Guest runtime fatal: ${guestFatal}`);
             const response = await cdp.call('Runtime.evaluate', {
                 expression,
                 awaitPromise,
@@ -584,8 +600,10 @@ async function main() {
         pushLog(`app: first frame, redraw=${launchState.redraw}`);
         await capture('app-first-frame.png');
 
+        let handoffExitKey = '';
         await sleep(1200);
         if (!options.noStartGame) {
+            monitorGuestFatal = true;
             await evaluate(`(async () => {
                 const code = EKA2L1.keys.OK;
                 EKA2L1.sendKey(code, 1);
@@ -594,6 +612,20 @@ async function main() {
                 return true;
             })()`, true);
             pushLog('app: sent OK to launch selected game');
+            const handoffDeadline = Date.now() + 3000;
+            while (Date.now() < handoffDeadline) {
+                const exit = await evaluate('EKA2L1.module && EKA2L1.lastAppExit ? EKA2L1.lastAppExit() : null');
+                if (exit) {
+                    if ((exit.uid >>> 0) !== (options.uid >>> 0) || exit.type !== 0 || exit.reason !== 0) {
+                        result.appExit = exit;
+                        throw new Error(`App exited during handoff: ${JSON.stringify(exit)}`);
+                    }
+                    handoffExitKey = appExitKey(exit);
+                    pushLog(`app: launcher handed off to runtime, exit=${exit.reason}`);
+                    break;
+                }
+                await sleep(100);
+            }
         }
         if (options.enterGame && !options.noStartGame) {
             await sleep(2000);
@@ -626,7 +658,7 @@ async function main() {
                 await evaluate(`(async () => {
                     const name = ${JSON.stringify(name)};
                     const code = EKA2L1.keys[name];
-                    if (code === undefined) throw new Error('Unknown EKA2L1 key: ' + name);
+                    if (code === undefined) throw new Error('Unknown EKA2L1 key: ' + name + '; available=' + Object.keys(EKA2L1.keys).sort().join(','));
                     EKA2L1.sendKey(code, 1);
                     await new Promise(resolve => setTimeout(resolve, 90));
                     EKA2L1.sendKey(code, 0);
@@ -645,7 +677,7 @@ async function main() {
                 redraw: EKA2L1.module && EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0,
                 exit: EKA2L1.module && EKA2L1.lastAppExit ? EKA2L1.lastAppExit() : null
             })`);
-            if (state.exit) {
+            if (state.exit && appExitKey(state.exit) !== handoffExitKey) {
                 result.appExit = state.exit;
                 throw new Error(`App exited during test: ${JSON.stringify(state.exit)}`);
             }
@@ -666,6 +698,7 @@ async function main() {
         })()`);
         pushLog(`midi-temp: ${JSON.stringify(midiProbe)}`);
 
+        if (guestFatal) throw new Error(`Guest runtime fatal: ${guestFatal}`);
         await capture('app-final.png');
         result.success = true;
         result.finishedAt = new Date().toISOString();

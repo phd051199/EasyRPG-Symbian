@@ -75,7 +75,7 @@ CPerfOverlay* CPerfOverlay::NewL()
 
 CPerfOverlay::CPerfOverlay()
     : iBitmap(NULL),
-      iMaskBitmap(NULL),
+      iPixels(NULL),
       iCounterPeriodUs(0),
       iUseNanoCounter(ETrue),
       iCpuAvailable(EFalse),
@@ -94,8 +94,8 @@ void CPerfOverlay::ConstructL()
 {
     iBitmap = new (ELeave) CFbsBitmap;
     User::LeaveIfError(iBitmap->Create(TSize(KOverlayWidth, KOverlayHeight), EColor64K));
-    iMaskBitmap = new (ELeave) CFbsBitmap;
-    User::LeaveIfError(iMaskBitmap->Create(TSize(KOverlayWidth, KOverlayHeight), EGray2));
+    iPixels = HBufC8::NewL(KOverlayWidth * KOverlayHeight * 2);
+    iPixels->Des().SetLength(KOverlayWidth * KOverlayHeight * 2);
 
     TInt period = 0;
     if (HAL::Get(HALData::ENanoTickPeriod, period) == KErrNone && period > 0)
@@ -133,8 +133,8 @@ void CPerfOverlay::ConstructL()
 CPerfOverlay::~CPerfOverlay()
 {
     iThread.Close();
-    delete iMaskBitmap;
-    iMaskBitmap = NULL;
+    delete iPixels;
+    iPixels = NULL;
     delete iBitmap;
     iBitmap = NULL;
 }
@@ -156,7 +156,7 @@ void CPerfOverlay::Reset()
     }
 
     ReadRam();
-    RebuildBitmap();
+    iDirty = ETrue;
 }
 
 void CPerfOverlay::FrameRendered()
@@ -197,7 +197,7 @@ void CPerfOverlay::FrameRendered()
     ReadRam();
     iLastCounter = currentCounter;
     iFramesSinceSample = 0;
-    RebuildBitmap();
+    iDirty = ETrue;
 }
 
 TBool CPerfOverlay::IsDirty() const
@@ -210,14 +210,53 @@ void CPerfOverlay::ClearDirty()
     iDirty = EFalse;
 }
 
+void CPerfOverlay::Compose(const CFbsBitmap& aFrameBitmap,
+                           TInt aX,
+                           TInt aY)
+{
+    if (!iBitmap || !iPixels)
+        return;
+
+    const TSize frameSize = aFrameBitmap.SizeInPixels();
+    if (aX < 0 || aY < 0 ||
+        aX + KOverlayWidth > frameSize.iWidth ||
+        aY + KOverlayHeight > frameSize.iHeight)
+        return;
+
+    TUint8* pixels = const_cast<TUint8*>(iPixels->Ptr());
+    const TInt stride = KOverlayWidth * 2;
+    aFrameBitmap.LockHeap();
+    const TUint8* framePixels = reinterpret_cast<const TUint8*>(aFrameBitmap.DataAddress());
+    const TInt frameStride = aFrameBitmap.DataStride();
+    if (!framePixels || frameStride <= 0)
+    {
+        aFrameBitmap.UnlockHeap();
+        return;
+    }
+    for (TInt y = 0; y < KOverlayHeight; ++y)
+    {
+        Mem::Copy(pixels + y * stride,
+                  framePixels + (aY + y) * frameStride + aX * 2,
+                  stride);
+    }
+    aFrameBitmap.UnlockHeap();
+
+    DrawMetrics();
+
+    iBitmap->LockHeap();
+    TUint8* bitmapPixels = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
+    const TInt bitmapStride = iBitmap->DataStride();
+    if (bitmapPixels && bitmapStride > 0)
+    {
+        for (TInt y = 0; y < KOverlayHeight; ++y)
+            Mem::Copy(bitmapPixels + y * bitmapStride, pixels + y * stride, stride);
+    }
+    iBitmap->UnlockHeap();
+}
+
 const CFbsBitmap& CPerfOverlay::Bitmap() const
 {
     return *iBitmap;
-}
-
-const CFbsBitmap& CPerfOverlay::MaskBitmap() const
-{
-    return *iMaskBitmap;
 }
 
 TUint32 CPerfOverlay::ReadCounter() const
@@ -246,43 +285,19 @@ void CPerfOverlay::ReadRam()
     }
 }
 
-void CPerfOverlay::RebuildBitmap()
+void CPerfOverlay::DrawMetrics()
 {
-    if (!iBitmap || !iMaskBitmap)
+    if (!iPixels)
         return;
 
-    iBitmap->LockHeap();
-    TUint8* pixels = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
-    if (!pixels)
-    {
-        iBitmap->UnlockHeap();
-        return;
-    }
-
-    const TInt stride = iBitmap->DataStride();
-    for (TInt y = 0; y < KOverlayHeight; ++y)
-        Mem::FillZ(pixels + y * stride, KOverlayWidth * static_cast<TInt>(sizeof(TUint16)));
-
-    iMaskBitmap->LockHeap();
-    TUint8* maskPixels = reinterpret_cast<TUint8*>(iMaskBitmap->DataAddress());
-    if (!maskPixels)
-    {
-        iMaskBitmap->UnlockHeap();
-        iBitmap->UnlockHeap();
-        return;
-    }
-    const TInt maskStride = iMaskBitmap->DataStride();
-    for (TInt y = 0; y < KOverlayHeight; ++y)
-        Mem::FillZ(maskPixels + y * maskStride, maskStride);
-    iMaskBitmap->UnlockHeap();
-
+    TUint8* pixels = const_cast<TUint8*>(iPixels->Ptr());
+    const TInt stride = KOverlayWidth * 2;
     TBuf8<32> line;
     if (iCpuPercent >= 0)
         line.Format(_L8("FPS %d CPU %d%%"), iFps, iCpuPercent);
     else
         line.Format(_L8("FPS %d CPU --%%"), iFps);
     DrawText(pixels, stride, 2, 2, line);
-    DrawMaskText(*iMaskBitmap, 2, 2, line);
 
     line.Zero();
     if (iRamUsedTenthsMb >= 0 && iRamTotalTenthsMb >= 0)
@@ -298,10 +313,6 @@ void CPerfOverlay::RebuildBitmap()
         line.Copy(_L8("RAM --.-/--.-M"));
     }
     DrawText(pixels, stride, 2, 10, line);
-    DrawMaskText(*iMaskBitmap, 2, 10, line);
-
-    iBitmap->UnlockHeap();
-    iDirty = ETrue;
 }
 
 TUint8 CPerfOverlay::GlyphRow(TUint8 aCharacter, TInt aRow)
@@ -335,32 +346,4 @@ void CPerfOverlay::DrawText(TUint8* aPixels,
             }
         }
     }
-}
-
-void CPerfOverlay::DrawMaskText(CFbsBitmap& aBitmap,
-                                TInt aX,
-                                TInt aY,
-                                const TDesC8& aText)
-{
-    TBitmapUtil bitmapUtil(&aBitmap);
-    bitmapUtil.Begin(TPoint(0, 0));
-    for (TInt index = 0; index < aText.Length(); ++index)
-    {
-        const TUint8 character = aText[index];
-        if (character == ' ')
-            continue;
-        for (TInt row = 0; row < 7; ++row)
-        {
-            const TUint8 bits = GlyphRow(character, row);
-            for (TInt column = 0; column < 5; ++column)
-            {
-                if ((bits & (1u << (4 - column))) != 0)
-                {
-                    bitmapUtil.SetPos(TPoint(aX + index * 6 + column, aY + row));
-                    bitmapUtil.SetPixel(1);
-                }
-            }
-        }
-    }
-    bitmapUtil.End();
 }

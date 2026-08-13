@@ -23,11 +23,31 @@ namespace {
 unsigned int gTicks = 0;
 bool gPlayerStarted = false;
 bool gRenderFrame = true;
+void* gFramebufferPixels = 0;
+int gFramebufferWidth = 0;
+int gFramebufferHeight = 0;
+int gFramebufferPitchBytes = 0;
+
+DynamicFormat FramebufferFormat() {
+    return DynamicFormat(16, 5, 11, 6, 5, 5, 0, 0, 0, PF::NoAlpha);
+}
+
+BitmapRef CreateMainSurface(int width, int height) {
+    if (gFramebufferPixels && gFramebufferWidth == width &&
+        gFramebufferHeight == height && gFramebufferPitchBytes >= width * 2) {
+        return Bitmap::Create(gFramebufferPixels,
+                              width,
+                              height,
+                              gFramebufferPitchBytes,
+                              FramebufferFormat());
+    }
+    return Bitmap::Create(width, height, false);
+}
 
 class EasyRpgUi : public BaseUi {
 public:
     EasyRpgUi(long width, long height) {
-        Bitmap::SetFormat(DynamicFormat(16, 5, 11, 6, 5, 5, 0, 0, 0, PF::NoAlpha));
+        Bitmap::SetFormat(FramebufferFormat());
         Resize(width, height);
         mouse_focus = false;
         mouse_x = 0;
@@ -47,7 +67,7 @@ public:
         current_display_mode.height = static_cast<int>(height);
         current_display_mode.bpp = 16;
         current_display_mode.flags = 0;
-        main_surface = Bitmap::Create(static_cast<int>(width), static_cast<int>(height), false);
+        main_surface = CreateMainSurface(static_cast<int>(width), static_cast<int>(height));
     }
 
     void ToggleFullscreen() override {}
@@ -188,6 +208,36 @@ BaseUi::KeyStatus& BaseUi::GetKeyStates() {
     return keys;
 }
 
+extern "C" int EasyRpgUpstreamPlayerBindFramebuffer(void* pixels,
+                                                      int width,
+                                                      int height,
+                                                      int pitch_bytes) {
+    if (!pixels || width <= 0 || height <= 0 || pitch_bytes < width * 2)
+        return -1;
+
+    const bool changed = gFramebufferPixels != pixels ||
+        gFramebufferWidth != width ||
+        gFramebufferHeight != height ||
+        gFramebufferPitchBytes != pitch_bytes;
+    gFramebufferPixels = pixels;
+    gFramebufferWidth = width;
+    gFramebufferHeight = height;
+    gFramebufferPitchBytes = pitch_bytes;
+
+    if (!DisplayUi || !changed)
+        return 0;
+
+    BitmapRef surface = Bitmap::Create(pixels,
+                                       width,
+                                       height,
+                                       pitch_bytes,
+                                       FramebufferFormat());
+    if (!surface || !surface->pixels())
+        return -2;
+    DisplayUi->GetDisplaySurface() = surface;
+    return 0;
+}
+
 extern "C" int EasyRpgUpstreamPlayerInit(const char* project_path,
                                            const char* save_path,
                                            int width,
@@ -231,6 +281,10 @@ extern "C" void EasyRpgUpstreamPlayerShutdown(void) {
     gPlayerStarted = false;
     if (DisplayUi)
         Player::Exit();
+    gFramebufferPixels = 0;
+    gFramebufferWidth = 0;
+    gFramebufferHeight = 0;
+    gFramebufferPitchBytes = 0;
 }
 
 extern "C" void EasyRpgUpstreamPlayerPause(void) {
@@ -265,28 +319,6 @@ extern "C" int EasyRpgUpstreamPlayerTick(unsigned int ticks,
 
 extern "C" int EasyRpgUpstreamPlayerShouldRender(void) {
     return gRenderFrame ? 1 : 0;
-}
-
-extern "C" const unsigned short* EasyRpgUpstreamPlayerPixels(void) {
-    if (!DisplayUi)
-        return 0;
-    BitmapRef const& surface = DisplayUi->GetDisplaySurface();
-    return surface ? reinterpret_cast<const unsigned short*>(surface->pixels()) : 0;
-}
-
-extern "C" int EasyRpgUpstreamPlayerWidth(void) {
-    return DisplayUi ? static_cast<int>(DisplayUi->GetWidth()) : 0;
-}
-
-extern "C" int EasyRpgUpstreamPlayerHeight(void) {
-    return DisplayUi ? static_cast<int>(DisplayUi->GetHeight()) : 0;
-}
-
-extern "C" int EasyRpgUpstreamPlayerPitchPixels(void) {
-    if (!DisplayUi)
-        return 0;
-    BitmapRef const& surface = DisplayUi->GetDisplaySurface();
-    return surface ? surface->pitch() / static_cast<int>(sizeof(unsigned short)) : 0;
 }
 
 extern "C" int EasyRpgUpstreamPlayerDirtyRegionCount(void) {

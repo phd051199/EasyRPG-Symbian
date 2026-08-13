@@ -48,12 +48,6 @@ RESOURCE MENU_PANE r_menu
         },
         MENU_ITEM
         {
-            command = EEasyRpgCmdLauncherActivate;
-            flags = EEikMenuItemDimmed;
-            txt = qtn_activate;
-        },
-        MENU_ITEM
-        {
             command = EEasyRpgCmdLauncherAbout;
             txt = qtn_about;
         },

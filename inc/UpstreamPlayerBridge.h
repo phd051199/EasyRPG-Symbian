@@ -5,6 +5,10 @@
 extern "C" {
 #endif
 
+int EasyRpgUpstreamPlayerBindFramebuffer(void* pixels,
+                                         int width,
+                                         int height,
+                                         int pitch_bytes);
 int EasyRpgUpstreamPlayerInit(const char* project_path,
                               const char* save_path,
                               int width,
@@ -19,10 +23,6 @@ int EasyRpgUpstreamPlayerTick(unsigned int ticks,
                               unsigned int keys_3,
                               int render_frame);
 int EasyRpgUpstreamPlayerShouldRender(void);
-const unsigned short* EasyRpgUpstreamPlayerPixels(void);
-int EasyRpgUpstreamPlayerWidth(void);
-int EasyRpgUpstreamPlayerHeight(void);
-int EasyRpgUpstreamPlayerPitchPixels(void);
 int EasyRpgUpstreamPlayerDirtyRegionCount(void);
 int EasyRpgUpstreamPlayerDirtyRegion(int index,
                                      int* x,

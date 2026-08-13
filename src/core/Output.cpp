@@ -1,16 +1,9 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
-#include <memory>
 #include <string>
 
-#include "baseui.h"
-#include "bitmap.h"
-#include "filefinder.h"
-#include "main_data.h"
 #include "output.h"
-#include "utils.h"
 
 namespace {
 void WriteLine(const char* prefix, const char* message) {
@@ -30,55 +23,21 @@ void PrintLine(const char* prefix, const char* fmt, va_list ap) {
 
 namespace Output {
 void Quit() {}
-bool TakeScreenshot() {
-    int index = 0;
-    std::string path;
-    do {
-        path = FileFinder::MakePath(Main_Data::GetSavePath(),
-                                    "screenshot_" + Utils::ToString(index++) + ".png");
-    } while (FileFinder::Exists(path));
-    return TakeScreenshot(path);
-}
-bool TakeScreenshot(std::string const& file) {
-    std::shared_ptr<std::fstream> stream = FileFinder::openUTF8(
-        file, std::ios_base::binary | std::ios_base::out | std::ios_base::trunc);
-    return stream && TakeScreenshot(*stream);
-}
-bool TakeScreenshot(std::ostream& stream) {
-    return DisplayUi && DisplayUi->GetDisplaySurface() &&
-        DisplayUi->GetDisplaySurface()->WritePNG(stream);
-}
+bool TakeScreenshot() { return false; }
+bool TakeScreenshot(std::string const&) { return false; }
+bool TakeScreenshot(std::ostream&) { return false; }
 void ToggleLog() {}
 void IgnorePause(bool) {}
 
-void Post(char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    PrintLine(0, fmt, ap);
-    va_end(ap);
-}
+void Post(char*, ...) {}
 
-void Post(const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    PrintLine(0, fmt, ap);
-    va_end(ap);
-}
+void Post(const char*, ...) {}
 
-void PostStr(std::string const& msg) {
-    WriteLine(0, msg.c_str());
-}
+void PostStr(std::string const&) {}
 
-void Warning(const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    PrintLine("warning: ", fmt, ap);
-    va_end(ap);
-}
+void Warning(const char*, ...) {}
 
-void WarningStr(std::string const& warn) {
-    WriteLine("warning: ", warn.c_str());
-}
+void WarningStr(std::string const&) {}
 
 void Error(const char* fmt, ...) {
     va_list ap;

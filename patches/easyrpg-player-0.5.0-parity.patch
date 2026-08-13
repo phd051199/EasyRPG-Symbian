@@ -52,3 +52,7 @@
  }
  
  bool Scene_Battle_Rpg2k3::CheckFlee() {
+--- a/src/scene_map.cpp
++++ b/src/scene_map.cpp
+@@ -223,0 +224 @@
++	spriteset.reset();

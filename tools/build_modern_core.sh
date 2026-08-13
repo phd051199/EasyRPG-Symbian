@@ -366,6 +366,7 @@ for source in "${SOURCES[@]}"; do
         $language_flag \
         $standard_flag \
         -O3 \
+        -DNDEBUG \
         -fomit-frame-pointer \
         -ffreestanding \
         -fno-exceptions \

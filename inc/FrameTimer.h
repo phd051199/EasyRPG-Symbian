@@ -10,7 +10,7 @@ public:
     virtual void FrameError(TInt aError) = 0;
 };
 
-class CFrameTimer : public CActive
+class CFrameTimer : public CBase
 {
 public:
     static CFrameTimer* NewL(MFrameTimerObserver& aObserver);
@@ -28,24 +28,23 @@ private:
         KLogicFps = 60,
         KRenderFps = 30,
         KLogicTicksPerRender = KLogicFps / KRenderFps,
-        KMaxLogicCatchUpTicks = 8,
-        KMaxTimerDelayMicroseconds = 16667
+        KMaxLogicCatchUpTicks = 4,
+        KMaxReadyCallbacks = 8,
+        KSleepGuardMicroseconds = 250,
+        KMaxSleepMicroseconds = 2000
     };
 
     explicit CFrameTimer(MFrameTimerObserver& aObserver);
     void ConstructL();
+    void RunLoop();
+    TBool PumpReady();
     void AdvanceDeadline();
     void UpdateElapsedCounter(TUint32 aCounter);
     TUint32 CounterDelta(TUint32 aCurrent, TUint32 aPrevious) const;
     TInt CounterTicksToMicroseconds(TInt64 aTicks) const;
-    void QueueToDeadline();
-    void RunL();
-    TInt RunError(TInt aError);
-    void DoCancel();
 
 private:
     MFrameTimerObserver& iObserver;
-    RTimer iTimer;
     TInt iCounterFrequency;
     TBool iCounterCountsUp;
     TInt iFramePeriodCounter;

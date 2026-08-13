@@ -319,6 +319,7 @@ void Player::Update(bool update_scene) {
 #endif
 
 	// Normal logic update
+#ifndef EASYRPG_SYMBIAN
 	if (Input::IsTriggered(Input::TOGGLE_FPS)) {
 		fps_flag = !fps_flag;
 	}
@@ -328,6 +329,7 @@ void Player::Update(bool update_scene) {
 	if (Input::IsTriggered(Input::SHOW_LOG)) {
 		Output::ToggleLog();
 	}
+#endif
 
 	DisplayUi->ProcessEvents();
 
