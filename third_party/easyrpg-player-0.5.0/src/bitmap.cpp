@@ -220,6 +220,12 @@ uint16_t SymbianA1555To565(uint16_t aPixel) {
 		(aPixel & 0x001fu));
 }
 
+uint32_t SymbianA1555PairTo565(uint32_t aPixels) {
+	return ((aPixels & 0x7fe07fe0u) << 1) |
+		((aPixels & 0x02000200u) >> 4) |
+		(aPixels & 0x001f001fu);
+}
+
 void SymbianCopyTileRow565(uint8_t* aDestination, const uint8_t* aSource) {
 	if (((reinterpret_cast<size_t>(aDestination) | reinterpret_cast<size_t>(aSource)) & 3u) == 0) {
 		uint32_t* destination = reinterpret_cast<uint32_t*>(aDestination);
@@ -323,7 +329,29 @@ bool SymbianBlitTo565(void* aDestinationPixels,
 				destinationBase + (dy + row) * aDestinationPitch) + dx;
 			const uint16_t* source = reinterpret_cast<const uint16_t*>(
 				sourceBase + (sy + row) * aSourcePitch) + sx;
-			for (int column = 0; column < width; ++column) {
+			int column = 0;
+			if (((reinterpret_cast<size_t>(destination) | reinterpret_cast<size_t>(source)) & 3u) == 0) {
+				uint32_t* destination32 = reinterpret_cast<uint32_t*>(destination);
+				const uint32_t* source32 = reinterpret_cast<const uint32_t*>(source);
+				const int pairs = width >> 1;
+				for (int pair = 0; pair < pairs; ++pair) {
+					const uint32_t pixels = source32[pair];
+					const uint32_t alpha = pixels & 0x80008000u;
+					if (alpha == 0)
+						continue;
+					if (alpha == 0x80008000u) {
+						destination32[pair] = SymbianA1555PairTo565(pixels);
+						continue;
+					}
+					const int pixel = pair << 1;
+					if ((pixels & 0x00008000u) != 0)
+						destination[pixel] = SymbianA1555To565(static_cast<uint16_t>(pixels));
+					if ((pixels & 0x80000000u) != 0)
+						destination[pixel + 1] = SymbianA1555To565(static_cast<uint16_t>(pixels >> 16));
+				}
+				column = pairs << 1;
+			}
+			for (; column < width; ++column) {
 				const uint16_t pixel = source[column];
 				if ((pixel & 0x8000u) == 0)
 					continue;
@@ -1489,10 +1517,17 @@ void Bitmap::BlitTileFast565(int x, int y, Bitmap const& src, int src_x, int src
 			for (int row = 0; row < copy_height; ++row) {
 				uint16_t* destination = reinterpret_cast<uint16_t*>(destination_base + (dy + row) * destination_pitch) + dx;
 				const uint16_t* source = reinterpret_cast<const uint16_t*>(source_base + (sy + row) * source_pitch) + sx;
-				for (int column = 0; column < copy_width; ++column) {
-					const uint16_t pixel = source[column];
-					destination[column] = SymbianA1555To565(pixel);
+				int column = 0;
+				if (((reinterpret_cast<size_t>(destination) | reinterpret_cast<size_t>(source)) & 3u) == 0) {
+					uint32_t* destination32 = reinterpret_cast<uint32_t*>(destination);
+					const uint32_t* source32 = reinterpret_cast<const uint32_t*>(source);
+					const int pairs = copy_width >> 1;
+					for (int pair = 0; pair < pairs; ++pair)
+						destination32[pair] = SymbianA1555PairTo565(source32[pair]);
+					column = pairs << 1;
 				}
+				for (; column < copy_width; ++column)
+					destination[column] = SymbianA1555To565(source[column]);
 			}
 		}
 		return;

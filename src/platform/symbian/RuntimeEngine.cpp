@@ -991,6 +991,12 @@ void CRuntimeEngine::ForgetDynamicScanKey(TInt aScanCode)
     }
 }
 
+void CRuntimeEngine::RequestInputRender()
+{
+    if (iFrameTimer)
+        iFrameTimer->RequestRender();
+}
+
 void CRuntimeEngine::ClearPlayerInput()
 {
     iHeldPlayerKeys = 0;
@@ -1071,12 +1077,16 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
         if (aType == EEventKeyDown)
         {
+            if ((iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) == 0)
+                RequestInputRender();
             iHeldPlayerKeys |= CPlayerRuntime::EKeyCancel;
             iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, ETrue);
             iRightSoftHeld = ETrue;
         }
         else if (aType == EEventKeyUp)
         {
+            if ((iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) != 0)
+                RequestInputRender();
             iHeldPlayerKeys &= ~CPlayerRuntime::EKeyCancel;
             iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, EFalse);
             iRightSoftHeld = EFalse;
@@ -1085,6 +1095,7 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
                  (iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) == 0)
         {
             iPendingPlayerPulses |= CPlayerRuntime::EKeyCancel;
+            RequestInputRender();
         }
         return;
     }
@@ -1168,6 +1179,8 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
     if (aType == EEventKeyDown && playerKey != 0)
     {
+        if ((iHeldPlayerKeys & playerKey) == 0)
+            RequestInputRender();
         iHeldPlayerKeys |= playerKey;
         iRuntime->SetKeyState(playerKey, ETrue);
         return;
@@ -1175,6 +1188,8 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
     if (aType == EEventKeyUp && playerKey != 0)
     {
+        if ((iHeldPlayerKeys & playerKey) != 0)
+            RequestInputRender();
         iHeldPlayerKeys &= ~playerKey;
         iRuntime->SetKeyState(playerKey, EFalse);
         ForgetDynamicScanKey(aKey.iScanCode);
@@ -1190,7 +1205,10 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
         if (aKey.iScanCode != 0 && MapScanKey(aKey) == 0)
             RememberDynamicScanKey(aKey.iScanCode, playerKey);
         if ((iHeldPlayerKeys & playerKey) == 0)
+        {
             iPendingPlayerPulses |= playerKey;
+            RequestInputRender();
+        }
     }
 }
 

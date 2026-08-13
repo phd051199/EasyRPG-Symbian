@@ -56,6 +56,7 @@ int EasyRpgRgssTilemapSetPriorities(int handle, int table_handle);
 int EasyRpgRgssTilemapSetOrigin(int handle, int ox, int oy);
 int EasyRpgRgssTilemapSetVisible(int handle, int visible);
 int EasyRpgRgssTilemapUpdate(int handle);
+void EasyRpgRgssTilemapInvalidateAll(void);
 int EasyRpgRgssTilemapCount(void);
 
 #ifdef __cplusplus

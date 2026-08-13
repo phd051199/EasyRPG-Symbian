@@ -126,7 +126,7 @@ void CRgssRuntime::ConstructL(const TDesC& aGamePath)
     tableHost.context = this;
     tableHost.allocate = &CRgssRuntime::BitmapAllocate;
     tableHost.release = &CRgssRuntime::BitmapRelease;
-    tableHost.max_tables = 256;
+    tableHost.max_tables = 2048;
     const TInt tableResult = EasyRpgRgssTableInitialize(&tableHost);
     if (tableResult != ERgssTableOk)
     {
@@ -303,13 +303,18 @@ void CRgssRuntime::ProcessAudioCommands()
     TRgssAudioCommand command;
     while (iVmWorker->TakeAudioCommand(command))
     {
-        TBuf8<257> path;
+        TBuf8<320> path;
         const char* audioPath = NULL;
         if (command.iPath.Length() > 0)
         {
-            path.Copy(command.iPath);
-            path.Append(0);
-            audioPath = reinterpret_cast<const char*>(path.Ptr());
+            _LIT8(KRgssVirtualRoot8, "C:\\Data\\EasyRPG\\RGSS\\");
+            if (KRgssVirtualRoot8().Length() + command.iPath.Length() + 1 <= path.MaxLength())
+            {
+                path.Copy(KRgssVirtualRoot8);
+                path.Append(command.iPath);
+                path.Append(0);
+                audioPath = reinterpret_cast<const char*>(path.Ptr());
+            }
         }
         switch (command.iCommand)
         {

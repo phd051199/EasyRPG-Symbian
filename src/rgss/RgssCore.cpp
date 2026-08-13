@@ -188,6 +188,34 @@ extern "C" int EasyRpgRgssCoreConfigure(const EasyRpgRgssConfig* config)
     return ERgssOk;
 }
 
+extern "C" int EasyRpgRgssCoreResizeLogical(int logical_width, int logical_height)
+{
+    if (!gState.configured)
+        return ERgssErrorNotConfigured;
+    if (logical_width <= 0 || logical_height <= 0 ||
+        logical_width > 4096 || logical_height > 4096)
+        return ERgssErrorInvalidArgument;
+
+    int viewportWidth = gState.config.output_width;
+    int viewportHeight = (logical_height * gState.config.output_width) / logical_width;
+    if (viewportHeight > gState.config.output_height)
+    {
+        viewportHeight = gState.config.output_height;
+        viewportWidth = (logical_width * gState.config.output_height + logical_height / 2) /
+                        logical_height;
+    }
+    if (viewportWidth <= 0 || viewportHeight <= 0)
+        return ERgssErrorInvalidConfig;
+
+    gState.config.logical_width = logical_width;
+    gState.config.logical_height = logical_height;
+    gState.config.viewport_width = viewportWidth;
+    gState.config.viewport_height = viewportHeight;
+    gState.config.viewport_x = (gState.config.output_width - viewportWidth) / 2;
+    gState.config.viewport_y = (gState.config.output_height - viewportHeight) / 2;
+    return ERgssOk;
+}
+
 extern "C" int EasyRpgRgssCoreBindFramebuffer(void* pixels,
                                                int width,
                                                int height,

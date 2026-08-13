@@ -1,4 +1,5 @@
 #include <fbs.h>
+#include <unistd.h>
 
 #include "Encoding.h"
 #include "RgssGlyphCache.h"
@@ -14,6 +15,47 @@ namespace
 _LIT(KRgssVmThreadName, "EasyRPG-RGSS-VM");
 const char* const KAudioExtensions[] = { ".ogg", ".mp3", ".wav", ".mid", ".midi", ".wma" };
 const TInt KAudioExtensionCount = sizeof(KAudioExtensions) / sizeof(KAudioExtensions[0]);
+_LIT(KSaveBasePath, "C:\\Data\\EasyRPG\\Saves\\");
+
+TUint32 HashText(const TDesC& aText, TUint32 aSeed)
+{
+    TUint32 hash = aSeed;
+    for (TInt index = 0; index < aText.Length(); ++index)
+    {
+        const TUint16 value = aText[index];
+        hash ^= static_cast<TUint8>(value & 0xffu);
+        hash *= 16777619u;
+        hash ^= static_cast<TUint8>((value >> 8) & 0xffu);
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+void PrepareSaveDirectoryL(RFs& aFs, const TDesC& aGamePath)
+{
+    const TUint32 gameHash = HashText(aGamePath, 2166136261u);
+    TBuf<16> gameDirectory;
+    gameDirectory.Format(_L("%08x\\"), gameHash);
+
+    TFileName saveRoot;
+    saveRoot.Copy(KSaveBasePath);
+    saveRoot.Append(gameDirectory);
+    const TInt directoryError = aFs.MkDirAll(saveRoot);
+    if (directoryError != KErrNone && directoryError != KErrAlreadyExists)
+        User::Leave(directoryError);
+
+    TBuf8<KMaxFileName + 1> path;
+    for (TInt index = 0; index < saveRoot.Length(); ++index)
+    {
+        const TUint16 value = saveRoot[index];
+        if (value > 0x7fu)
+            User::Leave(KErrNotSupported);
+        path.Append(static_cast<TUint8>(value == '\\' ? '/' : value));
+    }
+    path.Append(0);
+    if (chdir(reinterpret_cast<const char*>(path.Ptr())) != 0)
+        User::Leave(KErrPathNotFound);
+}
 
 void* ScriptAllocate(void*, unsigned int aBytes)
 {
@@ -281,6 +323,7 @@ void CRgssVmWorker::RunVmL()
 
     User::LeaveIfError(iFs.Connect());
     CleanupClosePushL(iFs);
+    PrepareSaveDirectoryL(iFs, iGamePath);
     iResources = CZipVfs::OpenL(iFs, iGamePath);
     CleanupStack::PushL(iResources);
 
@@ -349,15 +392,20 @@ void CRgssVmWorker::RunVmL()
     {
         const TInt error = VmResultToError(initResult);
         SignalStarted(error);
+        iFrameResume.Wait();
         User::Leave(error);
     }
     iVmInitialized = ETrue;
     CleanupStack::PushL(TCleanupItem(&CRgssVmWorker::ShutdownVm, this));
-    SignalStarted(KErrNone);
 
     const TInt loadResult = EasyRpgRgssVmLoadScripts(scriptsPath);
     if (loadResult != ERgssVmOk && !iStopRequested)
-        User::Leave(VmResultToError(loadResult));
+    {
+        const TInt error = VmResultToError(loadResult);
+        SignalStarted(error);
+        iFrameResume.Wait();
+        User::Leave(error);
+    }
 
     CleanupStack::PopAndDestroy();
     iVmInitialized = EFalse;
@@ -649,6 +697,8 @@ int CRgssVmWorker::VmFrameSync(void* aContext,
 
     self->iFrameRate = aFrameRate;
     self->iFrameCount = aFrameCount;
+    if (!self->iStartSignaled)
+        self->SignalStarted(KErrNone);
     self->iFrameReady.Signal();
     self->iFrameResume.Wait();
 

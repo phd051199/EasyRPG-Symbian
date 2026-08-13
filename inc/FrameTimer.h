@@ -21,6 +21,7 @@ public:
     TBool Running() const;
     void SetFrameSkipEnabled(TBool aEnabled);
     TBool FrameSkipEnabled() const;
+    void RequestRender();
 
 private:
     enum
@@ -52,6 +53,7 @@ private:
     TInt64 iElapsedCounter;
     TInt64 iNextDeadlineCounter;
     TUint32 iLogicFrame;
+    TUint32 iNextRenderLogicFrame;
     TBool iRunning;
     TBool iFrameSkipEnabled;
     TBool iRenderPending;

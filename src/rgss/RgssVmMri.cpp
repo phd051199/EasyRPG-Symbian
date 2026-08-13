@@ -181,6 +181,29 @@ VALUE NGraphicsSetFrameCount(VALUE, VALUE value)
     return result == ERgssGraphicsOk ? value : RaiseResult("Graphics.frame_count=", result);
 }
 
+VALUE NGraphicsWidth(VALUE)
+{
+    EasyRpgRgssConfig config;
+    const int result = EasyRpgRgssCoreGetConfig(&config);
+    return result == ERgssOk ? INT2NUM(config.logical_width) : RaiseResult("Graphics.width", result);
+}
+
+VALUE NGraphicsHeight(VALUE)
+{
+    EasyRpgRgssConfig config;
+    const int result = EasyRpgRgssCoreGetConfig(&config);
+    return result == ERgssOk ? INT2NUM(config.logical_height) : RaiseResult("Graphics.height", result);
+}
+
+VALUE NGraphicsResize(VALUE, VALUE width, VALUE height)
+{
+    const int result = EasyRpgRgssCoreResizeLogical(NUM2INT(width), NUM2INT(height));
+    if (result != ERgssOk)
+        return RaiseResult("Graphics.resize_screen", result);
+    EasyRpgRgssTilemapInvalidateAll();
+    return Qnil;
+}
+
 VALUE NInputUpdate(VALUE)
 {
     const unsigned int mask = gHost.input(gHost.context, 0);
@@ -929,6 +952,9 @@ void BindNative()
     DefineNativeMethod("graphics_frame_rate_set", RUBY_METHOD_FUNC(NGraphicsSetFrameRate), 1);
     DefineNativeMethod("graphics_frame_count", RUBY_METHOD_FUNC(NGraphicsFrameCount), 0);
     DefineNativeMethod("graphics_frame_count_set", RUBY_METHOD_FUNC(NGraphicsSetFrameCount), 1);
+    DefineNativeMethod("graphics_width", RUBY_METHOD_FUNC(NGraphicsWidth), 0);
+    DefineNativeMethod("graphics_height", RUBY_METHOD_FUNC(NGraphicsHeight), 0);
+    DefineNativeMethod("graphics_resize", RUBY_METHOD_FUNC(NGraphicsResize), 2);
     DefineNativeMethod("input_update", RUBY_METHOD_FUNC(NInputUpdate), 0);
     DefineNativeMethod("input_press", RUBY_METHOD_FUNC(NInputPress), 1);
     DefineNativeMethod("input_trigger", RUBY_METHOD_FUNC(NInputTrigger), 1);
@@ -1033,7 +1059,6 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
     const int bootstrapResult = EvalProtected(KEasyRpgRgssBootstrap);
     if (bootstrapResult != ERgssVmOk)
     {
-        ruby_cleanup(0);
         ResetHost();
         return bootstrapResult;
     }
@@ -1089,6 +1114,5 @@ extern "C" void EasyRpgRgssVmShutdown(void)
 {
     if (!gInitialized)
         return;
-    ruby_cleanup(0);
     ResetHost();
 }

@@ -41,6 +41,7 @@ private:
     void RememberDynamicScanKey(TInt aScanCode, TUint32 aPlayerKey);
     void ForgetDynamicScanKey(TInt aScanCode);
     void SetPlayerKeyMask(TUint32 aMask, TBool aPressed);
+    void RequestInputRender();
     void ClearPlayerInput();
     void OpenMenu();
     void CloseMenu();

@@ -24,6 +24,7 @@ CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
       iElapsedCounter(0),
       iNextDeadlineCounter(0),
       iLogicFrame(0),
+      iNextRenderLogicFrame(KLogicTicksPerRender),
       iRunning(EFalse),
       iFrameSkipEnabled(ETrue),
       iRenderPending(EFalse)
@@ -60,6 +61,7 @@ void CFrameTimer::Start()
     iElapsedCounter = 0;
     iLastCounter = User::FastCounter();
     iNextDeadlineCounter = 0;
+    iNextRenderLogicFrame = KLogicTicksPerRender;
     iRenderPending = EFalse;
     AdvanceDeadline();
     ScheduleNext();
@@ -88,6 +90,11 @@ void CFrameTimer::SetFrameSkipEnabled(TBool aEnabled)
 TBool CFrameTimer::FrameSkipEnabled() const
 {
     return iFrameSkipEnabled;
+}
+
+void CFrameTimer::RequestRender()
+{
+    iRenderPending = ETrue;
 }
 
 void CFrameTimer::AdvanceDeadline()
@@ -167,16 +174,19 @@ void CFrameTimer::RunL()
     AdvanceDeadline();
     ++iLogicFrame;
     const TBool scheduledRender =
-        (iLogicFrame % KLogicTicksPerRender) == 0;
+        static_cast<TInt32>(iLogicFrame - iNextRenderLogicFrame) >= 0;
     if (scheduledRender)
         iRenderPending = ETrue;
 
     const TBool stillBehind = iElapsedCounter >= iNextDeadlineCounter;
     const TBool renderFrame = iFrameSkipEnabled
         ? (!stillBehind && iRenderPending)
-        : scheduledRender;
+        : iRenderPending;
     if (renderFrame)
+    {
         iRenderPending = EFalse;
+        iNextRenderLogicFrame = iLogicFrame + KLogicTicksPerRender;
+    }
 
     TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
     if (error != KErrNone)

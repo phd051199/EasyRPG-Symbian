@@ -119,6 +119,7 @@ private:
 	void CreateTileCache(const std::vector<short>& nmap_data);
 	void PrepareTileDrawCache();
 	void DrawTiles(Bitmap& destination, int z_order, const Rect* paint_clip);
+	void DrawTilesView(Bitmap& destination, int z_order, const Rect* paint_clip, int view_ox, int view_oy, int view_width, int view_height);
 	void GenerateAutotileAB(short ID, short animID);
 	void GenerateAutotileD(short ID);
 
@@ -180,8 +181,8 @@ private:
 	Tone tone;
 #ifdef EASYRPG_SYMBIAN
 	uint32_t symbian_revision = 1;
-	bool symbian_has_animated_ab = false;
-	bool symbian_has_animated_c = false;
+	bool symbian_has_animated_ab[2] = { false, false };
+	bool symbian_has_animated_c[2] = { false, false };
 	struct SymbianScrollCacheState {
 		BitmapRef bitmap;
 		uint32_t revision = 0;
@@ -197,6 +198,7 @@ private:
 	void SymbianScrollTouch();
 	int SymbianScrollCacheIndex(int z_order) const;
 	bool SymbianUseScrollCache(int z_order) const;
+	bool SymbianUseAnchoredScrollCache(int z_order) const;
 	bool SymbianScrollCacheValid(int z_order, int display_width, int display_height) const;
 	bool SymbianPrepareScrollCache(int z_order, int display_width, int display_height);
 	void SymbianShiftScrollCache(int z_order, int shift_x, int shift_y);

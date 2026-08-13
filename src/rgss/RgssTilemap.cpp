@@ -841,6 +841,17 @@ extern "C" int EasyRpgRgssTilemapUpdate(int handle)
     return ERgssTilemapOk;
 }
 
+extern "C" void EasyRpgRgssTilemapInvalidateAll(void)
+{
+    if (!gTilemaps.initialized)
+        return;
+    for (int index = 0; index < gTilemaps.host.max_tilemaps; ++index)
+    {
+        if (gTilemaps.slots[index].used)
+            gTilemaps.slots[index].commands_dirty = 1;
+    }
+}
+
 extern "C" int EasyRpgRgssTilemapCount(void)
 {
     return gTilemaps.initialized ? gTilemaps.active_count : ERgssTilemapErrorNotInitialized;

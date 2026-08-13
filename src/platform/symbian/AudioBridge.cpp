@@ -1205,13 +1205,17 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
 
     EnsureMixerL();
     HBufC8* file = NULL;
-    TRAPD(readError, file = ReadFileLC(path, 2 * 1024 * 1024));
+    TRAPD(readError,
+        file = ReadFileLC(path, 2 * 1024 * 1024);
+        CleanupStack::Pop(file);
+    );
     if (readError == KErrTooBig)
     {
         PlayNativeSampledBgmL(path, aVolume, aPitch, aFadeIn);
         return;
     }
     User::LeaveIfError(readError);
+    CleanupStack::PushL(file);
     HBufC8* pcm = NULL;
     TInt frameCount = 0;
     TInt sampleRate = 0;

@@ -65,6 +65,7 @@ int EasyRpgRgssDetectProject(EasyRpgRgssFileExistsFn exists_fn,
                              void* context);
 void EasyRpgRgssCoreReset(void);
 int EasyRpgRgssCoreConfigure(const EasyRpgRgssConfig* config);
+int EasyRpgRgssCoreResizeLogical(int logical_width, int logical_height);
 int EasyRpgRgssCoreBindFramebuffer(void* pixels,
                                    int width,
                                    int height,

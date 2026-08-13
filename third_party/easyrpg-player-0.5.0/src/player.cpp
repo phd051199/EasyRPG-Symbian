@@ -332,7 +332,9 @@ void Player::Update(bool update_scene) {
 	}
 #endif
 
+#ifndef EASYRPG_SYMBIAN
 	DisplayUi->ProcessEvents();
+#endif
 
 	if (exit_flag) {
 		Scene::PopUntil(Scene::Null);
@@ -346,14 +348,19 @@ void Player::Update(bool update_scene) {
 		}
 	}
 
+#ifdef EASYRPG_SYMBIAN
+	Input::Update();
+	if (update_scene)
+		Scene::instance->Update();
+	if (Scene::instance.get() == symbian_scene_before_update) {
+		Graphics::Update(symbian_render_frame);
+		Audio().Update();
+	}
+#else
 	Audio().Update();
 	Input::Update();
-	if (update_scene) {
+	if (update_scene)
 		Scene::instance->Update();
-	}
-#ifdef EASYRPG_SYMBIAN
-	if (Scene::instance.get() == symbian_scene_before_update)
-		Graphics::Update(symbian_render_frame);
 #endif
 
 #ifndef EASYRPG_SYMBIAN

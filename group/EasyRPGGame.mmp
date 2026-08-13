@@ -4,7 +4,7 @@ UID               0x100039CE 0xE31EA5A2
 
 EPOCHEAPSIZE      0x100000 0x2000000
 EPOCSTACKSIZE     0x10000
-OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
+OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti -mtune=arm1136jf-s
 
 SOURCEPATH        ..\src\platform\symbian
 SOURCE            RuntimeMain.cpp
