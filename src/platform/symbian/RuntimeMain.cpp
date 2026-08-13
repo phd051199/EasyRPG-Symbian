@@ -44,6 +44,7 @@ void RunRuntimeL()
 
     CRuntimeEngine* runtime = CRuntimeEngine::NewL();
     CleanupStack::PushL(runtime);
+    RProcess::Rendezvous(KErrNone);
     runtime->Run();
     CleanupStack::PopAndDestroy(runtime);
 

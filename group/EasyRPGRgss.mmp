@@ -12,6 +12,7 @@ SOURCE            RgssRuntimeMain.cpp
 SOURCE            RgssEngine.cpp
 SOURCE            RgssRuntime.cpp
 SOURCE            RgssVmWorker.cpp
+SOURCE            RgssGlyphCache.cpp
 SOURCE            RgssDisplaySurface.cpp
 SOURCE            RgssImageLoader.cpp
 SOURCE            FrameTimer.cpp
@@ -33,6 +34,7 @@ LIBRARY           hal.lib
 LIBRARY           efsrv.lib
 LIBRARY           charconv.lib
 LIBRARY           imageconversion.lib
+LIBRARY           libz.lib
 LIBRARY           ws32.lib
 STATICLIBRARY     EasyRpgRgssCore.lib
 

@@ -168,7 +168,122 @@ void TilemapLayer::SymbianTouch() {
 	++symbian_revision;
 	if (symbian_revision == 0)
 		symbian_revision = 1;
+	symbian_scroll_cache_revision = 0;
 	SymbianRenderDamage::RequestFullFrame();
+}
+
+void TilemapLayer::SymbianScrollTouch() {
+	SymbianRenderDamage::RequestFullFrame();
+}
+
+bool TilemapLayer::SymbianUseScrollCache(int z_order) const {
+	return z_order == -2 + layer;
+}
+
+void TilemapLayer::SymbianShiftScrollCache(int shift_x, int shift_y) {
+	if (!symbian_scroll_cache)
+		return;
+	const int width = symbian_scroll_cache->GetWidth();
+	const int height = symbian_scroll_cache->GetHeight();
+	const int bytes = symbian_scroll_cache->bpp();
+	const int abs_x = shift_x < 0 ? -shift_x : shift_x;
+	const int abs_y = shift_y < 0 ? -shift_y : shift_y;
+	const int copy_width = width - abs_x;
+	const int copy_height = height - abs_y;
+	if (copy_width <= 0 || copy_height <= 0 || bytes <= 0)
+		return;
+
+	const int source_x = shift_x < 0 ? -shift_x : 0;
+	const int destination_x = shift_x > 0 ? shift_x : 0;
+	const int source_y = shift_y < 0 ? -shift_y : 0;
+	const int destination_y = shift_y > 0 ? shift_y : 0;
+	const int pitch = symbian_scroll_cache->pitch();
+	uint8_t* pixels = static_cast<uint8_t*>(symbian_scroll_cache->pixels());
+	const size_t row_bytes = static_cast<size_t>(copy_width) * static_cast<size_t>(bytes);
+
+	if (destination_y > source_y) {
+		for (int row = copy_height - 1; row >= 0; --row) {
+			std::memmove(pixels + (destination_y + row) * pitch + destination_x * bytes,
+				pixels + (source_y + row) * pitch + source_x * bytes,
+				row_bytes);
+		}
+	} else {
+		for (int row = 0; row < copy_height; ++row) {
+			std::memmove(pixels + (destination_y + row) * pitch + destination_x * bytes,
+				pixels + (source_y + row) * pitch + source_x * bytes,
+				row_bytes);
+		}
+	}
+}
+
+void TilemapLayer::SymbianRefreshScrollCacheRect(int z_order, const Rect& input) {
+	if (!symbian_scroll_cache)
+		return;
+	Rect rect = input;
+	rect.Adjust(symbian_scroll_cache->GetRect());
+	if (rect.IsEmpty())
+		return;
+	symbian_scroll_cache->ClearRect(rect);
+	DrawTiles(*symbian_scroll_cache, z_order, &rect);
+}
+
+bool TilemapLayer::SymbianPrepareScrollCache(int z_order, int display_width, int display_height) {
+	if (!SymbianUseScrollCache(z_order) || display_width <= 0 || display_height <= 0)
+		return false;
+
+	const bool transparent_cache = !fast_blit;
+	if (!symbian_scroll_cache ||
+		symbian_scroll_cache->GetWidth() != display_width ||
+		symbian_scroll_cache->GetHeight() != display_height ||
+		symbian_scroll_cache->GetTransparent() != transparent_cache) {
+		symbian_scroll_cache = Bitmap::Create(display_width, display_height, transparent_cache, transparent_cache ? 16 : 0);
+		symbian_scroll_cache_revision = 0;
+	}
+	if (!symbian_scroll_cache || !symbian_scroll_cache->pixels())
+		return false;
+
+	const bool rebuild = symbian_scroll_cache_revision != symbian_revision ||
+		symbian_scroll_cache_animation_step_ab != animation_step_ab ||
+		symbian_scroll_cache_animation_step_c != animation_step_c;
+	if (rebuild) {
+		symbian_scroll_cache->Clear();
+		DrawTiles(*symbian_scroll_cache, z_order, NULL);
+		symbian_scroll_cache_revision = symbian_revision;
+		symbian_scroll_cache_ox = ox;
+		symbian_scroll_cache_oy = oy;
+		symbian_scroll_cache_animation_step_ab = animation_step_ab;
+		symbian_scroll_cache_animation_step_c = animation_step_c;
+		return true;
+	}
+
+	const int shift_x = symbian_scroll_cache_ox - ox;
+	const int shift_y = symbian_scroll_cache_oy - oy;
+	if (shift_x == 0 && shift_y == 0)
+		return true;
+
+	const int abs_x = shift_x < 0 ? -shift_x : shift_x;
+	const int abs_y = shift_y < 0 ? -shift_y : shift_y;
+	if (abs_x >= display_width || abs_y >= display_height) {
+		symbian_scroll_cache->Clear();
+		DrawTiles(*symbian_scroll_cache, z_order, NULL);
+	} else {
+		SymbianShiftScrollCache(shift_x, shift_y);
+		if (shift_x > 0)
+			SymbianRefreshScrollCacheRect(z_order, Rect(0, 0, shift_x, display_height));
+		else if (shift_x < 0)
+			SymbianRefreshScrollCacheRect(z_order, Rect(display_width + shift_x, 0, -shift_x, display_height));
+		if (shift_y > 0)
+			SymbianRefreshScrollCacheRect(z_order, Rect(0, 0, display_width, shift_y));
+		else if (shift_y < 0)
+			SymbianRefreshScrollCacheRect(z_order, Rect(0, display_height + shift_y, display_width, -shift_y));
+	}
+
+	symbian_scroll_cache_revision = symbian_revision;
+	symbian_scroll_cache_ox = ox;
+	symbian_scroll_cache_oy = oy;
+	symbian_scroll_cache_animation_step_ab = animation_step_ab;
+	symbian_scroll_cache_animation_step_c = animation_step_c;
+	return true;
 }
 
 unsigned int TilemapLayer::SymbianSignature(int z_order) const {
@@ -312,12 +427,33 @@ void TilemapLayer::Draw(int z_order) {
 	if (!destination_ref)
 		return;
 	Bitmap& destination = *destination_ref;
+#ifdef EASYRPG_SYMBIAN
+	if (SymbianRenderDamage::IsFullPaintRecording() &&
+		SymbianPrepareScrollCache(z_order, display_width, display_height)) {
+		destination.BlitFast(0, 0, *symbian_scroll_cache, symbian_scroll_cache->GetRect(), Opacity::opaque);
+		return;
+	}
+	DrawTiles(destination, z_order, SymbianRenderDamage::PaintClipRect());
+#else
+	DrawTiles(destination, z_order, NULL);
+#endif
+}
+
+void TilemapLayer::DrawTiles(Bitmap& destination, int z_order, const Rect* paint_clip) {
+	const int display_width = DisplayUi->GetWidth();
+	const int display_height = DisplayUi->GetHeight();
+	const int offset_x = ox % TILE_SIZE;
+	const int offset_y = oy % TILE_SIZE;
+	int tiles_x = (display_width + TILE_SIZE - 1) / TILE_SIZE;
+	int tiles_y = (display_height + TILE_SIZE - 1) / TILE_SIZE;
+	if (offset_x != 0)
+		++tiles_x;
+	if (offset_y != 0)
+		++tiles_y;
 	int first_tile_x = 0;
 	int first_tile_y = 0;
 	int last_tile_x = tiles_x;
 	int last_tile_y = tiles_y;
-#ifdef EASYRPG_SYMBIAN
-	const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
 	if (paint_clip) {
 		const Rect& dirty = *paint_clip;
 		const int base_x = -offset_x;
@@ -331,7 +467,6 @@ void TilemapLayer::Draw(int z_order) {
 		while (last_tile_y > first_tile_y && base_y + (last_tile_y - 1) * TILE_SIZE >= dirty.y + dirty.height)
 			--last_tile_y;
 	}
-#endif
 	const bool neutral_tone = tone == Tone();
 	const int first_map_y = WrapTileIndex(oy / TILE_SIZE, height);
 	int map_x = WrapTileIndex(ox / TILE_SIZE, width);
@@ -908,7 +1043,7 @@ int TilemapLayer::GetOx() const {
 void TilemapLayer::SetOx(int nox) {
 #ifdef EASYRPG_SYMBIAN
 	if (ox != nox)
-		SymbianTouch();
+		SymbianScrollTouch();
 #endif
 	ox = nox;
 }
@@ -920,7 +1055,7 @@ int TilemapLayer::GetOy() const {
 void TilemapLayer::SetOy(int noy) {
 #ifdef EASYRPG_SYMBIAN
 	if (oy != noy)
-		SymbianTouch();
+		SymbianScrollTouch();
 #endif
 	oy = noy;
 }
@@ -986,6 +1121,10 @@ void TilemapLayer::Substitute(int old_id, int new_id) {
 }
 
 void TilemapLayer::SetFastBlit(bool fast) {
+#ifdef EASYRPG_SYMBIAN
+	if (fast_blit != fast)
+		SymbianTouch();
+#endif
 	fast_blit = fast;
 }
 

@@ -157,6 +157,11 @@ void CFrameTimer::RunLoop()
             continue;
         }
 
+        PumpReady();
+        if (!iRunning)
+            return;
+        UpdateElapsedCounter(User::FastCounter());
+
         TInt dueTicks = 0;
         while (iElapsedCounter >= iNextDeadlineCounter &&
                dueTicks < KMaxLogicCatchUpTicks)

@@ -1,3 +1,5 @@
+#include <zlib.h>
+
 #include "RgssScriptArchiveBridge.h"
 
 namespace
@@ -408,6 +410,157 @@ int InspectArchive(const EasyRpgRgssScriptArchiveReader* reader,
         return ERgssScriptArchiveErrorCorrupt;
     return ERgssScriptArchiveOk;
 }
+
+struct TInflateAllocator
+{
+    EasyRpgRgssScriptArchiveAllocFn allocate;
+    EasyRpgRgssScriptArchiveFreeFn release;
+    void* context;
+};
+
+voidpf ScriptZAlloc(voidpf opaque, uInt items, uInt size)
+{
+    TInflateAllocator* allocator = static_cast<TInflateAllocator*>(opaque);
+    if (!allocator || !allocator->allocate || items == 0 || size == 0 ||
+        items > 0xffffffffu / size)
+        return Z_NULL;
+    return allocator->allocate(allocator->context,
+                               static_cast<unsigned int>(items) *
+                               static_cast<unsigned int>(size));
+}
+
+void ScriptZFree(voidpf opaque, voidpf address)
+{
+    TInflateAllocator* allocator = static_cast<TInflateAllocator*>(opaque);
+    if (allocator && allocator->release && address)
+        allocator->release(allocator->context, address);
+}
+
+int InflatePass(const EasyRpgRgssScriptArchiveReader& reader,
+                const EasyRpgRgssScriptEntry& entry,
+                TInflateAllocator& allocator,
+                unsigned char* output,
+                int outputCapacity,
+                int maxOutputBytes,
+                int& outputLength)
+{
+    unsigned char inputBuffer[1024];
+    unsigned char scratchBuffer[1024];
+    z_stream stream;
+    stream.next_in = Z_NULL;
+    stream.avail_in = 0;
+    stream.total_in = 0;
+    stream.next_out = Z_NULL;
+    stream.avail_out = 0;
+    stream.total_out = 0;
+    stream.msg = Z_NULL;
+    stream.state = Z_NULL;
+    stream.zalloc = ScriptZAlloc;
+    stream.zfree = ScriptZFree;
+    stream.opaque = &allocator;
+    stream.data_type = Z_BINARY;
+    stream.adler = 0;
+    stream.reserved = 0;
+
+    const int initResult = inflateInit(&stream);
+    if (initResult != Z_OK)
+        return initResult == Z_MEM_ERROR
+            ? ERgssScriptArchiveErrorNoMemory
+            : ERgssScriptArchiveErrorCorrupt;
+
+    int result = ERgssScriptArchiveOk;
+    int inputPosition = 0;
+    int done = 0;
+    while (!done)
+    {
+        if (stream.avail_in == 0 && inputPosition < entry.data_length)
+        {
+            int chunk = entry.data_length - inputPosition;
+            if (chunk > static_cast<int>(sizeof(inputBuffer)))
+                chunk = static_cast<int>(sizeof(inputBuffer));
+            const int read = reader.read(reader.context,
+                                         entry.data_offset + inputPosition,
+                                         inputBuffer,
+                                         chunk);
+            if (read != chunk)
+            {
+                result = ERgssScriptArchiveErrorRead;
+                break;
+            }
+            inputPosition += chunk;
+            stream.next_in = inputBuffer;
+            stream.avail_in = static_cast<uInt>(chunk);
+        }
+
+        const unsigned long beforeOutput = stream.total_out;
+        if (output)
+        {
+            if (stream.total_out > static_cast<unsigned long>(outputCapacity))
+            {
+                result = ERgssScriptArchiveErrorCorrupt;
+                break;
+            }
+            const int remaining = outputCapacity - static_cast<int>(stream.total_out);
+            if (remaining <= 0)
+            {
+                stream.next_out = scratchBuffer;
+                stream.avail_out = static_cast<uInt>(sizeof(scratchBuffer));
+            }
+            else
+            {
+                stream.next_out = output + stream.total_out;
+                stream.avail_out = static_cast<uInt>(remaining);
+            }
+        }
+        else
+        {
+            stream.next_out = scratchBuffer;
+            stream.avail_out = static_cast<uInt>(sizeof(scratchBuffer));
+        }
+
+        const int inflateResult = inflate(&stream, Z_NO_FLUSH);
+        if (stream.total_out > static_cast<unsigned long>(maxOutputBytes))
+        {
+            result = ERgssScriptArchiveErrorCapacity;
+            break;
+        }
+        if (output && stream.total_out > static_cast<unsigned long>(outputCapacity))
+        {
+            result = ERgssScriptArchiveErrorCorrupt;
+            break;
+        }
+        if (inflateResult == Z_STREAM_END)
+        {
+            done = 1;
+            break;
+        }
+        if (inflateResult == Z_MEM_ERROR)
+        {
+            result = ERgssScriptArchiveErrorNoMemory;
+            break;
+        }
+        if (inflateResult != Z_OK)
+        {
+            result = ERgssScriptArchiveErrorCorrupt;
+            break;
+        }
+        if (stream.total_out == beforeOutput &&
+            stream.avail_in == 0 && inputPosition >= entry.data_length)
+        {
+            result = ERgssScriptArchiveErrorCorrupt;
+            break;
+        }
+    }
+
+    if (result == ERgssScriptArchiveOk &&
+        (stream.total_in != static_cast<unsigned long>(entry.data_length) || !done))
+        result = ERgssScriptArchiveErrorCorrupt;
+    if (stream.total_out > 0x7fffffffu)
+        result = ERgssScriptArchiveErrorCapacity;
+    outputLength = static_cast<int>(stream.total_out);
+    inflateEnd(&stream);
+    return result;
+}
 }
 
 extern "C" int EasyRpgRgssScriptArchiveInspect(
@@ -424,4 +577,67 @@ extern "C" int EasyRpgRgssScriptArchiveValidate(
     int* count)
 {
     return InspectArchive(reader, 0, 0, count, 1);
+}
+
+extern "C" int EasyRpgRgssScriptArchiveInflate(
+    const EasyRpgRgssScriptArchiveReader* reader,
+    const EasyRpgRgssScriptEntry* entry,
+    EasyRpgRgssScriptArchiveAllocFn allocate,
+    EasyRpgRgssScriptArchiveFreeFn release,
+    void* allocation_context,
+    int max_output_bytes,
+    unsigned char** output,
+    int* output_length)
+{
+    if (!reader || !reader->read || reader->size < 0 || !entry ||
+        !allocate || !release || max_output_bytes <= 0 || !output || !output_length ||
+        entry->data_offset < 0 || entry->data_length < 0 ||
+        entry->data_offset > reader->size ||
+        entry->data_length > reader->size - entry->data_offset)
+        return ERgssScriptArchiveErrorInvalidArgument;
+
+    *output = 0;
+    *output_length = 0;
+    TInflateAllocator allocator;
+    allocator.allocate = allocate;
+    allocator.release = release;
+    allocator.context = allocation_context;
+
+    int required = 0;
+    int result = InflatePass(*reader,
+                             *entry,
+                             allocator,
+                             0,
+                             0,
+                             max_output_bytes,
+                             required);
+    if (result != ERgssScriptArchiveOk)
+        return result;
+    if (required < 0 || required > max_output_bytes || required >= 0x7fffffff)
+        return ERgssScriptArchiveErrorCapacity;
+
+    unsigned char* data = static_cast<unsigned char*>(
+        allocate(allocation_context, static_cast<unsigned int>(required + 1)));
+    if (!data)
+        return ERgssScriptArchiveErrorNoMemory;
+
+    int actual = 0;
+    result = InflatePass(*reader,
+                         *entry,
+                         allocator,
+                         data,
+                         required,
+                         max_output_bytes,
+                         actual);
+    if (result != ERgssScriptArchiveOk || actual != required)
+    {
+        release(allocation_context, data);
+        return result != ERgssScriptArchiveOk
+            ? result : ERgssScriptArchiveErrorCorrupt;
+    }
+
+    data[actual] = 0;
+    *output = data;
+    *output_length = actual;
+    return ERgssScriptArchiveOk;
 }

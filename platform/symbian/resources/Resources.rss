@@ -79,7 +79,7 @@ RESOURCE LOCALISABLE_APP_INFO r_localisable_app_info
 
 RESOURCE DIALOG r_easyrpg_loading_wait_note
 {
-    flags = EAknWaitNoteFlags;
+    flags = EAknProgressNoteFlags;
     buttons = R_AVKON_SOFTKEYS_EMPTY;
     items =
     {
@@ -89,9 +89,8 @@ RESOURCE DIALOG r_easyrpg_loading_wait_note
             id = EGeneralNote;
             control = AVKON_NOTE
             {
-                layout = EWaitLayout;
+                layout = EProgressLayout;
                 singular_label = qtn_loading;
-                animation = R_QGN_GRAF_WAIT_BAR_ANIM;
             };
         }
     };

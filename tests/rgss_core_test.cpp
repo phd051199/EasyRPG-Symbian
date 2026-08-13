@@ -93,9 +93,42 @@ int VmBitmapLoad(void*, const char*, int* handle)
     return ERgssVmOk;
 }
 
+int VmTextDecode(void*, const unsigned char* text, int length, unsigned int* codepoints, int capacity)
+{
+    if (!text || length < 0 || !codepoints || capacity < length)
+        return ERgssVmErrorInvalidArgument;
+    for (int index = 0; index < length; ++index)
+        codepoints[index] = text[index];
+    return length;
+}
+
 int VmFrameSync(void*, int, int)
 {
     return ERgssVmOk;
+}
+
+int VmScriptCount(void*)
+{
+    return 0;
+}
+
+int VmScriptInfo(void*, int, int*, int*)
+{
+    return ERgssVmErrorInvalidArgument;
+}
+
+int VmScriptName(void*, int, void*, int)
+{
+    return ERgssVmErrorInvalidArgument;
+}
+
+int VmScriptInflate(void*, int, unsigned char**, int*)
+{
+    return ERgssVmErrorInvalidArgument;
+}
+
+void VmRelease(void*, void*)
+{
 }
 
 void VmDirty(void*, int, int, int, int)
@@ -110,6 +143,27 @@ void* BitmapAllocate(void*, unsigned int bytes)
 void BitmapRelease(void*, void* memory)
 {
     free(memory);
+}
+
+int BitmapGlyph(void*,
+                unsigned int codepoint,
+                const unsigned short** rows,
+                int* width,
+                int* height,
+                int* advance)
+{
+    static const unsigned short glyphRows[12] = {
+        0x0ff0, 0x0800, 0x0800, 0x0ff0,
+        0x0810, 0x0810, 0x0ff0, 0x0810,
+        0x0810, 0x0ff0, 0x0000, 0x0000
+    };
+    if (codepoint != 0x3042 || !rows || !width || !height || !advance)
+        return 0;
+    *rows = glyphRows;
+    *width = 12;
+    *height = 12;
+    *advance = 12;
+    return 1;
 }
 }
 
@@ -206,6 +260,7 @@ int main()
     bitmapHost.context = 0;
     bitmapHost.allocate = BitmapAllocate;
     bitmapHost.release = BitmapRelease;
+    bitmapHost.glyph = BitmapGlyph;
     bitmapHost.max_bitmaps = 8;
     assert(EasyRpgRgssBitmapInitialize(&bitmapHost) == ERgssBitmapOk);
     int bitmap = 0;
@@ -238,6 +293,113 @@ int main()
     assert(framebuffer[0] == 0xf800);
     assert(framebuffer[1] == 0xf800);
     assert(framebuffer[320] == 0xf800);
+
+    int textBitmap = 0;
+    assert(EasyRpgRgssBitmapCreate(96, 32, &textBitmap) == ERgssBitmapOk);
+    EasyRpgRgssTextStyle textStyle;
+    textStyle.font_size = 22;
+    textStyle.red = 255;
+    textStyle.green = 255;
+    textStyle.blue = 255;
+    textStyle.alpha = 255;
+    textStyle.bold = 0;
+    textStyle.italic = 0;
+    textStyle.shadow = 0;
+    textStyle.align = 0;
+    const unsigned int asciiText[] = {'A', 'B'};
+    int textWidth = 0;
+    int textHeight = 0;
+    assert(EasyRpgRgssBitmapTextSize(textBitmap,
+                                     asciiText,
+                                     2,
+                                     &textStyle,
+                                     &textWidth,
+                                     &textHeight) == ERgssBitmapOk);
+    assert(textWidth == 24);
+    assert(textHeight == 22);
+    EasyRpgRgssRect textRect;
+    textRect.x = 0;
+    textRect.y = 0;
+    textRect.width = 96;
+    textRect.height = 32;
+    assert(EasyRpgRgssBitmapDrawText(textBitmap,
+                                     &textRect,
+                                     asciiText,
+                                     2,
+                                     &textStyle) == ERgssBitmapOk);
+    unsigned short* textColor = 0;
+    unsigned char* textAlpha = 0;
+    int textPitch = 0;
+    assert(EasyRpgRgssBitmapLock(textBitmap,
+                                 &textColor,
+                                 &textAlpha,
+                                 &textPitch) == ERgssBitmapOk);
+    int textPixels = 0;
+    for (int textPixel = 0; textPixel < textPitch * 32; ++textPixel)
+        textPixels += textAlpha[textPixel] != 0;
+    assert(textPixels > 40);
+    const unsigned int japaneseText[] = {0x3042};
+    textStyle.font_size = 12;
+    assert(EasyRpgRgssBitmapTextSize(textBitmap,
+                                     japaneseText,
+                                     1,
+                                     &textStyle,
+                                     &textWidth,
+                                     &textHeight) == ERgssBitmapOk);
+    assert(textWidth == 12);
+    assert(textHeight == 12);
+    assert(EasyRpgRgssBitmapDestroy(textBitmap) == ERgssBitmapOk);
+
+    int bltSource = 0;
+    int bltDestination = 0;
+    assert(EasyRpgRgssBitmapCreate(2, 1, &bltSource) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapCreate(4, 1, &bltDestination) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapSetPixel(bltSource, 0, 0, 255, 0, 0, 255) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapSetPixel(bltSource, 1, 0, 0, 255, 0, 255) == ERgssBitmapOk);
+    EasyRpgRgssRect bltSourceRect;
+    bltSourceRect.x = 0;
+    bltSourceRect.y = 0;
+    bltSourceRect.width = 2;
+    bltSourceRect.height = 1;
+    EasyRpgRgssRect bltDestinationRect;
+    bltDestinationRect.x = 0;
+    bltDestinationRect.y = 0;
+    bltDestinationRect.width = 4;
+    bltDestinationRect.height = 1;
+    assert(EasyRpgRgssBitmapStretchBlt(bltDestination,
+                                       &bltDestinationRect,
+                                       bltSource,
+                                       &bltSourceRect,
+                                       255) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapGetPixel(bltDestination, 0, 0, &red, &green, &blue, &alpha) == ERgssBitmapOk);
+    assert(red == 255 && green == 0 && blue == 0 && alpha == 255);
+    assert(EasyRpgRgssBitmapGetPixel(bltDestination, 3, 0, &red, &green, &blue, &alpha) == ERgssBitmapOk);
+    assert(red == 0 && green == 255 && blue == 0 && alpha == 255);
+    assert(EasyRpgRgssBitmapHueChange(bltSource, 120) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapGetPixel(bltSource, 0, 0, &red, &green, &blue, &alpha) == ERgssBitmapOk);
+    assert(green > 240 && red < 16 && blue < 16);
+
+    int selfBlt = 0;
+    assert(EasyRpgRgssBitmapCreate(4, 1, &selfBlt) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapSetPixel(selfBlt, 0, 0, 255, 0, 0, 255) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapSetPixel(selfBlt, 1, 0, 0, 255, 0, 255) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapSetPixel(selfBlt, 2, 0, 0, 0, 255, 255) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapSetPixel(selfBlt, 3, 0, 255, 255, 255, 255) == ERgssBitmapOk);
+    EasyRpgRgssRect selfSourceRect;
+    selfSourceRect.x = 0;
+    selfSourceRect.y = 0;
+    selfSourceRect.width = 3;
+    selfSourceRect.height = 1;
+    assert(EasyRpgRgssBitmapBlt(selfBlt, 1, 0, selfBlt, &selfSourceRect, 255) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapGetPixel(selfBlt, 1, 0, &red, &green, &blue, &alpha) == ERgssBitmapOk);
+    assert(red == 255 && green == 0 && blue == 0);
+    assert(EasyRpgRgssBitmapGetPixel(selfBlt, 2, 0, &red, &green, &blue, &alpha) == ERgssBitmapOk);
+    assert(red == 0 && green == 255 && blue == 0);
+    assert(EasyRpgRgssBitmapGetPixel(selfBlt, 3, 0, &red, &green, &blue, &alpha) == ERgssBitmapOk);
+    assert(red == 0 && green == 0 && blue == 255);
+    assert(EasyRpgRgssBitmapDestroy(selfBlt) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapDestroy(bltDestination) == ERgssBitmapOk);
+    assert(EasyRpgRgssBitmapDestroy(bltSource) == ERgssBitmapOk);
 
     int greenBitmap = 0;
     assert(EasyRpgRgssBitmapCreate(4, 4, &greenBitmap) == ERgssBitmapOk);
@@ -300,6 +462,19 @@ int main()
     assert(spriteDirty.width == 2);
     assert(spriteDirty.height == 2);
     assert(framebuffer[0] == 0x07e0);
+    assert(EasyRpgRgssSpriteSetColor(highSprite, 0, 0, 255, 255) == ERgssSpriteOk);
+    for (int coloredSpriteIndex = 0; coloredSpriteIndex < 320 * 240; ++coloredSpriteIndex)
+        framebuffer[coloredSpriteIndex] = 0;
+    assert(EasyRpgRgssSpriteRenderRange(-100, 100, &spriteDirty) == ERgssSpriteOk);
+    assert(framebuffer[0] == 0x001f);
+    assert(EasyRpgRgssSpriteSetColor(highSprite, 0, 0, 0, 0) == ERgssSpriteOk);
+    assert(EasyRpgRgssSpriteSetBush(highSprite, 2, 0) == ERgssSpriteOk);
+    for (int bushSpriteIndex = 0; bushSpriteIndex < 320 * 240; ++bushSpriteIndex)
+        framebuffer[bushSpriteIndex] = 0;
+    assert(EasyRpgRgssSpriteRenderRange(-100, 100, &spriteDirty) == ERgssSpriteOk);
+    assert(framebuffer[0] == 0x07e0);
+    assert(framebuffer[320] == 0xf800);
+    assert(EasyRpgRgssSpriteSetBush(highSprite, 0, 128) == ERgssSpriteOk);
     assert(EasyRpgRgssSpriteCount() == 2);
     assert(EasyRpgRgssRenderCount() == 2);
     assert(EasyRpgRgssSpriteDestroy(highSprite) == ERgssSpriteOk);
@@ -522,6 +697,47 @@ int main()
     assert(EasyRpgRgssScriptArchiveInspect(&archiveReader, &scriptEntry, 1, &scriptCount) ==
            ERgssScriptArchiveErrorCorrupt);
 
+    const unsigned char compressedScript[] = {
+        0x78, 0x9c, 0x2b, 0x28, 0x2d, 0x29, 0x56, 0xb0,
+        0xca, 0xcf, 0xe6, 0x02, 0x00, 0x11, 0x34, 0x03, 0x0b
+    };
+    TMemoryArchive compressedArchive = {
+        compressedScript,
+        static_cast<int>(sizeof(compressedScript))
+    };
+    archiveReader.context = &compressedArchive;
+    archiveReader.size = compressedArchive.size;
+    EasyRpgRgssScriptEntry compressedEntry;
+    compressedEntry.id = 1;
+    compressedEntry.name_offset = 0;
+    compressedEntry.name_length = 0;
+    compressedEntry.data_offset = 0;
+    compressedEntry.data_length = compressedArchive.size;
+    unsigned char* inflatedScript = 0;
+    int inflatedLength = 0;
+    assert(EasyRpgRgssScriptArchiveInflate(&archiveReader,
+                                            &compressedEntry,
+                                            BitmapAllocate,
+                                            BitmapRelease,
+                                            0,
+                                            1024,
+                                            &inflatedScript,
+                                            &inflatedLength) == ERgssScriptArchiveOk);
+    assert(inflatedLength == 9);
+    assert(memcmp(inflatedScript, "puts :ok\n", 9) == 0);
+    assert(inflatedScript[inflatedLength] == 0);
+    BitmapRelease(0, inflatedScript);
+    inflatedScript = 0;
+    assert(EasyRpgRgssScriptArchiveInflate(&archiveReader,
+                                            &compressedEntry,
+                                            BitmapAllocate,
+                                            BitmapRelease,
+                                            0,
+                                            4,
+                                            &inflatedScript,
+                                            &inflatedLength) == ERgssScriptArchiveErrorCapacity);
+    assert(inflatedScript == 0);
+
     EasyRpgRgssVmHost host;
     host.context = 0;
     host.file_size = VmFileSize;
@@ -529,7 +745,13 @@ int main()
     host.ticks = VmTicks;
     host.input = VmInput;
     host.bitmap_load = VmBitmapLoad;
+    host.text_decode = VmTextDecode;
     host.frame_sync = VmFrameSync;
+    host.script_count = VmScriptCount;
+    host.script_info = VmScriptInfo;
+    host.script_name = VmScriptName;
+    host.script_inflate = VmScriptInflate;
+    host.release = VmRelease;
     host.dirty = VmDirty;
     assert(EasyRpgRgssVmAvailable() == 0);
     assert(EasyRpgRgssVmInitialize(ERgssVersion1, &host) == ERgssVmErrorUnavailable);

@@ -6,8 +6,8 @@
 namespace
 {
 const TInt KDirtyRegionCapacity = 16;
-const TInt KMaximumPresentRegions = 4;
-const TInt KDirtyRegionFixedCostDivisor = 12;
+const TInt KMaximumPresentRegions = 2;
+const TInt KDirtyRegionFixedCostDivisor = 6;
 const TInt KFullRedrawAreaPercent = 88;
 
 TInt RectArea(const TRect& aRect)
@@ -252,20 +252,11 @@ void CDisplaySurface::PresentL()
                 currentDirty[currentDirtyCount++].iRect = TRect(left, top, right, bottom);
         }
 
-        if (coreDirtyValid)
-        {
-            OptimizeDirtyRegions(currentDirty, currentDirtyCount, frameRect);
-        }
-        else
+        if (!coreDirtyValid)
         {
             currentDirty[0].iRect = frameRect;
             currentDirtyCount = 1;
         }
-    }
-    else if (coreDirtyCount > KDirtyRegionCapacity)
-    {
-        currentDirty[0].iRect = frameRect;
-        currentDirtyCount = 1;
     }
     else
     {

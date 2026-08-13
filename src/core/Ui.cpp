@@ -2,6 +2,7 @@
 #include <sstream>
 #include <string>
 
+#include "audio.h"
 #include "baseui.h"
 #include "bitmap.h"
 #include "color.h"
@@ -16,7 +17,6 @@
 #include "scene_map.h"
 #include "scene_title.h"
 #include "RenderDamage.h"
-#include "../../inc/CoreAudio.h"
 #include "UpstreamPlayerBridge.h"
 
 namespace {
@@ -114,7 +114,7 @@ void SetKeys(unsigned int keys_0,
 
 void PushInitialGameScene() {
     std::shared_ptr<FileFinder::DirectoryTree> tree =
-        FileFinder::CreateDirectoryTree(Main_Data::GetProjectPath(), false);
+        FileFinder::CreateDirectoryTree(Main_Data::GetProjectPath());
     if (!tree)
         Output::Error("%s is not a valid path", Main_Data::GetProjectPath().c_str());
 
@@ -123,7 +123,7 @@ void PushInitialGameScene() {
         return;
     }
 
-    FileFinder::SetDirectoryTree(FileFinder::CreateDirectoryTree(Main_Data::GetProjectPath()));
+    FileFinder::SetDirectoryTree(tree);
     Player::CreateGameObjects();
     Scene::Push(std::make_shared<Scene_Title>());
 

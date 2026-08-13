@@ -7,10 +7,14 @@
 #include <f32file.h>
 
 class CAknDoubleStyleListBox;
+class CAknProgressDialog;
+class CEikProgressInfo;
+class CGameLaunchWatcher;
 
 class CLauncherView : public CCoeControl,
                       public MEikListBoxObserver
 {
+    friend class CGameLaunchWatcher;
 public:
     static CLauncherView* NewL(const TRect& aRect);
     ~CLauncherView();
@@ -24,6 +28,10 @@ private:
     void ConstructL(const TRect& aRect);
     void BuildGameListL();
     void LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion);
+    void ShowLoadingDialogL();
+    void UpdateLoadingProgress(TInt aValue);
+    void DismissLoadingDialog();
+    void GameLaunchCompleted(TInt aError);
     void SizeChanged();
     TInt CountComponentControls() const;
     CCoeControl* ComponentControl(TInt aIndex) const;
@@ -36,6 +44,10 @@ private:
     CDesCArrayFlat* iListItems;
     CDesCArrayFlat* iArchivePaths;
     RArray<TInt> iEngineVersions;
+    CAknProgressDialog* iLoadingDialog;
+    CEikProgressInfo* iLoadingProgress;
+    CGameLaunchWatcher* iLaunchWatcher;
+    TBool iLaunching;
 };
 
 #endif

@@ -1,5 +1,5 @@
-#include "../../inc/CoreAudio.h"
 #include "../../inc/AudioBridge.h"
+#include "audio.h"
 #include "output.h"
 
 namespace {

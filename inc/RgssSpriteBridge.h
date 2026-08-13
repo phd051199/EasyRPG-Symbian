@@ -46,6 +46,16 @@ typedef struct EasyRpgRgssSpriteState
     int visible;
     int mirror;
     int blend_type;
+    int tone_red;
+    int tone_green;
+    int tone_blue;
+    int tone_gray;
+    int color_red;
+    int color_green;
+    int color_blue;
+    int color_alpha;
+    int bush_depth;
+    int bush_opacity;
 } EasyRpgRgssSpriteState;
 
 int EasyRpgRgssSpriteInitialize(const EasyRpgRgssSpriteHost* host);
@@ -64,6 +74,17 @@ int EasyRpgRgssSpriteSetOpacity(int handle, int opacity);
 int EasyRpgRgssSpriteSetVisible(int handle, int visible);
 int EasyRpgRgssSpriteSetMirror(int handle, int mirror);
 int EasyRpgRgssSpriteSetBlendType(int handle, int blend_type);
+int EasyRpgRgssSpriteSetTone(int handle,
+                             int red,
+                             int green,
+                             int blue,
+                             int gray);
+int EasyRpgRgssSpriteSetColor(int handle,
+                              int red,
+                              int green,
+                              int blue,
+                              int alpha);
+int EasyRpgRgssSpriteSetBush(int handle, int depth, int opacity);
 int EasyRpgRgssSpriteLogicalBounds(int handle, EasyRpgRgssRect* bounds);
 int EasyRpgRgssSpriteRenderRange(int minimum_z,
                                  int maximum_z,

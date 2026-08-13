@@ -5,6 +5,9 @@
 #include "output.h"
 #include "player.h"
 #include "scene.h"
+#ifdef EASYRPG_SYMBIAN
+#include "UpstreamPlayerBridge.h"
+#endif
 
 std::shared_ptr<Scene> Scene::instance;
 std::vector<std::shared_ptr<Scene> > Scene::old_instances;
@@ -80,7 +83,11 @@ void Scene::MainFunction() {
 
     if (Scene::instance.get() != this) {
         assert(Scene::instance == instances.back());
+#ifdef EASYRPG_SYMBIAN
+        Graphics::Update(EasyRpgUpstreamPlayerShouldRender() != 0);
+#else
         Graphics::Update(true);
+#endif
         Suspend();
         TransitionOut();
 

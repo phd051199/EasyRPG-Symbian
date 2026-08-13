@@ -14,8 +14,6 @@ enum TGameEngineVersion
     EGameEngineRpg2003 = 2003
 };
 
-TInt DetectGameEngineL(RFs& aFs,
-                       const TDesC& aArchivePath);
 void ReadGameMetadataL(RFs& aFs,
                        const TDesC& aArchivePath,
                        TDes& aTitle,

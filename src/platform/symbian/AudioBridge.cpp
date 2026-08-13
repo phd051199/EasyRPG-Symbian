@@ -31,6 +31,7 @@ TBool gBgmPlaying = EFalse;
 TBool gBgmPaused = EFalse;
 TInt gAudioAsyncError = KErrNone;
 TInt gMasterVolumePercent = 50;
+const TInt KBgmUpdatePumpFrames = 512;
 
 TUint16 Read16(const TUint8* aData)
 {
@@ -1384,7 +1385,7 @@ extern "C" void EasyRpgAudioUpdate(void)
         if (gMixer)
             gMixer->SetStreamVolume(CAudioMixer::EStreamBgm, volume);
     }
-    PumpBgm(1024);
+    PumpBgm(KBgmUpdatePumpFrames);
     if (gMixer)
         gMixer->CommitStreams();
 }

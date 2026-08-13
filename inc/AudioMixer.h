@@ -46,6 +46,7 @@ private:
         KOutputBufferBytes = 4096,
         KOutputBufferCount = 7,
         KOutputQueueDepth = 6,
+        KOutputFillBurst = 1,
         KStreamBufferFrames = 4096,
         KMaxCachedClips = 128,
         KMaxCachedKeyLength = 160,

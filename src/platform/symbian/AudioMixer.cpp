@@ -715,7 +715,7 @@ void CAudioMixer::QueueOutputBuffers()
     if (!iStream || !iReady || iShuttingDown)
         return;
     TInt filled = 0;
-    while (iQueuedOutputBufferCount < KOutputQueueDepth && filled < 2)
+    while (iQueuedOutputBufferCount < KOutputQueueDepth && filled < KOutputFillBurst)
     {
         if (!CanFillOutputBuffer())
             return;

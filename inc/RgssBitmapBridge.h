@@ -27,17 +27,52 @@ enum EasyRpgRgssBitmapResult
 
 typedef void* (*EasyRpgRgssAllocFn)(void* context, unsigned int bytes);
 typedef void (*EasyRpgRgssFreeFn)(void* context, void* memory);
+typedef int (*EasyRpgRgssGlyphFn)(void* context,
+                                  unsigned int codepoint,
+                                  const unsigned short** rows,
+                                  int* width,
+                                  int* height,
+                                  int* advance);
+
+typedef struct EasyRpgRgssBlitEffects
+{
+    int tone_red;
+    int tone_green;
+    int tone_blue;
+    int tone_gray;
+    int color_red;
+    int color_green;
+    int color_blue;
+    int color_alpha;
+    int bush_depth;
+    int bush_opacity;
+} EasyRpgRgssBlitEffects;
+
+typedef struct EasyRpgRgssTextStyle
+{
+    int font_size;
+    int red;
+    int green;
+    int blue;
+    int alpha;
+    int bold;
+    int italic;
+    int shadow;
+    int align;
+} EasyRpgRgssTextStyle;
 
 typedef struct EasyRpgRgssBitmapHost
 {
     void* context;
     EasyRpgRgssAllocFn allocate;
     EasyRpgRgssFreeFn release;
+    EasyRpgRgssGlyphFn glyph;
     int max_bitmaps;
 } EasyRpgRgssBitmapHost;
 
 int EasyRpgRgssBitmapInitialize(const EasyRpgRgssBitmapHost* host);
 void EasyRpgRgssBitmapShutdown(void);
+void EasyRpgRgssBitmapSetGlyphProvider(void* context, EasyRpgRgssGlyphFn glyph);
 int EasyRpgRgssBitmapCreate(int width, int height, int* handle);
 int EasyRpgRgssBitmapDestroy(int handle);
 int EasyRpgRgssBitmapWidth(int handle);
@@ -59,6 +94,18 @@ int EasyRpgRgssBitmapSetPixel(int handle,
                               int green,
                               int blue,
                               int alpha);
+int EasyRpgRgssBitmapBlt(int destination_handle,
+                         int destination_x,
+                         int destination_y,
+                         int source_handle,
+                         const EasyRpgRgssRect* source_rect,
+                         int opacity);
+int EasyRpgRgssBitmapStretchBlt(int destination_handle,
+                                const EasyRpgRgssRect* destination_rect,
+                                int source_handle,
+                                const EasyRpgRgssRect* source_rect,
+                                int opacity);
+int EasyRpgRgssBitmapHueChange(int handle, int hue_degrees);
 int EasyRpgRgssBitmapGetPixel(int handle,
                               int x,
                               int y,
@@ -91,6 +138,15 @@ int EasyRpgRgssBitmapBlitExClipped(int handle,
                                    int mirror,
                                    int blend_type,
                                    EasyRpgRgssRect* output_dirty);
+int EasyRpgRgssBitmapBlitEffects(int handle,
+                                 const EasyRpgRgssRect* source_rect,
+                                 const EasyRpgRgssRect* destination_rect,
+                                 const EasyRpgRgssRect* clip_rect,
+                                 int opacity,
+                                 int mirror,
+                                 int blend_type,
+                                 const EasyRpgRgssBlitEffects* effects,
+                                 EasyRpgRgssRect* output_dirty);
 int EasyRpgRgssBitmapTile(int handle,
                           const EasyRpgRgssRect* source_rect,
                           const EasyRpgRgssRect* destination_rect,
@@ -101,6 +157,17 @@ int EasyRpgRgssBitmapTile(int handle,
                           int opacity,
                           int blend_type,
                           EasyRpgRgssRect* output_dirty);
+int EasyRpgRgssBitmapTextSize(int handle,
+                              const unsigned int* codepoints,
+                              int count,
+                              const EasyRpgRgssTextStyle* style,
+                              int* width,
+                              int* height);
+int EasyRpgRgssBitmapDrawText(int handle,
+                              const EasyRpgRgssRect* rect,
+                              const unsigned int* codepoints,
+                              int count,
+                              const EasyRpgRgssTextStyle* style);
 
 #ifdef __cplusplus
 }

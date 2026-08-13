@@ -1,6 +1,7 @@
 #include <fbs.h>
 
 #include "Encoding.h"
+#include "RgssGlyphCache.h"
 #include "RgssGraphicsBridge.h"
 #include "RgssImageLoader.h"
 #include "RgssScriptArchiveBridge.h"
@@ -11,6 +12,18 @@
 namespace
 {
 _LIT(KRgssVmThreadName, "EasyRPG-RGSS-VM");
+
+void* ScriptAllocate(void*, unsigned int aBytes)
+{
+    if (aBytes > 0x7fffffffu)
+        return NULL;
+    return User::Alloc(static_cast<TInt>(aBytes));
+}
+
+void ScriptRelease(void*, void* aMemory)
+{
+    User::Free(aMemory);
+}
 
 TInt VmResultToError(TInt aResult)
 {
@@ -46,12 +59,15 @@ CRgssVmWorker* CRgssVmWorker::NewL(const TDesC& aGamePath, TInt aVersion)
 CRgssVmWorker::CRgssVmWorker(TInt aVersion)
     : iVersion(aVersion),
       iResources(NULL),
+      iGlyphCache(NULL),
       iStartResult(KErrNotReady),
       iExitResult(KRequestPending),
       iFrameRate(0),
       iFrameCount(0),
       iScriptDataOffset(0),
       iScriptFileSize(0),
+      iScriptEntries(NULL),
+      iScriptCount(0),
       iStopRequested(EFalse),
       iStartSignaled(EFalse),
       iVmInitialized(EFalse),
@@ -93,6 +109,8 @@ void CRgssVmWorker::StartL()
     iFrameCount = 0;
     iScriptDataOffset = 0;
     iScriptFileSize = 0;
+    iScriptEntries = NULL;
+    iScriptCount = 0;
     iStopRequested = EFalse;
     iStartSignaled = EFalse;
     iVmInitialized = EFalse;
@@ -234,6 +252,9 @@ void CRgssVmWorker::RunVmL()
 
     User::LeaveIfError(RFbsSession::Connect());
     CleanupStack::PushL(TCleanupItem(&CRgssVmWorker::DisconnectFbs, NULL));
+    iGlyphCache = CRgssGlyphCache::NewL();
+    EasyRpgRgssBitmapSetGlyphProvider(iGlyphCache, &CRgssGlyphCache::Resolve);
+    CleanupStack::PushL(TCleanupItem(&CRgssVmWorker::DestroyGlyphCache, this));
 
     User::LeaveIfError(iFs.Connect());
     CleanupClosePushL(iFs);
@@ -258,6 +279,22 @@ void CRgssVmWorker::RunVmL()
     if (archiveResult != ERgssScriptArchiveOk)
         User::Leave(archiveResult == ERgssScriptArchiveErrorUnsupported
             ? KErrNotSupported : KErrCorrupt);
+    if (scriptCount <= 0)
+        User::Leave(KErrCorrupt);
+    iScriptEntries = static_cast<EasyRpgRgssScriptEntry*>(
+        User::Alloc(scriptCount * static_cast<TInt>(sizeof(EasyRpgRgssScriptEntry))));
+    if (!iScriptEntries)
+        User::Leave(KErrNoMemory);
+    iScriptCount = scriptCount;
+    CleanupStack::PushL(TCleanupItem(&CRgssVmWorker::FreeScriptEntries, this));
+    TInt indexedCount = 0;
+    const TInt indexResult = EasyRpgRgssScriptArchiveInspect(&archiveReader,
+                                                              iScriptEntries,
+                                                              iScriptCount,
+                                                              &indexedCount);
+    if (indexResult != ERgssScriptArchiveOk || indexedCount != iScriptCount)
+        User::Leave(indexResult == ERgssScriptArchiveErrorNoMemory
+            ? KErrNoMemory : KErrCorrupt);
 
     EasyRpgRgssGraphicsHost graphicsHost;
     graphicsHost.context = this;
@@ -274,7 +311,13 @@ void CRgssVmWorker::RunVmL()
     host.ticks = &CRgssVmWorker::VmTicks;
     host.input = &CRgssVmWorker::VmInput;
     host.bitmap_load = &CRgssVmWorker::VmBitmapLoad;
+    host.text_decode = &CRgssVmWorker::VmTextDecode;
     host.frame_sync = &CRgssVmWorker::VmFrameSync;
+    host.script_count = &CRgssVmWorker::VmScriptCount;
+    host.script_info = &CRgssVmWorker::VmScriptInfo;
+    host.script_name = &CRgssVmWorker::VmScriptName;
+    host.script_inflate = &CRgssVmWorker::VmScriptInflate;
+    host.release = &CRgssVmWorker::VmRelease;
     host.dirty = &CRgssVmWorker::VmDirty;
 
     const TInt initResult = EasyRpgRgssVmInitialize(iVersion, &host);
@@ -295,9 +338,11 @@ void CRgssVmWorker::RunVmL()
     CleanupStack::PopAndDestroy();
     iVmInitialized = EFalse;
     CleanupStack::PopAndDestroy();
+    CleanupStack::PopAndDestroy();
     CleanupStack::PopAndDestroy(iResources);
     iResources = NULL;
     CleanupStack::PopAndDestroy(&iFs);
+    CleanupStack::PopAndDestroy();
     CleanupStack::PopAndDestroy();
     CActiveScheduler::Install(NULL);
     CleanupStack::PopAndDestroy(scheduler);
@@ -315,6 +360,26 @@ void CRgssVmWorker::SignalStarted(TInt aResult)
 void CRgssVmWorker::DisconnectFbs(TAny*)
 {
     RFbsSession::Disconnect();
+}
+
+void CRgssVmWorker::DestroyGlyphCache(TAny* aContext)
+{
+    CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
+    EasyRpgRgssBitmapSetGlyphProvider(NULL, NULL);
+    if (!self)
+        return;
+    delete self->iGlyphCache;
+    self->iGlyphCache = NULL;
+}
+
+void CRgssVmWorker::FreeScriptEntries(TAny* aContext)
+{
+    CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
+    if (!self)
+        return;
+    User::Free(self->iScriptEntries);
+    self->iScriptEntries = NULL;
+    self->iScriptCount = 0;
 }
 
 void CRgssVmWorker::ShutdownGraphics(TAny*)
@@ -401,6 +466,36 @@ int CRgssVmWorker::VmBitmapLoad(void* aContext,
     return ERgssVmOk;
 }
 
+int CRgssVmWorker::VmTextDecode(void*,
+                                const unsigned char* aText,
+                                int aTextLength,
+                                unsigned int* aCodepoints,
+                                int aCapacity)
+{
+    if (!aText || aTextLength < 0 || !aCodepoints || aCapacity < aTextLength)
+        return ERgssVmErrorInvalidArgument;
+    if (aTextLength == 0)
+        return 0;
+
+    TInt count = 0;
+    TRAPD(error,
+        HBufC* unicode = HBufC::NewLC(aTextLength);
+        TPtr output = unicode->Des();
+        TPtrC8 source(aText, aTextLength);
+        TEncoding::ShiftJisToUnicodeL(source, output);
+        TEncoding::NormalizeJapaneseNfcInPlace(output);
+        if (output.Length() > aCapacity)
+            User::Leave(KErrOverflow);
+        for (TInt index = 0; index < output.Length(); ++index)
+            aCodepoints[index] = static_cast<TUint16>(output[index]);
+        count = output.Length();
+        CleanupStack::PopAndDestroy(unicode);
+    );
+    if (error != KErrNone)
+        return error == KErrNoMemory ? ERgssVmErrorRuntime : ERgssVmErrorScript;
+    return count;
+}
+
 int CRgssVmWorker::ScriptArchiveRead(void* aContext,
                                      int aOffset,
                                      void* aBuffer,
@@ -421,6 +516,97 @@ int CRgssVmWorker::ScriptArchiveRead(void* aContext,
                                                    aOffset,
                                                    buffer));
     return error == KErrNone ? buffer.Length() : -1;
+}
+
+int CRgssVmWorker::VmScriptCount(void* aContext)
+{
+    if (!aContext)
+        return ERgssVmErrorInvalidArgument;
+    CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
+    return self->iScriptEntries ? self->iScriptCount : ERgssVmErrorNotInitialized;
+}
+
+int CRgssVmWorker::VmScriptInfo(void* aContext,
+                                int aIndex,
+                                int* aId,
+                                int* aNameLength)
+{
+    if (!aContext || !aId || !aNameLength)
+        return ERgssVmErrorInvalidArgument;
+    CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
+    if (!self->iScriptEntries)
+        return ERgssVmErrorNotInitialized;
+    if (aIndex < 0 || aIndex >= self->iScriptCount)
+        return ERgssVmErrorInvalidArgument;
+    const EasyRpgRgssScriptEntry& entry = self->iScriptEntries[aIndex];
+    *aId = entry.id;
+    *aNameLength = entry.name_length;
+    return ERgssVmOk;
+}
+
+int CRgssVmWorker::VmScriptName(void* aContext,
+                                int aIndex,
+                                void* aBuffer,
+                                int aCapacity)
+{
+    if (!aContext || aIndex < 0 || aCapacity < 0 ||
+        (aCapacity > 0 && !aBuffer))
+        return ERgssVmErrorInvalidArgument;
+    CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
+    if (!self->iScriptEntries || !self->iResources)
+        return ERgssVmErrorNotInitialized;
+    if (aIndex >= self->iScriptCount)
+        return ERgssVmErrorInvalidArgument;
+    const EasyRpgRgssScriptEntry& entry = self->iScriptEntries[aIndex];
+    if (aCapacity < entry.name_length)
+        return ERgssVmErrorInvalidArgument;
+    if (entry.name_length == 0)
+        return 0;
+
+    TPtr8 buffer(static_cast<TUint8*>(aBuffer), 0, entry.name_length);
+    TRAPD(error, self->iResources->ReadStoredFileL(self->iScriptDataOffset,
+                                                   self->iScriptFileSize,
+                                                   entry.name_offset,
+                                                   buffer));
+    return error == KErrNone ? buffer.Length() : ERgssVmErrorFile;
+}
+
+int CRgssVmWorker::VmScriptInflate(void* aContext,
+                                   int aIndex,
+                                   unsigned char** aSource,
+                                   int* aSourceLength)
+{
+    if (!aContext || !aSource || !aSourceLength)
+        return ERgssVmErrorInvalidArgument;
+    CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
+    if (!self->iScriptEntries || !self->iResources)
+        return ERgssVmErrorNotInitialized;
+    if (aIndex < 0 || aIndex >= self->iScriptCount)
+        return ERgssVmErrorInvalidArgument;
+
+    EasyRpgRgssScriptArchiveReader reader;
+    reader.context = self;
+    reader.size = self->iScriptFileSize;
+    reader.read = &CRgssVmWorker::ScriptArchiveRead;
+    const TInt result = EasyRpgRgssScriptArchiveInflate(&reader,
+                                                         &self->iScriptEntries[aIndex],
+                                                         ScriptAllocate,
+                                                         ScriptRelease,
+                                                         NULL,
+                                                         4 * 1024 * 1024,
+                                                         aSource,
+                                                         aSourceLength);
+    if (result == ERgssScriptArchiveOk)
+        return ERgssVmOk;
+    if (result == ERgssScriptArchiveErrorNoMemory ||
+        result == ERgssScriptArchiveErrorCapacity)
+        return ERgssVmErrorRuntime;
+    return ERgssVmErrorScript;
+}
+
+void CRgssVmWorker::VmRelease(void*, void* aMemory)
+{
+    User::Free(aMemory);
 }
 
 int CRgssVmWorker::VmFrameSync(void* aContext,

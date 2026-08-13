@@ -34,6 +34,7 @@ SOURCES=(
     "$PROJECT_DIR/src/rgss/RgssViewport.cpp"
     "$PROJECT_DIR/src/rgss/RgssTable.cpp"
     "$PROJECT_DIR/src/rgss/RgssVmStub.cpp"
+    "$PROJECT_DIR/src/core/GohuFontData.cpp"
     "$PROJECT_DIR/src/core/Aeabi.cpp"
 )
 
@@ -109,6 +110,7 @@ for source in "${SOURCES[@]}"; do
         -fdata-sections \
         -ffunction-sections \
         -I "$PROJECT_DIR/inc" \
+        -I "$SDK_ROOT/epoc32/include/stdapis" \
         -S "$source" \
         -o "$assembly_raw"
 
@@ -150,10 +152,16 @@ for required_symbol in \
     EasyRpgRgssGraphicsSetFrameRate \
     EasyRpgRgssBitmapInitialize \
     EasyRpgRgssBitmapCreate \
+    EasyRpgRgssBitmapBlt \
+    EasyRpgRgssBitmapStretchBlt \
+    EasyRpgRgssBitmapHueChange \
     EasyRpgRgssBitmapBlit \
     EasyRpgRgssBitmapBlitEx \
     EasyRpgRgssBitmapBlitExClipped \
+    EasyRpgRgssBitmapBlitEffects \
     EasyRpgRgssBitmapTile \
+    EasyRpgRgssBitmapTextSize \
+    EasyRpgRgssBitmapDrawText \
     EasyRpgRgssBitmapShutdown \
     EasyRpgRgssInputReset \
     EasyRpgRgssInputUpdate \
@@ -164,11 +172,15 @@ for required_symbol in \
     EasyRpgRgssRenderShutdown \
     EasyRpgRgssScriptArchiveInspect \
     EasyRpgRgssScriptArchiveValidate \
+    EasyRpgRgssScriptArchiveInflate \
     EasyRpgRgssPlaneInitialize \
     EasyRpgRgssPlaneCreate \
     EasyRpgRgssPlaneShutdown \
     EasyRpgRgssSpriteInitialize \
     EasyRpgRgssSpriteCreate \
+    EasyRpgRgssSpriteSetTone \
+    EasyRpgRgssSpriteSetColor \
+    EasyRpgRgssSpriteSetBush \
     EasyRpgRgssSpriteRenderRange \
     EasyRpgRgssSpriteShutdown \
     EasyRpgRgssViewportInitialize \

@@ -11,9 +11,9 @@ enum TPhase {
 
 const int KCommandCapacity = 2048;
 const int KDirtyCapacity = 16;
-const int KMaximumDirtyRegions = 4;
+const int KMaximumDirtyRegions = 2;
 const int KFullRedrawAreaPercent = 88;
-const int KDirtyRegionFixedCostDivisor = 12;
+const int KDirtyRegionFixedCostDivisor = 6;
 const int KCommandResyncLookahead = 8;
 
 struct TCommand {

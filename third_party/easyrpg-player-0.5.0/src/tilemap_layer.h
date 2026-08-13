@@ -25,6 +25,7 @@
 #include "drawable.h"
 #include "tone.h"
 
+class Rect;
 class TilemapLayer;
 
 /**
@@ -117,6 +118,7 @@ private:
 
 	void CreateTileCache(const std::vector<short>& nmap_data);
 	void PrepareTileDrawCache();
+	void DrawTiles(Bitmap& destination, int z_order, const Rect* paint_clip);
 	void GenerateAutotileAB(short ID, short animID);
 	void GenerateAutotileD(short ID);
 
@@ -182,7 +184,18 @@ private:
 	bool symbian_has_animated_c = false;
 	int symbian_recorded_animation_step_ab = -1;
 	int symbian_recorded_animation_step_c = -1;
+	BitmapRef symbian_scroll_cache;
+	uint32_t symbian_scroll_cache_revision = 0;
+	int symbian_scroll_cache_ox = 0;
+	int symbian_scroll_cache_oy = 0;
+	int symbian_scroll_cache_animation_step_ab = -1;
+	int symbian_scroll_cache_animation_step_c = -1;
 	void SymbianTouch();
+	void SymbianScrollTouch();
+	bool SymbianUseScrollCache(int z_order) const;
+	bool SymbianPrepareScrollCache(int z_order, int display_width, int display_height);
+	void SymbianShiftScrollCache(int shift_x, int shift_y);
+	void SymbianRefreshScrollCacheRect(int z_order, const Rect& rect);
 	unsigned int SymbianSignature(int z_order) const;
 #endif
 };

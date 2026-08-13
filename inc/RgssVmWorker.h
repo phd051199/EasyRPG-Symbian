@@ -5,6 +5,8 @@
 #include <f32file.h>
 
 class CZipVfs;
+class CRgssGlyphCache;
+struct EasyRpgRgssScriptEntry;
 
 class CRgssVmWorker : public CBase
 {
@@ -29,6 +31,8 @@ private:
     void RunVmL();
     void SignalStarted(TInt aResult);
     static void DisconnectFbs(TAny* aContext);
+    static void DestroyGlyphCache(TAny* aContext);
+    static void FreeScriptEntries(TAny* aContext);
     static void ShutdownGraphics(TAny* aContext);
     static void ShutdownVm(TAny* aContext);
     static TInt CopyVmPath(const char* aSource, TDes& aTarget);
@@ -43,10 +47,29 @@ private:
     static int VmBitmapLoad(void* aContext,
                             const char* aRelativePath,
                             int* aBitmapHandle);
+    static int VmTextDecode(void* aContext,
+                            const unsigned char* aText,
+                            int aTextLength,
+                            unsigned int* aCodepoints,
+                            int aCapacity);
     static int ScriptArchiveRead(void* aContext,
                                  int aOffset,
                                  void* aBuffer,
                                  int aBytes);
+    static int VmScriptCount(void* aContext);
+    static int VmScriptInfo(void* aContext,
+                            int aIndex,
+                            int* aId,
+                            int* aNameLength);
+    static int VmScriptName(void* aContext,
+                            int aIndex,
+                            void* aBuffer,
+                            int aCapacity);
+    static int VmScriptInflate(void* aContext,
+                               int aIndex,
+                               unsigned char** aSource,
+                               int* aSourceLength);
+    static void VmRelease(void* aContext, void* aMemory);
     static int VmFrameSync(void* aContext,
                            int aFrameRate,
                            int aFrameCount);
@@ -66,6 +89,7 @@ private:
     TInt iVersion;
     RFs iFs;
     CZipVfs* iResources;
+    CRgssGlyphCache* iGlyphCache;
     RThread iThread;
     RSemaphore iStarted;
     RSemaphore iFrameReady;
@@ -76,6 +100,8 @@ private:
     volatile TInt iFrameCount;
     TInt iScriptDataOffset;
     TInt iScriptFileSize;
+    EasyRpgRgssScriptEntry* iScriptEntries;
+    TInt iScriptCount;
     volatile TUint32 iInputWords[4];
     volatile TBool iStopRequested;
     volatile TBool iStartSignaled;

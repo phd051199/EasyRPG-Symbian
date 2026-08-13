@@ -28,7 +28,7 @@ private:
         KLogicFps = 60,
         KRenderFps = 30,
         KLogicTicksPerRender = KLogicFps / KRenderFps,
-        KMaxLogicCatchUpTicks = 4,
+        KMaxLogicCatchUpTicks = 2,
         KMaxReadyCallbacks = 8,
         KSleepGuardMicroseconds = 250,
         KMaxSleepMicroseconds = 2000

@@ -66,7 +66,6 @@ for player_patch in "$PLAYER_WINDOW_PATCH" "$PLAYER_GAMEPLAY_PATCH" "$PLAYER_PAR
     fi
 done
 SOURCES=(
-    "$PROJECT_DIR/src/core/ModernCoreProbe.cpp"
     "$LIBLCF_ROOT/reader_lcf.cpp"
     "$LIBLCF_ROOT/data.cpp"
     "$LIBLCF_ROOT/rpg_setup.cpp"
@@ -90,8 +89,6 @@ SOURCES=(
     "$PROJECT_DIR/src/core/LibcxxSharedPtrRuntime.cpp"
     "$PROJECT_DIR/src/core/LiblcfReaderUtil.cpp"
     "$PROJECT_DIR/src/core/LiblcfXmlReader.cpp"
-    "$PROJECT_DIR/src/core/UpstreamLmuBridge.cpp"
-    "$PROJECT_DIR/src/core/UpstreamLcfLinkAnchor.cpp"
     "$PROJECT_DIR/src/core/Ui.cpp"
     "$PLAYER_ROOT/scene.cpp"
     "$PROJECT_DIR/src/core/RenderDamage.cpp"
@@ -443,7 +440,7 @@ done
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgModernCoreProbe EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgUpstreamLoadLmtSummary EasyRpgUpstreamLoadLdbSummary EasyRpgUpstreamReadLmuSummary EasyRpgUpstreamReadLmuLayers EasyRpgUpstreamLmuLinkAnchor EasyRpgMidiLiteCreate EasyRpgMidiLiteRender EasyRpgMidiLiteDestroy _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
+for required_symbol in EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgMidiLiteCreate EasyRpgMidiLiteRender EasyRpgMidiLiteDestroy _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "Modern core archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2

@@ -5,11 +5,8 @@
 #include "PlayerRuntime.h"
 #include "DisplaySurface.h"
 #include "Encoding.h"
-#include "LcfProbe.h"
-#include "ModernCoreProbe.h"
 #include "AudioBridge.h"
 #include "DirentBridge.h"
-#include "UpstreamLcfLinkAnchor.h"
 #include "UpstreamPlayerBridge.h"
 #include "ZipVfs.h"
 
@@ -262,12 +259,6 @@ void CPlayerRuntime::ConstructL(const TDesC& aGameSource)
     TBuf8<KMaxFileName + 1> savePath;
     PrepareProjectRootL(aGameSource, projectPath, savePath);
 
-    TLcfProjectSummary projectSummary;
-    TBuf<96> gameTitle;
-    User::LeaveIfError(TLcfProbe::ProbeProject(*iResources, gameTitle, projectSummary));
-    if (EasyRpgModernCoreProbe(5) != 33 || EasyRpgUpstreamLmuLinkAnchor() != 0)
-        User::Leave(KErrNotSupported);
-
     TUint16* framebuffer = iDisplaySurface.BeginRenderL();
     const TInt bindError = EasyRpgUpstreamPlayerBindFramebuffer(
         framebuffer,
@@ -346,16 +337,19 @@ void CPlayerRuntime::TickL(TUint32 aLogicFrame, TBool aRenderFrame)
         return;
     static_cast<void>(aLogicFrame);
 
-    TUint16* framebuffer = iDisplaySurface.BeginRenderL();
-    const TInt bindError = EasyRpgUpstreamPlayerBindFramebuffer(
-        framebuffer,
-        iDisplaySurface.Size().iWidth,
-        iDisplaySurface.Size().iHeight,
-        iDisplaySurface.RenderStrideBytes());
-    if (bindError != 0)
+    if (aRenderFrame)
     {
-        iDisplaySurface.EndRender();
-        User::Leave(KErrNotSupported);
+        TUint16* framebuffer = iDisplaySurface.BeginRenderL();
+        const TInt bindError = EasyRpgUpstreamPlayerBindFramebuffer(
+            framebuffer,
+            iDisplaySurface.Size().iWidth,
+            iDisplaySurface.Size().iHeight,
+            iDisplaySurface.RenderStrideBytes());
+        if (bindError != 0)
+        {
+            iDisplaySurface.EndRender();
+            User::Leave(KErrNotSupported);
+        }
     }
 
     const TInt tickResult = EasyRpgUpstreamPlayerTick(
@@ -365,7 +359,8 @@ void CPlayerRuntime::TickL(TUint32 aLogicFrame, TBool aRenderFrame)
         iUpstreamKeys2,
         0,
         aRenderFrame ? 1 : 0);
-    iDisplaySurface.EndRender();
+    if (aRenderFrame)
+        iDisplaySurface.EndRender();
     iTickMs += 16;
     iTickRemainder += 40;
     if (iTickRemainder >= 60)

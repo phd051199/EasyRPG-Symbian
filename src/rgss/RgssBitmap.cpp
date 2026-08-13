@@ -1,3 +1,4 @@
+#include "GohuFont.h"
 #include "RgssBitmapBridge.h"
 
 namespace
@@ -16,6 +17,7 @@ struct TBitmapState
 {
     EasyRpgRgssBitmapHost host;
     TBitmapSlot* slots;
+    void* glyph_context;
     int initialized;
 };
 
@@ -32,6 +34,11 @@ int DivideInt(int numerator, int denominator)
 #else
     return numerator / denominator;
 #endif
+}
+
+int MaxInt(int left, int right)
+{
+    return left > right ? left : right;
 }
 
 int ClampByte(int value)
@@ -67,6 +74,11 @@ int Divide255Round(int value)
 {
     const int rounded = value + 128;
     return (rounded + (rounded >> 8)) >> 8;
+}
+
+int Divide255SignedRound(int value)
+{
+    return value >= 0 ? Divide255Round(value) : -Divide255Round(-value);
 }
 
 unsigned short Blend565(unsigned short destination,
@@ -181,6 +193,411 @@ void ZeroDirty(EasyRpgRgssRect* rect)
     rect->width = 0;
     rect->height = 0;
 }
+
+struct TResolvedGlyph
+{
+    const unsigned char* rows8;
+    const unsigned short* rows16;
+    int width;
+    int height;
+    int advance;
+};
+
+int ResolveGlyph(unsigned int codepoint, TResolvedGlyph& glyph)
+{
+    glyph.rows8 = 0;
+    glyph.rows16 = 0;
+    glyph.width = 0;
+    glyph.height = 0;
+    glyph.advance = 0;
+    if (gBitmaps.host.glyph)
+    {
+        const unsigned short* rows = 0;
+        int width = 0;
+        int height = 0;
+        int advance = 0;
+        if (gBitmaps.host.glyph(gBitmaps.glyph_context,
+                                codepoint,
+                                &rows,
+                                &width,
+                                &height,
+                                &advance) > 0 &&
+            rows && width > 0 && width <= 16 &&
+            height > 0 && height <= 32 && advance > 0 && advance <= 32)
+        {
+            glyph.rows16 = rows;
+            glyph.width = width;
+            glyph.height = height;
+            glyph.advance = advance;
+            return 1;
+        }
+    }
+
+    const unsigned char* rows = EasyRpgGohuGlyphRows(codepoint);
+    if (!rows)
+        rows = EasyRpgGohuGlyphRows('?');
+    if (!rows)
+        return 0;
+    glyph.rows8 = rows;
+    glyph.width = 6;
+    glyph.height = 11;
+    glyph.advance = 6;
+    return 1;
+}
+
+int GlyphBit(const TResolvedGlyph& glyph, int x, int y)
+{
+    if (x < 0 || y < 0 || x >= glyph.width || y >= glyph.height)
+        return 0;
+    if (glyph.rows16)
+        return (glyph.rows16[y] & (static_cast<unsigned int>(1) << x)) != 0;
+    return (glyph.rows8[y] & (static_cast<unsigned int>(1) << x)) != 0;
+}
+
+int ScaleMetric(int value, int baseHeight, int fontSize)
+{
+    if (value <= 0 || baseHeight <= 0 || fontSize <= 0)
+        return 0;
+    return (value * fontSize + baseHeight - 1) / baseHeight;
+}
+
+int ValidateTextStyle(const EasyRpgRgssTextStyle* style)
+{
+    if (!style || style->font_size <= 0 || style->font_size > 96 ||
+        style->red < 0 || style->red > 255 ||
+        style->green < 0 || style->green > 255 ||
+        style->blue < 0 || style->blue > 255 ||
+        style->alpha < 0 || style->alpha > 255 ||
+        style->align < 0 || style->align > 2)
+        return ERgssBitmapErrorInvalidArgument;
+    return ERgssBitmapOk;
+}
+
+void CompositeBitmapPixel(TBitmapSlot& slot,
+                          int x,
+                          int y,
+                          unsigned short sourceColor,
+                          int sourceAlpha)
+{
+    if (x < 0 || y < 0 || x >= slot.width || y >= slot.height || sourceAlpha <= 0)
+        return;
+    const int index = y * slot.width + x;
+    if (sourceAlpha >= 255 || slot.alpha[index] == 0)
+    {
+        slot.color[index] = sourceColor;
+        slot.alpha[index] = static_cast<unsigned char>(ClampByte(sourceAlpha));
+        return;
+    }
+
+    const int destinationAlpha = slot.alpha[index];
+    const int inverse = 255 - sourceAlpha;
+    const int destinationContribution = Divide255Round(destinationAlpha * inverse);
+    int outputAlpha = sourceAlpha + destinationContribution;
+    if (outputAlpha > 255)
+        outputAlpha = 255;
+    if (outputAlpha <= 0)
+        return;
+
+    const int sourceR = (sourceColor >> 11) & 31;
+    const int sourceG = (sourceColor >> 5) & 63;
+    const int sourceB = sourceColor & 31;
+    const int destinationR = (slot.color[index] >> 11) & 31;
+    const int destinationG = (slot.color[index] >> 5) & 63;
+    const int destinationB = slot.color[index] & 31;
+    const int outputR = (sourceR * sourceAlpha + destinationR * destinationContribution + outputAlpha / 2) / outputAlpha;
+    const int outputG = (sourceG * sourceAlpha + destinationG * destinationContribution + outputAlpha / 2) / outputAlpha;
+    const int outputB = (sourceB * sourceAlpha + destinationB * destinationContribution + outputAlpha / 2) / outputAlpha;
+    slot.color[index] = static_cast<unsigned short>((outputR << 11) | (outputG << 5) | outputB);
+    slot.alpha[index] = static_cast<unsigned char>(outputAlpha);
+}
+
+void DrawResolvedGlyph(TBitmapSlot& slot,
+                       const TResolvedGlyph& glyph,
+                       int x,
+                       int y,
+                       const EasyRpgRgssTextStyle& style,
+                       unsigned short color,
+                       int alpha)
+{
+    const int targetHeight = style.font_size;
+    const int targetWidth = ScaleMetric(glyph.width, glyph.height, targetHeight);
+    const int boldOffset = style.bold ? MaxInt(1, targetHeight / 11) : 0;
+    for (int dy = 0; dy < targetHeight; ++dy)
+    {
+        int sourceY = (dy * glyph.height) / targetHeight;
+        if (sourceY >= glyph.height)
+            sourceY = glyph.height - 1;
+        const int italicOffset = style.italic
+            ? ((targetHeight - 1 - dy) * MaxInt(1, targetHeight / 11)) / 4
+            : 0;
+        for (int dx = 0; dx < targetWidth; ++dx)
+        {
+            int sourceX = (dx * glyph.width) / targetWidth;
+            if (sourceX >= glyph.width)
+                sourceX = glyph.width - 1;
+            if (!GlyphBit(glyph, sourceX, sourceY))
+                continue;
+            CompositeBitmapPixel(slot, x + dx + italicOffset, y + dy, color, alpha);
+            for (int bold = 1; bold <= boldOffset; ++bold)
+                CompositeBitmapPixel(slot, x + dx + italicOffset + bold, y + dy, color, alpha);
+        }
+    }
+}
+
+int MeasureText(const unsigned int* codepoints,
+                int count,
+                const EasyRpgRgssTextStyle& style,
+                int& width,
+                int& height)
+{
+    width = 0;
+    height = style.font_size;
+    if (count <= 0)
+        return ERgssBitmapOk;
+    if (!codepoints)
+        return ERgssBitmapErrorInvalidArgument;
+
+    for (int index = 0; index < count; ++index)
+    {
+        if (codepoints[index] == '\r' || codepoints[index] == '\n')
+            continue;
+        TResolvedGlyph glyph;
+        if (!ResolveGlyph(codepoints[index], glyph))
+            continue;
+        width += ScaleMetric(glyph.advance, glyph.height, style.font_size);
+        if (width < 0)
+            return ERgssBitmapErrorInvalidArgument;
+    }
+    if (style.bold)
+        width += MaxInt(1, style.font_size / 11);
+    if (style.italic)
+        width += MaxInt(1, style.font_size / 11) * style.font_size / 4;
+    return ERgssBitmapOk;
+}
+
+int BitmapToBitmap(TBitmapSlot& destination,
+                   const EasyRpgRgssRect& destinationRect,
+                   TBitmapSlot& source,
+                   const EasyRpgRgssRect& sourceRect,
+                   int opacity)
+{
+    if (destinationRect.width < 0 || destinationRect.height < 0 ||
+        sourceRect.width < 0 || sourceRect.height < 0 ||
+        sourceRect.x < 0 || sourceRect.y < 0 ||
+        sourceRect.x + sourceRect.width > source.width ||
+        sourceRect.y + sourceRect.height > source.height)
+        return ERgssBitmapErrorInvalidArgument;
+    if (destinationRect.width == 0 || destinationRect.height == 0 ||
+        sourceRect.width == 0 || sourceRect.height == 0 || opacity <= 0)
+        return ERgssBitmapOk;
+
+    unsigned short* copiedColor = 0;
+    unsigned char* copiedAlpha = 0;
+    if (&destination == &source)
+    {
+        const unsigned int sourceWidth = static_cast<unsigned int>(sourceRect.width);
+        const unsigned int sourceHeight = static_cast<unsigned int>(sourceRect.height);
+        if (sourceWidth > 0xffffffffu / sourceHeight)
+            return ERgssBitmapErrorNoMemory;
+        const unsigned int pixels = sourceWidth * sourceHeight;
+        if (pixels > 0xffffffffu / 2u)
+            return ERgssBitmapErrorNoMemory;
+        copiedColor = static_cast<unsigned short*>(
+            gBitmaps.host.allocate(gBitmaps.host.context, pixels * 2u));
+        if (!copiedColor)
+            return ERgssBitmapErrorNoMemory;
+        copiedAlpha = static_cast<unsigned char*>(
+            gBitmaps.host.allocate(gBitmaps.host.context, pixels));
+        if (!copiedAlpha)
+        {
+            gBitmaps.host.release(gBitmaps.host.context, copiedColor);
+            return ERgssBitmapErrorNoMemory;
+        }
+        for (int y = 0; y < sourceRect.height; ++y)
+        {
+            const int sourceBase = (sourceRect.y + y) * source.width + sourceRect.x;
+            const int copyBase = y * sourceRect.width;
+            for (int x = 0; x < sourceRect.width; ++x)
+            {
+                copiedColor[copyBase + x] = source.color[sourceBase + x];
+                copiedAlpha[copyBase + x] = source.alpha[sourceBase + x];
+            }
+        }
+    }
+
+    const int globalOpacity = ClampByte(opacity);
+    int left = destinationRect.x < 0 ? 0 : destinationRect.x;
+    int top = destinationRect.y < 0 ? 0 : destinationRect.y;
+    int right = destinationRect.x + destinationRect.width;
+    int bottom = destinationRect.y + destinationRect.height;
+    if (right > destination.width)
+        right = destination.width;
+    if (bottom > destination.height)
+        bottom = destination.height;
+
+    if (right > left && bottom > top)
+    {
+        for (int y = top; y < bottom; ++y)
+        {
+            const int relativeY = y - destinationRect.y;
+            int sourceOffsetY = (relativeY * sourceRect.height) / destinationRect.height;
+            if (sourceOffsetY >= sourceRect.height)
+                sourceOffsetY = sourceRect.height - 1;
+            for (int x = left; x < right; ++x)
+            {
+                const int relativeX = x - destinationRect.x;
+                int sourceOffsetX = (relativeX * sourceRect.width) / destinationRect.width;
+                if (sourceOffsetX >= sourceRect.width)
+                    sourceOffsetX = sourceRect.width - 1;
+                unsigned short sourceColor = 0;
+                int sourceAlpha = 0;
+                if (copiedColor)
+                {
+                    const int sourceIndex = sourceOffsetY * sourceRect.width + sourceOffsetX;
+                    sourceColor = copiedColor[sourceIndex];
+                    sourceAlpha = copiedAlpha[sourceIndex];
+                }
+                else
+                {
+                    const int sourceIndex = (sourceRect.y + sourceOffsetY) * source.width +
+                                            sourceRect.x + sourceOffsetX;
+                    sourceColor = source.color[sourceIndex];
+                    sourceAlpha = source.alpha[sourceIndex];
+                }
+                const int effectiveAlpha = Divide255Round(sourceAlpha * globalOpacity);
+                CompositeBitmapPixel(destination,
+                                     x,
+                                     y,
+                                     sourceColor,
+                                     effectiveAlpha);
+            }
+        }
+    }
+
+    if (copiedAlpha)
+        gBitmaps.host.release(gBitmaps.host.context, copiedAlpha);
+    if (copiedColor)
+        gBitmaps.host.release(gBitmaps.host.context, copiedColor);
+    return ERgssBitmapOk;
+}
+
+void RotateHue(unsigned short& color, int hueDegrees)
+{
+    int red = 0;
+    int green = 0;
+    int blue = 0;
+    Unpack565(color, red, green, blue);
+    const int maximum = MaxInt(red, MaxInt(green, blue));
+    int minimum = red < green ? red : green;
+    if (blue < minimum)
+        minimum = blue;
+    const int delta = maximum - minimum;
+    if (delta <= 0)
+        return;
+
+    int hue = 0;
+    if (maximum == red)
+        hue = DivideInt((green - blue) * 256, delta);
+    else if (maximum == green)
+        hue = 512 + DivideInt((blue - red) * 256, delta);
+    else
+        hue = 1024 + DivideInt((red - green) * 256, delta);
+    if (hue < 0)
+        hue += 1536;
+    if (hue >= 1536)
+        hue -= 1536;
+
+    const int shift = DivideInt(hueDegrees * 1536, 360);
+    hue += shift;
+    if (hue >= 1536)
+        hue -= 1536;
+
+    const int sector = hue >> 8;
+    const int fraction = hue & 255;
+    const int rising = minimum + DivideInt(delta * fraction, 255);
+    const int falling = maximum - DivideInt(delta * fraction, 255);
+    switch (sector)
+    {
+    case 0:
+        red = maximum;
+        green = rising;
+        blue = minimum;
+        break;
+    case 1:
+        red = falling;
+        green = maximum;
+        blue = minimum;
+        break;
+    case 2:
+        red = minimum;
+        green = maximum;
+        blue = rising;
+        break;
+    case 3:
+        red = minimum;
+        green = falling;
+        blue = maximum;
+        break;
+    case 4:
+        red = rising;
+        green = minimum;
+        blue = maximum;
+        break;
+    default:
+        red = maximum;
+        green = minimum;
+        blue = falling;
+        break;
+    }
+    color = Pack565(red, green, blue);
+}
+
+unsigned short ApplyBlitEffects(unsigned short color,
+                                const EasyRpgRgssBlitEffects& effects)
+{
+    int red = 0;
+    int green = 0;
+    int blue = 0;
+    Unpack565(color, red, green, blue);
+    if (effects.tone_gray > 0)
+    {
+        const int gray = (red * 77 + green * 150 + blue * 29) >> 8;
+        red += Divide255SignedRound((gray - red) * effects.tone_gray);
+        green += Divide255SignedRound((gray - green) * effects.tone_gray);
+        blue += Divide255SignedRound((gray - blue) * effects.tone_gray);
+    }
+    red = ClampByte(red + effects.tone_red);
+    green = ClampByte(green + effects.tone_green);
+    blue = ClampByte(blue + effects.tone_blue);
+    if (effects.color_alpha > 0)
+    {
+        red += Divide255SignedRound((effects.color_red - red) * effects.color_alpha);
+        green += Divide255SignedRound((effects.color_green - green) * effects.color_alpha);
+        blue += Divide255SignedRound((effects.color_blue - blue) * effects.color_alpha);
+        red = ClampByte(red);
+        green = ClampByte(green);
+        blue = ClampByte(blue);
+    }
+    return Pack565(red, green, blue);
+}
+
+int ValidateBlitEffects(const EasyRpgRgssBlitEffects* effects)
+{
+    if (!effects)
+        return ERgssBitmapOk;
+    if (effects->tone_red < -255 || effects->tone_red > 255 ||
+        effects->tone_green < -255 || effects->tone_green > 255 ||
+        effects->tone_blue < -255 || effects->tone_blue > 255 ||
+        effects->tone_gray < 0 || effects->tone_gray > 255 ||
+        effects->color_red < 0 || effects->color_red > 255 ||
+        effects->color_green < 0 || effects->color_green > 255 ||
+        effects->color_blue < 0 || effects->color_blue > 255 ||
+        effects->color_alpha < 0 || effects->color_alpha > 255 ||
+        effects->bush_depth < 0 || effects->bush_opacity < 0 ||
+        effects->bush_opacity > 255)
+        return ERgssBitmapErrorInvalidArgument;
+    return ERgssBitmapOk;
+}
 }
 
 extern "C" int EasyRpgRgssBitmapInitialize(const EasyRpgRgssBitmapHost* host)
@@ -198,6 +615,7 @@ extern "C" int EasyRpgRgssBitmapInitialize(const EasyRpgRgssBitmapHost* host)
 
     gBitmaps.host = *host;
     gBitmaps.slots = slots;
+    gBitmaps.glyph_context = host->context;
     gBitmaps.initialized = 1;
     for (int index = 0; index < host->max_bitmaps; ++index)
     {
@@ -225,8 +643,19 @@ extern "C" void EasyRpgRgssBitmapShutdown(void)
     gBitmaps.host.context = 0;
     gBitmaps.host.allocate = 0;
     gBitmaps.host.release = 0;
+    gBitmaps.host.glyph = 0;
     gBitmaps.host.max_bitmaps = 0;
+    gBitmaps.glyph_context = 0;
     gBitmaps.initialized = 0;
+}
+
+extern "C" void EasyRpgRgssBitmapSetGlyphProvider(void* context,
+                                                    EasyRpgRgssGlyphFn glyph)
+{
+    if (!gBitmaps.initialized)
+        return;
+    gBitmaps.glyph_context = context;
+    gBitmaps.host.glyph = glyph;
 }
 
 extern "C" int EasyRpgRgssBitmapCreate(int width, int height, int* handle)
@@ -383,6 +812,70 @@ extern "C" int EasyRpgRgssBitmapSetPixel(int handle,
     const int index = y * slot->width + x;
     slot->color[index] = Pack565(red, green, blue);
     slot->alpha[index] = static_cast<unsigned char>(ClampByte(alpha));
+    return ERgssBitmapOk;
+}
+
+extern "C" int EasyRpgRgssBitmapBlt(int destination_handle,
+                                     int destination_x,
+                                     int destination_y,
+                                     int source_handle,
+                                     const EasyRpgRgssRect* source_rect,
+                                     int opacity)
+{
+    TBitmapSlot* destination = FindSlot(destination_handle);
+    TBitmapSlot* source = FindSlot(source_handle);
+    if (!destination || !source)
+        return ERgssBitmapErrorInvalidHandle;
+    if (!source_rect)
+        return ERgssBitmapErrorInvalidArgument;
+    EasyRpgRgssRect destinationRect;
+    destinationRect.x = destination_x;
+    destinationRect.y = destination_y;
+    destinationRect.width = source_rect->width;
+    destinationRect.height = source_rect->height;
+    return BitmapToBitmap(*destination,
+                          destinationRect,
+                          *source,
+                          *source_rect,
+                          opacity);
+}
+
+extern "C" int EasyRpgRgssBitmapStretchBlt(int destination_handle,
+                                            const EasyRpgRgssRect* destination_rect,
+                                            int source_handle,
+                                            const EasyRpgRgssRect* source_rect,
+                                            int opacity)
+{
+    TBitmapSlot* destination = FindSlot(destination_handle);
+    TBitmapSlot* source = FindSlot(source_handle);
+    if (!destination || !source)
+        return ERgssBitmapErrorInvalidHandle;
+    if (!destination_rect || !source_rect)
+        return ERgssBitmapErrorInvalidArgument;
+    return BitmapToBitmap(*destination,
+                          *destination_rect,
+                          *source,
+                          *source_rect,
+                          opacity);
+}
+
+extern "C" int EasyRpgRgssBitmapHueChange(int handle, int hue_degrees)
+{
+    TBitmapSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssBitmapErrorInvalidHandle;
+    int normalized = hue_degrees % 360;
+    if (normalized < 0)
+        normalized += 360;
+    if (normalized == 0)
+        return ERgssBitmapOk;
+    const unsigned int pixels = static_cast<unsigned int>(slot->width) *
+                                static_cast<unsigned int>(slot->height);
+    for (unsigned int index = 0; index < pixels; ++index)
+    {
+        if (slot->alpha[index] != 0)
+            RotateHue(slot->color[index], normalized);
+    }
     return ERgssBitmapOk;
 }
 
@@ -552,14 +1045,15 @@ extern "C" int EasyRpgRgssBitmapBlit(int handle,
     return ERgssBitmapOk;
 }
 
-extern "C" int EasyRpgRgssBitmapBlitExClipped(int handle,
-                                               const EasyRpgRgssRect* source_rect,
-                                               const EasyRpgRgssRect* destination_rect,
-                                               const EasyRpgRgssRect* clip_rect,
-                                               int opacity,
-                                               int mirror,
-                                               int blend_type,
-                                               EasyRpgRgssRect* output_dirty)
+static int BitmapBlitEffectsInternal(int handle,
+                                     const EasyRpgRgssRect* source_rect,
+                                     const EasyRpgRgssRect* destination_rect,
+                                     const EasyRpgRgssRect* clip_rect,
+                                     int opacity,
+                                     int mirror,
+                                     int blend_type,
+                                     const EasyRpgRgssBlitEffects* effects,
+                                     EasyRpgRgssRect* output_dirty)
 {
     ZeroDirty(output_dirty);
     TBitmapSlot* slot = FindSlot(handle);
@@ -572,6 +1066,9 @@ extern "C" int EasyRpgRgssBitmapBlitExClipped(int handle,
         blend_type < ERgssBitmapBlendNormal ||
         blend_type > ERgssBitmapBlendSubtract)
         return ERgssBitmapErrorInvalidArgument;
+    const int effectsResult = ValidateBlitEffects(effects);
+    if (effectsResult != ERgssBitmapOk)
+        return effectsResult;
     if (source_rect->width == 0 || source_rect->height == 0 ||
         destination_rect->width == 0 || destination_rect->height == 0 ||
         opacity <= 0)
@@ -665,10 +1162,18 @@ extern "C" int EasyRpgRgssBitmapBlitExClipped(int handle,
                 targetX < 0 || targetX >= framebufferWidth)
                 continue;
             const int sourceIndex = sourceY * slot->width + sourceX;
-            const int effectiveAlpha = Divide255Round(
+            int effectiveAlpha = Divide255Round(
                 static_cast<int>(slot->alpha[sourceIndex]) * globalOpacity);
+            unsigned short sourceColor = slot->color[sourceIndex];
+            if (effects)
+            {
+                sourceColor = ApplyBlitEffects(sourceColor, *effects);
+                if (effects->bush_depth > 0 &&
+                    relativeY >= destination_rect->height - effects->bush_depth)
+                    effectiveAlpha = Divide255Round(effectiveAlpha * effects->bush_opacity);
+            }
             target[targetX] = Composite565(target[targetX],
-                                           slot->color[sourceIndex],
+                                           sourceColor,
                                            effectiveAlpha,
                                            blend_type);
         }
@@ -677,6 +1182,47 @@ extern "C" int EasyRpgRgssBitmapBlitExClipped(int handle,
     if (output_dirty)
         *output_dirty = physicalRect;
     return ERgssBitmapOk;
+}
+
+extern "C" int EasyRpgRgssBitmapBlitExClipped(int handle,
+                                               const EasyRpgRgssRect* source_rect,
+                                               const EasyRpgRgssRect* destination_rect,
+                                               const EasyRpgRgssRect* clip_rect,
+                                               int opacity,
+                                               int mirror,
+                                               int blend_type,
+                                               EasyRpgRgssRect* output_dirty)
+{
+    return BitmapBlitEffectsInternal(handle,
+                                     source_rect,
+                                     destination_rect,
+                                     clip_rect,
+                                     opacity,
+                                     mirror,
+                                     blend_type,
+                                     0,
+                                     output_dirty);
+}
+
+extern "C" int EasyRpgRgssBitmapBlitEffects(int handle,
+                                             const EasyRpgRgssRect* source_rect,
+                                             const EasyRpgRgssRect* destination_rect,
+                                             const EasyRpgRgssRect* clip_rect,
+                                             int opacity,
+                                             int mirror,
+                                             int blend_type,
+                                             const EasyRpgRgssBlitEffects* effects,
+                                             EasyRpgRgssRect* output_dirty)
+{
+    return BitmapBlitEffectsInternal(handle,
+                                     source_rect,
+                                     destination_rect,
+                                     clip_rect,
+                                     opacity,
+                                     mirror,
+                                     blend_type,
+                                     effects,
+                                     output_dirty);
 }
 
 extern "C" int EasyRpgRgssBitmapBlitEx(int handle,
@@ -824,5 +1370,91 @@ extern "C" int EasyRpgRgssBitmapTile(int handle,
 
     if (output_dirty)
         *output_dirty = physicalRect;
+    return ERgssBitmapOk;
+}
+
+extern "C" int EasyRpgRgssBitmapTextSize(int handle,
+                                          const unsigned int* codepoints,
+                                          int count,
+                                          const EasyRpgRgssTextStyle* style,
+                                          int* width,
+                                          int* height)
+{
+    TBitmapSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssBitmapErrorInvalidHandle;
+    if (count < 0 || !width || !height)
+        return ERgssBitmapErrorInvalidArgument;
+    const int styleResult = ValidateTextStyle(style);
+    if (styleResult != ERgssBitmapOk)
+        return styleResult;
+    return MeasureText(codepoints, count, *style, *width, *height);
+}
+
+extern "C" int EasyRpgRgssBitmapDrawText(int handle,
+                                          const EasyRpgRgssRect* rect,
+                                          const unsigned int* codepoints,
+                                          int count,
+                                          const EasyRpgRgssTextStyle* style)
+{
+    TBitmapSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssBitmapErrorInvalidHandle;
+    if (!rect || rect->width < 0 || rect->height < 0 || count < 0 ||
+        (count > 0 && !codepoints))
+        return ERgssBitmapErrorInvalidArgument;
+    const int styleResult = ValidateTextStyle(style);
+    if (styleResult != ERgssBitmapOk)
+        return styleResult;
+    if (rect->width == 0 || rect->height == 0 || count == 0 || style->alpha == 0)
+        return ERgssBitmapOk;
+
+    int textWidth = 0;
+    int textHeight = 0;
+    const int measureResult = MeasureText(codepoints,
+                                          count,
+                                          *style,
+                                          textWidth,
+                                          textHeight);
+    if (measureResult != ERgssBitmapOk)
+        return measureResult;
+
+    int penX = rect->x;
+    if (style->align == 1)
+        penX += (rect->width - textWidth) / 2;
+    else if (style->align == 2)
+        penX += rect->width - textWidth;
+    const int penY = rect->y + (rect->height - textHeight) / 2;
+    const unsigned short color = Pack565(style->red,
+                                         style->green,
+                                         style->blue);
+    const unsigned short shadowColor = 0;
+    const int shadowAlpha = Divide255Round(style->alpha * 128);
+
+    for (int index = 0; index < count; ++index)
+    {
+        const unsigned int codepoint = codepoints[index];
+        if (codepoint == '\r' || codepoint == '\n')
+            continue;
+        TResolvedGlyph glyph;
+        if (!ResolveGlyph(codepoint, glyph))
+            continue;
+        if (style->shadow)
+            DrawResolvedGlyph(*slot,
+                              glyph,
+                              penX + MaxInt(1, style->font_size / 11),
+                              penY + MaxInt(1, style->font_size / 11),
+                              *style,
+                              shadowColor,
+                              shadowAlpha);
+        DrawResolvedGlyph(*slot,
+                          glyph,
+                          penX,
+                          penY,
+                          *style,
+                          color,
+                          style->alpha);
+        penX += ScaleMetric(glyph.advance, glyph.height, style->font_size);
+    }
     return ERgssBitmapOk;
 }

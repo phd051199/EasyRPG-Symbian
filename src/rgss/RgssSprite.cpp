@@ -71,6 +71,16 @@ void DefaultState(EasyRpgRgssSpriteState& state)
     state.visible = 1;
     state.mirror = 0;
     state.blend_type = ERgssBitmapBlendNormal;
+    state.tone_red = 0;
+    state.tone_green = 0;
+    state.tone_blue = 0;
+    state.tone_gray = 0;
+    state.color_red = 0;
+    state.color_green = 0;
+    state.color_blue = 0;
+    state.color_alpha = 0;
+    state.bush_depth = 0;
+    state.bush_opacity = 128;
 }
 
 TSpriteSlot* FindSlot(int handle)
@@ -99,7 +109,16 @@ int ValidateState(const EasyRpgRgssSpriteState& state)
         state.zoom_x_milli > 16000 || state.zoom_y_milli > 16000 ||
         state.opacity < 0 || state.opacity > 255 ||
         state.blend_type < ERgssBitmapBlendNormal ||
-        state.blend_type > ERgssBitmapBlendSubtract)
+        state.blend_type > ERgssBitmapBlendSubtract ||
+        state.tone_red < -255 || state.tone_red > 255 ||
+        state.tone_green < -255 || state.tone_green > 255 ||
+        state.tone_blue < -255 || state.tone_blue > 255 ||
+        state.tone_gray < 0 || state.tone_gray > 255 ||
+        state.color_red < 0 || state.color_red > 255 ||
+        state.color_green < 0 || state.color_green > 255 ||
+        state.color_blue < 0 || state.color_blue > 255 ||
+        state.color_alpha < 0 || state.color_alpha > 255 ||
+        state.bush_depth < 0 || state.bush_opacity < 0 || state.bush_opacity > 255)
         return ERgssSpriteErrorInvalidArgument;
     if (state.bitmap_handle != 0 &&
         (EasyRpgRgssBitmapWidth(state.bitmap_handle) < 0 ||
@@ -255,22 +274,52 @@ int RenderState(const EasyRpgRgssSpriteState& state, EasyRpgRgssRect* outputDirt
         return boundsResult;
     if (bounds.width <= 0 || bounds.height <= 0)
         return ERgssSpriteOk;
-    const int result = clipped
-        ? EasyRpgRgssBitmapBlitExClipped(state.bitmap_handle,
-                                         &state.source_rect,
-                                         &bounds,
-                                         &clip,
-                                         state.opacity,
-                                         state.mirror,
-                                         state.blend_type,
-                                         outputDirty)
-        : EasyRpgRgssBitmapBlitEx(state.bitmap_handle,
-                                  &state.source_rect,
-                                  &bounds,
-                                  state.opacity,
-                                  state.mirror,
-                                  state.blend_type,
-                                  outputDirty);
+    const int hasEffects = state.tone_red != 0 || state.tone_green != 0 ||
+        state.tone_blue != 0 || state.tone_gray != 0 ||
+        state.color_alpha != 0 || state.bush_depth != 0;
+    int result = ERgssBitmapOk;
+    if (hasEffects)
+    {
+        EasyRpgRgssBlitEffects effects;
+        effects.tone_red = state.tone_red;
+        effects.tone_green = state.tone_green;
+        effects.tone_blue = state.tone_blue;
+        effects.tone_gray = state.tone_gray;
+        effects.color_red = state.color_red;
+        effects.color_green = state.color_green;
+        effects.color_blue = state.color_blue;
+        effects.color_alpha = state.color_alpha;
+        effects.bush_depth = state.bush_depth;
+        effects.bush_opacity = state.bush_opacity;
+        result = EasyRpgRgssBitmapBlitEffects(state.bitmap_handle,
+                                               &state.source_rect,
+                                               &bounds,
+                                               clipped ? &clip : 0,
+                                               state.opacity,
+                                               state.mirror,
+                                               state.blend_type,
+                                               &effects,
+                                               outputDirty);
+    }
+    else
+    {
+        result = clipped
+            ? EasyRpgRgssBitmapBlitExClipped(state.bitmap_handle,
+                                             &state.source_rect,
+                                             &bounds,
+                                             &clip,
+                                             state.opacity,
+                                             state.mirror,
+                                             state.blend_type,
+                                             outputDirty)
+            : EasyRpgRgssBitmapBlitEx(state.bitmap_handle,
+                                      &state.source_rect,
+                                      &bounds,
+                                      state.opacity,
+                                      state.mirror,
+                                      state.blend_type,
+                                      outputDirty);
+    }
     return result == ERgssBitmapOk ? ERgssSpriteOk : ERgssSpriteErrorRender;
 }
 
@@ -613,6 +662,56 @@ extern "C" int EasyRpgRgssSpriteSetBlendType(int handle, int blend_type)
     return ERgssSpriteOk;
 }
 
+extern "C" int EasyRpgRgssSpriteSetTone(int handle,
+                                         int red,
+                                         int green,
+                                         int blue,
+                                         int gray)
+{
+    TSpriteSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssSpriteErrorInvalidHandle;
+    if (red < -255 || red > 255 || green < -255 || green > 255 ||
+        blue < -255 || blue > 255 || gray < 0 || gray > 255)
+        return ERgssSpriteErrorInvalidArgument;
+    slot->state.tone_red = red;
+    slot->state.tone_green = green;
+    slot->state.tone_blue = blue;
+    slot->state.tone_gray = gray;
+    return ERgssSpriteOk;
+}
+
+extern "C" int EasyRpgRgssSpriteSetColor(int handle,
+                                          int red,
+                                          int green,
+                                          int blue,
+                                          int alpha)
+{
+    TSpriteSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssSpriteErrorInvalidHandle;
+    if (red < 0 || red > 255 || green < 0 || green > 255 ||
+        blue < 0 || blue > 255 || alpha < 0 || alpha > 255)
+        return ERgssSpriteErrorInvalidArgument;
+    slot->state.color_red = red;
+    slot->state.color_green = green;
+    slot->state.color_blue = blue;
+    slot->state.color_alpha = alpha;
+    return ERgssSpriteOk;
+}
+
+extern "C" int EasyRpgRgssSpriteSetBush(int handle, int depth, int opacity)
+{
+    TSpriteSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssSpriteErrorInvalidHandle;
+    if (depth < 0 || opacity < 0 || opacity > 255)
+        return ERgssSpriteErrorInvalidArgument;
+    slot->state.bush_depth = depth;
+    slot->state.bush_opacity = opacity;
+    return ERgssSpriteOk;
+}
+
 extern "C" int EasyRpgRgssSpriteLogicalBounds(int handle, EasyRpgRgssRect* bounds)
 {
     TSpriteSlot* slot = FindSlot(handle);
@@ -648,33 +747,10 @@ extern "C" int EasyRpgRgssSpriteRenderRange(int minimum_z,
             continue;
         if (layerZ > maximum_z)
             break;
-        EasyRpgRgssRect bounds;
-        EasyRpgRgssRect clip;
-        int clipped = 0;
-        const int boundsResult = ComputeRenderBounds(slot.state, bounds, clip, clipped);
-        if (boundsResult != ERgssSpriteOk)
-            return boundsResult;
-        if (bounds.width <= 0 || bounds.height <= 0)
-            continue;
         EasyRpgRgssRect dirty;
-        const int result = clipped
-            ? EasyRpgRgssBitmapBlitExClipped(slot.state.bitmap_handle,
-                                             &slot.state.source_rect,
-                                             &bounds,
-                                             &clip,
-                                             slot.state.opacity,
-                                             slot.state.mirror,
-                                             slot.state.blend_type,
-                                             &dirty)
-            : EasyRpgRgssBitmapBlitEx(slot.state.bitmap_handle,
-                                      &slot.state.source_rect,
-                                      &bounds,
-                                      slot.state.opacity,
-                                      slot.state.mirror,
-                                      slot.state.blend_type,
-                                      &dirty);
-        if (result != ERgssBitmapOk)
-            return ERgssSpriteErrorRender;
+        const int result = RenderState(slot.state, &dirty);
+        if (result != ERgssSpriteOk)
+            return result;
         UnionDirty(total, dirty);
     }
     if (output_dirty)

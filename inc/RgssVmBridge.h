@@ -46,9 +46,28 @@ typedef unsigned int (*EasyRpgRgssVmInputFn)(void* context,
 typedef int (*EasyRpgRgssVmBitmapLoadFn)(void* context,
                                          const char* relative_path,
                                          int* bitmap_handle);
+typedef int (*EasyRpgRgssVmTextDecodeFn)(void* context,
+                                         const unsigned char* text,
+                                         int text_length,
+                                         unsigned int* codepoints,
+                                         int capacity);
 typedef int (*EasyRpgRgssVmFrameSyncFn)(void* context,
                                         int frame_rate,
                                         int frame_count);
+typedef int (*EasyRpgRgssVmScriptCountFn)(void* context);
+typedef int (*EasyRpgRgssVmScriptInfoFn)(void* context,
+                                         int index,
+                                         int* id,
+                                         int* name_length);
+typedef int (*EasyRpgRgssVmScriptNameFn)(void* context,
+                                         int index,
+                                         void* buffer,
+                                         int capacity);
+typedef int (*EasyRpgRgssVmScriptInflateFn)(void* context,
+                                            int index,
+                                            unsigned char** source,
+                                            int* source_length);
+typedef void (*EasyRpgRgssVmReleaseFn)(void* context, void* memory);
 typedef void (*EasyRpgRgssVmDirtyFn)(void* context,
                                      int x,
                                      int y,
@@ -63,7 +82,13 @@ typedef struct EasyRpgRgssVmHost
     EasyRpgRgssVmTicksFn ticks;
     EasyRpgRgssVmInputFn input;
     EasyRpgRgssVmBitmapLoadFn bitmap_load;
+    EasyRpgRgssVmTextDecodeFn text_decode;
     EasyRpgRgssVmFrameSyncFn frame_sync;
+    EasyRpgRgssVmScriptCountFn script_count;
+    EasyRpgRgssVmScriptInfoFn script_info;
+    EasyRpgRgssVmScriptNameFn script_name;
+    EasyRpgRgssVmScriptInflateFn script_inflate;
+    EasyRpgRgssVmReleaseFn release;
     EasyRpgRgssVmDirtyFn dirty;
 } EasyRpgRgssVmHost;
 

@@ -12,13 +12,16 @@ enum EasyRpgRgssScriptArchiveResult
     ERgssScriptArchiveErrorRead = -121,
     ERgssScriptArchiveErrorCorrupt = -122,
     ERgssScriptArchiveErrorUnsupported = -123,
-    ERgssScriptArchiveErrorCapacity = -124
+    ERgssScriptArchiveErrorCapacity = -124,
+    ERgssScriptArchiveErrorNoMemory = -125
 };
 
 typedef int (*EasyRpgRgssScriptArchiveReadFn)(void* context,
                                                int offset,
                                                void* buffer,
                                                int bytes);
+typedef void* (*EasyRpgRgssScriptArchiveAllocFn)(void* context, unsigned int bytes);
+typedef void (*EasyRpgRgssScriptArchiveFreeFn)(void* context, void* memory);
 
 typedef struct EasyRpgRgssScriptArchiveReader
 {
@@ -42,6 +45,14 @@ int EasyRpgRgssScriptArchiveInspect(const EasyRpgRgssScriptArchiveReader* reader
                                      int* count);
 int EasyRpgRgssScriptArchiveValidate(const EasyRpgRgssScriptArchiveReader* reader,
                                      int* count);
+int EasyRpgRgssScriptArchiveInflate(const EasyRpgRgssScriptArchiveReader* reader,
+                                    const EasyRpgRgssScriptEntry* entry,
+                                    EasyRpgRgssScriptArchiveAllocFn allocate,
+                                    EasyRpgRgssScriptArchiveFreeFn release,
+                                    void* allocation_context,
+                                    int max_output_bytes,
+                                    unsigned char** output,
+                                    int* output_length);
 
 #ifdef __cplusplus
 }

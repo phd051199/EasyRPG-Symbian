@@ -500,6 +500,12 @@ The XP/VX/VX Ace runtime is isolated from the RPG Maker 2000/2003 player. It use
 - [x] global allocation-free render registry merges renderables by effective z and creation order
 - [x] native RGSS Plane tiled compositor with zoom, origin scrolling, opacity, blend and viewport support
 - [x] native RGSS Table and Input state cores for future MRI bindings
+- [x] streaming Ruby Marshal script archive validation/indexing without loading `Scripts.*` whole into RAM
+- [x] two-pass streaming zlib inflate per script with exact output allocation and bounded source size
+- [x] VM host exposes script count/info/name/inflate/release so MRI can eval one script at a time
+- [x] native RGSS Bitmap text_size/draw_text with Gohu fallback and worker-thread Symbian font-server glyph cache
+- [x] native RGSS Bitmap blt/stretch_blt/hue_change including safe self-overlap blits
+- [x] native RGSS Sprite tone/color/bush effects keep the normal no-effect render path unchanged
 - [ ] vendor MRI source directly into `third_party`
 - [ ] boot MRI with a minimal embedded script on ARMV5
 - [ ] RGSS1 Marshal and `Scripts.rxdata` loading

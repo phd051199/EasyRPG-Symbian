@@ -1,11 +1,15 @@
 #include <aknappui.h>
 #include <aknlists.h>
 #include <aknnotewrappers.h>
+#include <aknprogressdialog.h>
+#include <basched.h>
+#include <eikprogi.h>
 #include <coemain.h>
 #include <e32std.h>
 #include <eikclbd.h>
 #include <eikenv.h>
 #include <eikscrlb.h>
+#include <EasyRPG.rsg>
 
 #include "GameLocator.h"
 #include "GameMetadata.h"
@@ -30,6 +34,143 @@ void CopyListText(const TDesC& aSource, TDes& aTarget)
 
 }
 
+class CGameLaunchWatcher : public CActive
+{
+public:
+    static CGameLaunchWatcher* NewL(CLauncherView& aOwner)
+    {
+        CGameLaunchWatcher* self = new (ELeave) CGameLaunchWatcher(aOwner);
+        CActiveScheduler::Add(self);
+        return self;
+    }
+
+    ~CGameLaunchWatcher()
+    {
+        Cancel();
+        if (iCreated)
+            iProcess.Close();
+    }
+
+    void StartL(const TDesC& aExecutablePath, const TDesC& aArchivePath)
+    {
+        if (IsActive() || iState != EIdle || iCreated)
+            User::Leave(KErrInUse);
+        if (aExecutablePath.Length() > iExecutablePath.MaxLength() ||
+            aArchivePath.Length() > iArchivePath.MaxLength())
+            User::Leave(KErrTooBig);
+
+        iExecutablePath.Copy(aExecutablePath);
+        iArchivePath.Copy(aArchivePath);
+        iState = EDeferredStart;
+        iStatus = KRequestPending;
+        SetActive();
+        TRequestStatus* status = &iStatus;
+        User::RequestComplete(status, KErrNone);
+    }
+
+private:
+    enum TState
+    {
+        EIdle,
+        EDeferredStart,
+        EWaitingForRuntime
+    };
+
+    CGameLaunchWatcher(CLauncherView& aOwner)
+        : CActive(EPriorityIdle),
+          iOwner(aOwner),
+          iState(EIdle),
+          iCreated(EFalse)
+    {
+    }
+
+    void StartProcessL()
+    {
+        const TInt KGamePathParameterSlot = 1;
+        iOwner.UpdateLoadingProgress(35);
+        User::LeaveIfError(iProcess.Create(iExecutablePath, KNullDesC));
+        iCreated = ETrue;
+
+        const TInt parameterError = iProcess.SetParameter(KGamePathParameterSlot, iArchivePath);
+        if (parameterError != KErrNone)
+        {
+            iProcess.Kill(parameterError);
+            iProcess.Close();
+            iCreated = EFalse;
+            User::Leave(parameterError);
+        }
+
+        iProcess.Rendezvous(iStatus);
+        if (iStatus != KRequestPending)
+        {
+            TInt error = iStatus.Int();
+            if (error == KErrNone)
+                error = KErrGeneral;
+            iProcess.Kill(error);
+            iProcess.Close();
+            iCreated = EFalse;
+            User::Leave(error);
+        }
+
+        iState = EWaitingForRuntime;
+        iOwner.UpdateLoadingProgress(70);
+        SetActive();
+        iProcess.Resume();
+    }
+
+    void RunL()
+    {
+        if (iState == EDeferredStart)
+        {
+            iState = EIdle;
+            TRAPD(error, StartProcessL());
+            if (error != KErrNone)
+                iOwner.GameLaunchCompleted(error);
+            return;
+        }
+
+        const TInt error = iStatus.Int();
+        if (iCreated)
+            iProcess.Close();
+        iCreated = EFalse;
+        iState = EIdle;
+        iOwner.GameLaunchCompleted(error);
+    }
+
+    TInt RunError(TInt aError)
+    {
+        if (iCreated)
+        {
+            iProcess.Kill(aError);
+            iProcess.Close();
+            iCreated = EFalse;
+        }
+        iState = EIdle;
+        iOwner.GameLaunchCompleted(aError);
+        return KErrNone;
+    }
+
+    void DoCancel()
+    {
+        if (iState == EWaitingForRuntime && iCreated)
+        {
+            iProcess.Kill(KErrCancel);
+            User::WaitForRequest(iStatus);
+            iProcess.Close();
+            iCreated = EFalse;
+        }
+        iState = EIdle;
+    }
+
+private:
+    CLauncherView& iOwner;
+    RProcess iProcess;
+    TFileName iExecutablePath;
+    TFileName iArchivePath;
+    TState iState;
+    TBool iCreated;
+};
+
 CLauncherView* CLauncherView::NewL(const TRect& aRect)
 {
     CLauncherView* self = new (ELeave) CLauncherView;
@@ -42,7 +183,11 @@ CLauncherView* CLauncherView::NewL(const TRect& aRect)
 CLauncherView::CLauncherView()
     : iListBox(NULL),
       iListItems(NULL),
-      iArchivePaths(NULL)
+      iArchivePaths(NULL),
+      iLoadingDialog(NULL),
+      iLoadingProgress(NULL),
+      iLaunchWatcher(NULL),
+      iLaunching(EFalse)
 {
 }
 
@@ -50,6 +195,7 @@ void CLauncherView::ConstructL(const TRect& aRect)
 {
     CreateWindowL();
     User::LeaveIfError(iFs.Connect());
+    iLaunchWatcher = CGameLaunchWatcher::NewL(*this);
 
     iListBox = new (ELeave) CAknDoubleStyleListBox;
     iListBox->SetContainerWindowL(*this);
@@ -74,6 +220,9 @@ void CLauncherView::ConstructL(const TRect& aRect)
 
 CLauncherView::~CLauncherView()
 {
+    delete iLaunchWatcher;
+    iLaunchWatcher = NULL;
+    DismissLoadingDialog();
     delete iListBox;
     iListBox = NULL;
     delete iListItems;
@@ -100,14 +249,10 @@ void CLauncherView::BuildGameListL()
         CopyListText((*displayNames)[index], title);
 
         TInt version = EGameEngineUnknown;
-        TRAP_IGNORE(version = DetectGameEngineL(iFs, (*iArchivePaths)[index]));
-        TInt metadataVersion = version;
         TRAP_IGNORE(ReadGameMetadataL(iFs,
                                       (*iArchivePaths)[index],
                                       title,
-                                      metadataVersion));
-        if (metadataVersion != EGameEngineUnknown)
-            version = metadataVersion;
+                                      version));
         User::LeaveIfError(iEngineVersions.Append(version));
 
         TBuf<64> subtitle;
@@ -130,9 +275,41 @@ void CLauncherView::BuildGameListL()
     iListBox->SetCurrentItemIndex(0);
 }
 
+void CLauncherView::ShowLoadingDialogL()
+{
+    if (iLoadingDialog)
+        return;
+    iLoadingDialog = new (ELeave) CAknProgressDialog(
+        reinterpret_cast<CEikDialog**>(&iLoadingDialog), ETrue);
+    iLoadingDialog->PrepareLC(R_EASYRPG_LOADING_WAIT_NOTE);
+    iLoadingProgress = iLoadingDialog->GetProgressInfoL();
+    iLoadingProgress->SetFinalValue(100);
+    iLoadingDialog->RunLD();
+    iLoadingProgress->SetAndDraw(10);
+}
+
+void CLauncherView::UpdateLoadingProgress(TInt aValue)
+{
+    if (!iLoadingProgress)
+        return;
+    if (aValue < 0)
+        aValue = 0;
+    else if (aValue > 100)
+        aValue = 100;
+    iLoadingProgress->SetAndDraw(aValue);
+}
+
+void CLauncherView::DismissLoadingDialog()
+{
+    if (!iLoadingDialog)
+        return;
+    iLoadingProgress = NULL;
+    TRAP_IGNORE(iLoadingDialog->ProcessFinishedL());
+    iLoadingDialog = NULL;
+}
+
 void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion)
 {
-    const TInt KGamePathParameterSlot = 1;
     _LIT(KEasyRpgRuntime, "EasyRPGGame.exe");
     _LIT(KEasyRpgRgssRuntime, "EasyRPGRgss.exe");
     const TDesC* executable = &KEasyRpgRuntime;
@@ -149,38 +326,57 @@ void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion)
     TFileName executablePath(currentParse.DriveAndPath());
     executablePath.Append(*executable);
 
-    RProcess process;
-    User::LeaveIfError(process.Create(executablePath, KNullDesC));
-    const TInt parameterError = process.SetParameter(KGamePathParameterSlot, aArchivePath);
-    if (parameterError != KErrNone)
-    {
-        process.Kill(parameterError);
-        process.Close();
-        User::Leave(parameterError);
-    }
-    process.Resume();
-    process.Close();
-
-    CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
-    appUi->Exit();
+    if (!iLaunchWatcher)
+        User::Leave(KErrNotReady);
+    iLaunchWatcher->StartL(executablePath, aArchivePath);
 }
 
 void CLauncherView::PlaySelectedGameL()
 {
-    if (!iListBox || !iArchivePaths)
+    if (iLaunching || !iListBox || !iArchivePaths)
         return;
     const TInt index = iListBox->CurrentItemIndex();
     if (index < 0 || index >= iArchivePaths->Count() ||
         index >= iEngineVersions.Count())
         return;
-    TRAPD(error, LaunchArchiveL((*iArchivePaths)[index], iEngineVersions[index]));
+    iLaunching = ETrue;
+    TRAPD(error,
+        ShowLoadingDialogL();
+        LaunchArchiveL((*iArchivePaths)[index], iEngineVersions[index]);
+    );
     if (error != KErrNone)
     {
+        iLaunching = EFalse;
+        DismissLoadingDialog();
         TBuf<48> message;
         message.Format(_L("Start failed (%d)"), error);
         CAknErrorNote* note = new (ELeave) CAknErrorNote;
         note->ExecuteLD(message);
     }
+}
+
+void CLauncherView::GameLaunchCompleted(TInt aError)
+{
+    iLaunching = EFalse;
+    UpdateLoadingProgress(100);
+    DismissLoadingDialog();
+    if (aError == KLeaveExit)
+        aError = KErrNone;
+    if (aError != KErrNone)
+    {
+        TRAP_IGNORE(
+            TBuf<48> message;
+            message.Format(_L("Start failed (%d)"), aError);
+            CAknErrorNote* note = new (ELeave) CAknErrorNote;
+            note->ExecuteLD(message);
+        );
+        return;
+    }
+
+    CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
+    appUi->PrepareToExit();
+    if (CActiveScheduler::Current())
+        CActiveScheduler::Stop();
 }
 
 void CLauncherView::UpdateLayout()

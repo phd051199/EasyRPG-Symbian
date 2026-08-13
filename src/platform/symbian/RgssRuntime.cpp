@@ -57,6 +57,7 @@ void CRgssRuntime::ConstructL(const TDesC& aGamePath)
     bitmapHost.context = this;
     bitmapHost.allocate = &CRgssRuntime::BitmapAllocate;
     bitmapHost.release = &CRgssRuntime::BitmapRelease;
+    bitmapHost.glyph = NULL;
     bitmapHost.max_bitmaps = 512;
     const TInt bitmapResult = EasyRpgRgssBitmapInitialize(&bitmapHost);
     if (bitmapResult != ERgssBitmapOk)

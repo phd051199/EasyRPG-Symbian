@@ -16,7 +16,6 @@ SOURCE            AudioMixer.cpp
 SOURCE            AudioBridge.cpp
 SOURCE            MovieBridge.cpp
 SOURCE            ZipVfs.cpp
-SOURCE            LcfProbe.cpp
 SOURCE            Encoding.cpp
 SOURCE            Dirent.cpp
 SOURCE            PlayerRuntime.cpp
