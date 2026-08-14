@@ -3,9 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#ifdef EASYRPG_RUBY300
 #include <pthread.h>
-#endif
 
 #include "Encoding.h"
 #include "RgssGlyphCache.h"
@@ -242,13 +240,8 @@ void CRgssVmWorker::StartL()
     iStartSignaled = EFalse;
     iVmInitialized = EFalse;
 
-#ifdef EASYRPG_RUBY300
     const TInt stackSize = 0x40000;
     const TInt heapMax = 0x02800000;
-#else
-    const TInt stackSize = 0x18000;
-    const TInt heapMax = 0x01800000;
-#endif
     User::LeaveIfError(iThread.Create(KRgssVmThreadName,
                                       &CRgssVmWorker::ThreadEntry,
                                       stackSize,
@@ -331,12 +324,9 @@ void CRgssVmWorker::SetInputWord(TInt aWord, TUint32 aValue)
 {
     if (aWord < 0 || aWord >= 4)
         return;
-    if (iInputWords[aWord] != aValue)
-    {
-        char line[48];
-        snprintf(line, sizeof(line), "input %d %08x", aWord, aValue);
-        EasyRpgRgssVmTrace(line);
-    }
+    // Called from the engine/UI thread. Do not write rgss.trace here: the
+    // trace RFs/RFile session is owned by the VM pthread, and using it across
+    // Symbian threads can corrupt the session or fault in euser.dll.
     iInputWords[aWord] = aValue;
 }
 
@@ -378,7 +368,6 @@ TInt CRgssVmWorker::ThreadEntry(TAny* aContext)
     if (!self)
         return KErrArgument;
 
-#ifdef EASYRPG_RUBY300
     pthread_attr_t attributes;
     if (pthread_attr_init(&attributes) != 0)
     {
@@ -398,22 +387,8 @@ TInt CRgssVmWorker::ThreadEntry(TAny* aContext)
     }
     pthread_join(thread, NULL);
     return self->iExitResult;
-#else
-    CTrapCleanup* cleanup = CTrapCleanup::New();
-    if (!cleanup)
-    {
-        self->iExitResult = KErrNoMemory;
-        self->SignalStarted(KErrNoMemory);
-        return KErrNoMemory;
-    }
-
-    const TInt result = self->ThreadMain();
-    delete cleanup;
-    return result;
-#endif
 }
 
-#ifdef EASYRPG_RUBY300
 TAny* CRgssVmWorker::PthreadEntry(TAny* aContext)
 {
     CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
@@ -440,7 +415,6 @@ TAny* CRgssVmWorker::PthreadEntry(TAny* aContext)
     TraceClose();
     return NULL;
 }
-#endif
 
 TInt CRgssVmWorker::ThreadMain()
 {
@@ -448,13 +422,11 @@ TInt CRgssVmWorker::ThreadMain()
     iExitResult = result;
     if (!iStartSignaled)
         SignalStarted(result);
-#ifdef EASYRPG_RUBY300
     {
         char line[96];
         snprintf(line, sizeof(line), "vm thread main result=%d", result);
         EasyRpgRgssVmTraceHeap(line);
     }
-#endif
     iResources = NULL;
     iFs.Close();
     return result;
@@ -687,13 +659,11 @@ int CRgssVmWorker::VmBitmapLoad(void* aContext,
     if (!self->iResources)
         return ERgssVmErrorNotInitialized;
 
-#ifdef EASYRPG_RUBY300
     {
         char line[160];
         snprintf(line, sizeof(line), "bitmap load %s", aRelativePath);
         EasyRpgRgssVmTraceHeap(line);
     }
-#endif
 
     TInt handle = 0;
     TRAPD(error, EasyRpgRgssLoadBitmapL(self->iFs,
@@ -861,7 +831,7 @@ int CRgssVmWorker::VmFrameSync(void* aContext,
     if (self->iStopRequested)
         return ERgssVmErrorRuntime;
 
-#ifdef EASYRPG_RUBY300
+#ifdef EASYRPG_RGSS_TRACE_FRAMES
     if ((aFrameCount & 127) == 0)
     {
         char line[96];

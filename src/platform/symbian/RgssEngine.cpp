@@ -1,15 +1,10 @@
 #include <e32keys.h>
 #include <gdi.h>
-#include <stdio.h>
 
 #include "RgssDisplaySurface.h"
 #include "RgssEngine.h"
 #include "RgssRuntime.h"
 #include "RgssVmBridge.h"
-
-#ifdef EASYRPG_RUBY300
-extern "C" void EasyRpgRgssVmTrace(const char* aText);
-#endif
 
 class CRgssWindowEventPump : public CActive
 {
@@ -163,6 +158,8 @@ CRgssEngine::CRgssEngine()
       iEventPump(NULL),
       iDirectScreen(NULL),
       iInputWord(0),
+      iPendingInputPulses(0),
+      iDynamicScanCount(0),
       iLogicAccumulator(0),
       iPresentAccumulator(0),
       iFrameError(KErrNone),
@@ -215,16 +212,17 @@ void CRgssEngine::ConstructL()
     const TUint scanCaptures[] = {
         EStdKeyUpArrow, EStdKeyDownArrow, EStdKeyLeftArrow, EStdKeyRightArrow,
         EStdKeyDevice3, EStdKeyDevice1, EStdKeyEnter, EStdKeyEscape,
-        EStdKeySpace, EStdKeyLeftShift, EStdKeyRightShift,
-        'W', 'S', 'A', 'D', 'Z', 'X', 'Q', 'E'
+        EStdKeyBackspace, EStdKeySpace, EStdKeyLeftShift, EStdKeyRightShift,
+        'W', 'S', 'A', 'D', 'Z', 'X', 'C', 'V', 'B', 'N', 'Q', 'E'
     };
     for (TUint index = 0; index < sizeof(scanCaptures) / sizeof(scanCaptures[0]); ++index)
         iWindowGroup->CaptureKeyUpAndDowns(scanCaptures[index], 0, 0, 0);
     const TUint codeCaptures[] = {
-        EKeyEnter, EKeyEscape, EKeySpace,
+        EKeyEnter, EKeyEscape, EKeyBackspace, EKeySpace,
         EKeyLeftArrow, EKeyRightArrow, EKeyUpArrow, EKeyDownArrow,
         EKeyDevice1, EKeyDevice3,
-        'W', 'S', 'A', 'D', 'Z', 'X', 'Q', 'E'
+        'W', 'S', 'A', 'D', 'Z', 'X', 'C', 'V', 'B', 'N', 'Q', 'E',
+        'w', 's', 'a', 'd', 'z', 'x', 'c', 'v', 'b', 'n', 'q', 'e'
     };
     for (TUint index = 0; index < sizeof(codeCaptures) / sizeof(codeCaptures[0]); ++index)
         iWindowGroup->CaptureKey(codeCaptures[index], 0, 0, 0);
@@ -340,18 +338,6 @@ void CRgssEngine::FrameTickL(TUint32, TBool)
         return;
     const TInt focusGroup = iWs.GetFocusWindowGroup();
     const TBool ownsFocus = focusGroup == iWindowGroup->Identifier();
-#ifdef EASYRPG_RUBY300
-    {
-        static TUint frameTick = 0;
-        if ((++frameTick & 127) == 0)
-        {
-            char line[96];
-            snprintf(line, sizeof(line), "focus me=%d focus=%d fg=%d",
-                     iWindowGroup->Identifier(), focusGroup, static_cast<int>(iForeground));
-            EasyRpgRgssVmTrace(line);
-        }
-    }
-#endif
     if (ownsFocus || !iPresentedFrame)
         iForeground = ETrue;
     if (!iForeground)
@@ -368,12 +354,14 @@ void CRgssEngine::FrameTickL(TUint32, TBool)
     TInt nextPresentAccumulator = iPresentAccumulator + presentRate;
     const TBool compose = nextPresentAccumulator >= logicFps;
 
-    if (!iRuntime->AdvanceVmFrameL(compose))
+    const TUint32 frameInput = iInputWord | iPendingInputPulses;
+    if (!iRuntime->AdvanceVmFrameL(compose, frameInput))
     {
         iLogicAccumulator = Min(iLogicAccumulator, 60);
         return;
     }
 
+    iPendingInputPulses = 0;
     iLogicAccumulator -= 60;
     iPresentAccumulator = nextPresentAccumulator;
     if (compose)
@@ -407,9 +395,14 @@ TUint32 CRgssEngine::MapScanKey(const TKeyEvent& aKey) const
     case EStdKeySpace:
     case 'Z': return ERgssInputDecision;
     case EStdKeyEscape:
+    case EStdKeyBackspace:
     case 'X': return ERgssInputCancel;
     case EStdKeyLeftShift:
     case EStdKeyRightShift: return ERgssInputShift;
+    case 'C': return ERgssInputA;
+    case 'V': return ERgssInputX;
+    case 'B': return ERgssInputY;
+    case 'N': return ERgssInputZ;
     case 'Q': return ERgssInputL;
     case 'E': return ERgssInputR;
     default: return 0;
@@ -438,15 +431,69 @@ TUint32 CRgssEngine::MapCharacterKey(TInt aCode) const
     case 'z':
     case ' ': return ERgssInputDecision;
     case EKeyEscape:
+    case EKeyBackspace:
     case 'X':
     case 'x': return ERgssInputCancel;
     case EKeyLeftShift:
     case EKeyRightShift: return ERgssInputShift;
+    case 'C':
+    case 'c': return ERgssInputA;
+    case 'V':
+    case 'v': return ERgssInputX;
+    case 'B':
+    case 'b': return ERgssInputY;
+    case 'N':
+    case 'n': return ERgssInputZ;
     case 'Q':
     case 'q': return ERgssInputL;
     case 'E':
     case 'e': return ERgssInputR;
     default: return 0;
+    }
+}
+
+TUint32 CRgssEngine::FindDynamicScanKey(TInt aScanCode) const
+{
+    for (TInt index = 0; index < iDynamicScanCount; ++index)
+    {
+        if (iDynamicScanCodes[index] == aScanCode)
+            return iDynamicScanMasks[index];
+    }
+    return 0;
+}
+
+void CRgssEngine::RememberDynamicScanKey(TInt aScanCode, TUint32 aMask)
+{
+    if (aScanCode == 0 || aMask == 0)
+        return;
+    for (TInt index = 0; index < iDynamicScanCount; ++index)
+    {
+        if (iDynamicScanCodes[index] == aScanCode)
+        {
+            iDynamicScanMasks[index] = aMask;
+            return;
+        }
+    }
+    if (iDynamicScanCount >= 16)
+        return;
+    iDynamicScanCodes[iDynamicScanCount] = aScanCode;
+    iDynamicScanMasks[iDynamicScanCount] = aMask;
+    ++iDynamicScanCount;
+}
+
+void CRgssEngine::ForgetDynamicScanKey(TInt aScanCode)
+{
+    for (TInt index = 0; index < iDynamicScanCount; ++index)
+    {
+        if (iDynamicScanCodes[index] != aScanCode)
+            continue;
+        for (TInt next = index + 1; next < iDynamicScanCount; ++next)
+        {
+            iDynamicScanCodes[next - 1] = iDynamicScanCodes[next];
+            iDynamicScanMasks[next - 1] = iDynamicScanMasks[next];
+        }
+        --iDynamicScanCount;
+        return;
     }
 }
 
@@ -463,6 +510,8 @@ void CRgssEngine::SetInput(TUint32 aMask, TBool aPressed)
 void CRgssEngine::ClearInput()
 {
     iInputWord = 0;
+    iPendingInputPulses = 0;
+    iDynamicScanCount = 0;
     if (iRuntime)
         iRuntime->SetInputWord(0, 0);
 }
@@ -472,33 +521,46 @@ void CRgssEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
     const TBool rightSoft = aKey.iScanCode == EStdKeyDevice1 || aKey.iCode == EKeyDevice1;
     TUint32 key = rightSoft ? ERgssInputCancel : MapScanKey(aKey);
     if (key == 0)
+        key = FindDynamicScanKey(aKey.iScanCode);
+
+    if (aType == EEventKeyDown)
+    {
+        if (key != 0)
+        {
+            SetInput(key, ETrue);
+            // Preserve a one-frame trigger even if Window Server delivers the
+            // matching key-up before the next VM frame is resumed.
+            iPendingInputPulses |= key;
+        }
+        return;
+    }
+
+    if (aType == EEventKeyUp)
+    {
+        if (key != 0)
+            SetInput(key, EFalse);
+        ForgetDynamicScanKey(aKey.iScanCode);
+        return;
+    }
+
+    if (aType != EEventKey)
+        return;
+
+    if (key == 0)
         key = MapCharacterKey(aKey.iCode);
     if (key == 0)
         return;
+    if (aKey.iScanCode != 0 && MapScanKey(aKey) == 0)
+        RememberDynamicScanKey(aKey.iScanCode, key);
 
-    if (aType == EEventKeyDown)
-        SetInput(key, ETrue);
-    else if (aType == EEventKeyUp)
-        SetInput(key, EFalse);
-    else if (aType == EEventKey && aKey.iRepeats == 0)
-    {
-        SetInput(key, ETrue);
-        SetInput(key, EFalse);
-    }
+    // EEventKey is a character/pulse event on many Symbian QWERTY devices.
+    // Keep it pending until the VM's next Input.update instead of toggling the
+    // bit on and off inside this callback (which made the press invisible).
+    iPendingInputPulses |= key;
 }
 
 void CRgssEngine::HandleWindowEvent(const TWsEvent& aEvent)
 {
-#ifdef EASYRPG_RUBY300
-    if (aEvent.Type() == EEventFocusGained || aEvent.Type() == EEventFocusLost ||
-        aEvent.Type() == EEventKeyDown || aEvent.Type() == EEventKeyUp || aEvent.Type() == EEventKey)
-    {
-        char line[64];
-        snprintf(line, sizeof(line), "ws event type=%d code=%d scan=%d",
-                 aEvent.Type(), aEvent.Key()->iCode, aEvent.Key()->iScanCode);
-        EasyRpgRgssVmTrace(line);
-    }
-#endif
     switch (aEvent.Type())
     {
     case EEventFocusLost:

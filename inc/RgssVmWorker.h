@@ -37,9 +37,7 @@ private:
     CRgssVmWorker(TInt aVersion);
     void ConstructL(const TDesC& aGamePath);
     static TInt ThreadEntry(TAny* aContext);
-#ifdef EASYRPG_RUBY300
     static TAny* PthreadEntry(TAny* aContext);
-#endif
     TInt ThreadMain();
     void RunVmL();
     void SignalStarted(TInt aResult);

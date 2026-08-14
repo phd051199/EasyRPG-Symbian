@@ -38,7 +38,6 @@ void RubyAtomicRelease()
     gRubyAtomicLock = 0;
 }
 
-#ifdef EASYRPG_RUBY300
 struct TRubyGcPage
 {
     TRubyGcPage* next;
@@ -52,7 +51,6 @@ TRubyGcPage* gRubyGcFreePages = NULL;
 unsigned char* gRubyGcPageNext = NULL;
 unsigned char* gRubyGcPageEnd = NULL;
 int gRubyGcBlockCount = 0;
-#endif
 }
 
 extern "C"
@@ -82,7 +80,6 @@ TRgssSignalHandler signal(int, TRgssSignalHandler handler)
     return handler;
 }
 
-#ifdef EASYRPG_RUBY300
 void* easyrpg_symbian_gc_page_alloc(size_t alignment, size_t size)
 {
     if (alignment != 16384 || size != 16384)
@@ -155,7 +152,6 @@ void Init_enc(void)
     rb_encdb_alias("BINARY", "ASCII-8BIT");
     rb_encdb_alias("ASCII", "US-ASCII");
 }
-#endif
 
 int raise(int)
 {
@@ -319,7 +315,6 @@ int munmap(void* address, size_t)
     return 0;
 }
 
-#ifdef EASYRPG_RUBY300
 int poll(struct pollfd* fds, nfds_t count, int timeout)
 {
     if (!fds && count > 0)
@@ -373,7 +368,6 @@ int poll(struct pollfd* fds, nfds_t count, int timeout)
     }
     return ready;
 }
-#endif
 
 int setmode(int, int)
 {

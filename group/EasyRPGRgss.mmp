@@ -2,8 +2,8 @@ TARGET            EasyRPGRgss.exe
 TARGETTYPE        exe
 UID               0x100039CE 0xE31EA5A3
 
-EPOCHEAPSIZE      0x100000 0x2000000
-EPOCSTACKSIZE     0x10000
+EPOCHEAPSIZE      0x100000 0x03800000
+EPOCSTACKSIZE     0x18000
 OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
 MACRO             EASYRPG_LAUNCHER_PROCESS
 MACRO             EASYRPG_RGSS_PROCESS
@@ -30,7 +30,9 @@ SOURCE            RgssMriCompat.cpp
 
 USERINCLUDE       ..\inc
 USERINCLUDE       ..\src\rgss\mri
-USERINCLUDE       ..\build\vendor\ruby-1.8.7-p374
+USERINCLUDE       ..\third_party\ruby-3.0.7
+USERINCLUDE       ..\third_party\ruby-3.0.7\include
+USERINCLUDE       ..\third_party\ruby-3.0.7\include\ruby
 SYSTEMINCLUDE     \epoc32\include
 SYSTEMINCLUDE     \epoc32\include\stdapis
 SYSTEMINCLUDE     \epoc32\include\libc
@@ -49,17 +51,18 @@ LIBRARY           imageconversion.lib
 LIBRARY           libc.lib
 LIBRARY           libm.lib
 LIBRARY           libz.lib
+LIBRARY           libpthread.lib
 LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
 LIBRARY           ws32.lib
 STATICLIBRARY     EasyRpgRgssCore.lib
-STATICLIBRARY     EasyRpgRuby187.lib
+STATICLIBRARY     EasyRpgRuby300.lib
 
 LANG              SC
 
 VENDORID          0
 SECUREID          0xE31EA5A3
-CAPABILITY        None
+CAPABILITY        SwEvent
 
 #ifdef ENABLE_ABIV2_MODE
 DEBUGGABLE_UDEBONLY

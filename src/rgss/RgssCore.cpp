@@ -1,5 +1,12 @@
 #include "RgssCoreBridge.h"
 
+namespace Output
+{
+void Warning(const char*, ...)
+{
+}
+}
+
 namespace
 {
 struct TRgssCoreState

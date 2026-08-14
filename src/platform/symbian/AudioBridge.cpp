@@ -1415,23 +1415,17 @@ void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
 {
     if (aPitch < 50 || aPitch > 200)
         User::Leave(KErrArgument);
-    EnsureMixerL();
 
     TFileName path;
     AsciiPathL(aPath, path);
-    _LIT(KWav, ".wav");
-    if (!HasExtension(path, KWav))
-    {
-        PlayNativeSeL(path, aVolume);
-        return;
-    }
-    TBuf<160> cacheKey;
-    BuildCacheKeyL(path, aPitch, cacheKey);
-    if (!gMixer->IsCached(cacheKey))
-        CacheSeL(path, aPitch, EFalse);
-    if (!gMixer->PlaySe(cacheKey, aVolume))
-        User::Leave(KErrNotReady);
-    gMixer->CommitStreams();
+
+    // One-shot effects are more stable and cheaper through Symbian's native
+    // audio player. The software WAV mixer can fault while the title scene is
+    // transitioning (e.g. the LOTAD cry in Pokemon Essentials), preventing the
+    // game from ever reaching the load screen. Native playback also avoids a
+    // full software mix pass on every output buffer. Pitch is currently
+    // accepted for RGSS compatibility but native SE playback uses device pitch.
+    PlayNativeSeL(path, aVolume);
 }
 }
 
@@ -1452,20 +1446,18 @@ extern "C" int EasyRpgAudioIsEnabled(void)
     return gAudioEnabled ? 1 : 0;
 }
 
-extern "C" int EasyRpgAudioPreloadSe(const char* aPath, int aPitch)
+extern "C" int EasyRpgAudioPreloadSe(const char*, int)
 {
-    if (!EasyRpgAudioIsEnabled())
-        return KErrNone;
-    TRAPD(error, PreloadSeL(aPath, aPitch));
-    return error;
+    // Native one-shot SE playback does not need the software PCM cache.
+    // Avoid creating/filling CAudioMixer just because the game preloads SEs.
+    return KErrNone;
 }
 
-extern "C" int EasyRpgAudioWarmSe(const char* aPath, int aPitch)
+extern "C" int EasyRpgAudioWarmSe(const char*, int)
 {
-    if (!EasyRpgAudioIsEnabled())
-        return KErrNone;
-    TRAPD(error, WarmSeL(aPath, aPitch));
-    return error;
+    // See EasyRpgAudioPreloadSe. Native CMdaAudioPlayerUtility opens the
+    // effect on demand and is safer than sharing the streaming PCM mixer.
+    return KErrNone;
 }
 
 extern "C" int EasyRpgAudioPlaySe(const char* aPath, int aVolume, int aPitch)

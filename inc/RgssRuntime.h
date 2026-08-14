@@ -18,7 +18,7 @@ public:
     TInt LogicFps() const;
     TInt TargetFps() const;
     void StartVmL();
-    TBool AdvanceVmFrameL(TBool aCompose);
+    TBool AdvanceVmFrameL(TBool aCompose, TUint32 aInputWord0);
     void ComposeL();
     void SetInputWord(TInt aWord, TUint32 aValue);
     const CRgssDisplaySurface& Surface() const;

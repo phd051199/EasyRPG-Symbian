@@ -10,18 +10,14 @@
 #include "RgssVmBridge.h"
 
 #include "ruby.h"
-#ifdef EASYRPG_RUBY300
 #include "ruby/encoding.h"
-#endif
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <zlib.h>
 
-#ifdef EASYRPG_RUBY300
 extern "C" void rb_call_builtin_inits(void);
-#endif
 extern "C" void EasyRpgRgssVmTrace(const char* aText);
 extern "C" void EasyRpgRgssVmTraceHeap(const char* aText);
 
@@ -96,6 +92,9 @@ int gDeferredOptionalLoaded = 0;
 int gDeferredOptionalLoading = 0;
 int gLastErrorScript = -1;
 char gLastError[768];
+unsigned int gLastGraphicsTick = 0;
+unsigned int gSystemDeltaUs = 25000;
+int gHaveGraphicsTick = 0;
 
 VALUE NLoadDeferredBattle(VALUE);
 VALUE NLoadDeferredOptional(VALUE);
@@ -132,6 +131,9 @@ void ResetHost()
     gDeferredOptionalLoading = 0;
     gLastErrorScript = -1;
     gLastError[0] = 0;
+    gLastGraphicsTick = 0;
+    gSystemDeltaUs = 25000;
+    gHaveGraphicsTick = 0;
 }
 
 void DestroyNativeHandle(THandleToken* token)
@@ -228,7 +230,31 @@ VALUE NHandleDisposed(VALUE, VALUE value)
 VALUE NGraphicsUpdate(VALUE)
 {
     const int result = EasyRpgRgssGraphicsUpdate();
-    return result == ERgssGraphicsOk ? Qnil : RaiseResult("Graphics.update", result);
+    if (result != ERgssGraphicsOk)
+        return RaiseResult("Graphics.update", result);
+
+    // mkxp-z exposes System.delta as the elapsed time of the previous frame
+    // in microseconds, not an absolute clock. Pokemon Essentials builds
+    // Graphics.delta_s on top of this value for splash timers, fades, weather,
+    // etc. Keep a stable first-frame fallback and clamp long focus/pause gaps so
+    // event timers do not jump several seconds in one update.
+    const unsigned int now = gHost.ticks(gHost.context);
+    unsigned int delta = 0;
+    if (gHaveGraphicsTick)
+        delta = now - gLastGraphicsTick; // unsigned subtraction handles wraparound
+    if (!gHaveGraphicsTick || delta == 0)
+    {
+        const int frameRate = EasyRpgRgssGraphicsFrameRate();
+        delta = frameRate > 0 ? static_cast<unsigned int>(1000000 / frameRate) : 25000u;
+    }
+    if (delta < 1000u)
+        delta = 1000u;
+    else if (delta > 250000u)
+        delta = 250000u;
+    gLastGraphicsTick = now;
+    gSystemDeltaUs = delta;
+    gHaveGraphicsTick = 1;
+    return Qnil;
 }
 
 VALUE NGraphicsFrameRate(VALUE)
@@ -305,7 +331,7 @@ VALUE NInputRepeat(VALUE, VALUE mask)
 
 VALUE NSystemDelta(VALUE)
 {
-    return ULONG2NUM(gHost.ticks(gHost.context));
+    return ULONG2NUM(gSystemDeltaUs);
 }
 
 VALUE NTraceScene(VALUE, VALUE name)
@@ -1055,7 +1081,6 @@ void AnimationDecodeIvars(TAnimationDecodeState& state, VALUE object)
             rb_ivar_set(object, rb_intern(key.name), value);
             continue;
         }
-#ifdef EASYRPG_RUBY300
         if (RB_TYPE_P(object, T_STRING) && key.length == 1 && key.name[0] == 'E')
         {
             if (value == Qtrue)
@@ -1063,7 +1088,6 @@ void AnimationDecodeIvars(TAnimationDecodeState& state, VALUE object)
             else if (value == Qfalse)
                 rb_enc_associate(object, rb_usascii_encoding());
         }
-#endif
     }
 }
 
@@ -1937,7 +1961,6 @@ VALUE NAudioCommand(VALUE, VALUE command, VALUE path, VALUE volume, VALUE pitch,
 
 void DefineNativeMethod(const char* name, VALUE (*method)(ANYARGS), int arity)
 {
-#ifdef EASYRPG_RUBY300
     switch (arity)
     {
     case -1: rb_define_module_function(gNativeModule, name, method, -1); break;
@@ -1949,9 +1972,6 @@ void DefineNativeMethod(const char* name, VALUE (*method)(ANYARGS), int arity)
     case 5: rb_define_module_function(gNativeModule, name, method, 5); break;
     default: rb_raise(rb_eArgError, "unsupported native arity");
     }
-#else
-    rb_define_module_function(gNativeModule, name, method, arity);
-#endif
 }
 
 void BindNative()
@@ -1972,10 +1992,8 @@ void BindNative()
 
     DefineNativeMethod("vfs_input", RUBY_METHOD_FUNC(NVfsInputCreate), 1);
     DefineNativeMethod("animation_archive", RUBY_METHOD_FUNC(NAnimationArchiveCreate), 1);
-#ifdef EASYRPG_RUBY300
     DefineNativeMethod("load_deferred_battle", RUBY_METHOD_FUNC(NLoadDeferredBattle), 0);
     DefineNativeMethod("load_deferred_optional", RUBY_METHOD_FUNC(NLoadDeferredOptional), 0);
-#endif
     DefineNativeMethod("handle_dispose", RUBY_METHOD_FUNC(NHandleDispose), 1);
     DefineNativeMethod("handle_disposed", RUBY_METHOD_FUNC(NHandleDisposed), 1);
     DefineNativeMethod("graphics_update", RUBY_METHOD_FUNC(NGraphicsUpdate), 0);
@@ -2066,11 +2084,7 @@ int EvalProtected(const char* source, int scriptIndex)
     rb_eval_string_protect(source, &state);
     if (state == 0)
         return ERgssVmOk;
-#ifdef EASYRPG_RUBY300
     VALUE error = rb_errinfo();
-#else
-    VALUE error = ruby_errinfo;
-#endif
     gLastErrorScript = scriptIndex;
     if (!NIL_P(error))
     {
@@ -2079,7 +2093,6 @@ int EvalProtected(const char* source, int scriptIndex)
         const char* text = StringValuePtr(message);
         snprintf(gLastError, sizeof(gLastError), "%s: %s", klass ? klass : "Exception", text ? text : "");
         gLastError[sizeof(gLastError) - 1] = 0;
-#ifdef EASYRPG_RUBY300
         VALUE backtrace = rb_funcall(error, rb_intern("backtrace"), 0);
         if (RB_TYPE_P(backtrace, T_ARRAY) && RARRAY_LEN(backtrace) > 0)
         {
@@ -2092,21 +2105,18 @@ int EvalProtected(const char* source, int scriptIndex)
                 gLastError[sizeof(gLastError) - 1] = 0;
             }
         }
-#endif
     }
     else
     {
         strncpy(gLastError, "Ruby script error", sizeof(gLastError) - 1);
         gLastError[sizeof(gLastError) - 1] = 0;
     }
-#ifdef EASYRPG_RUBY300
     {
         char prefix[64];
         snprintf(prefix, sizeof(prefix), "ruby error script=%d:", scriptIndex);
         EasyRpgRgssVmTraceHeap(prefix);
         EasyRpgRgssVmTrace(gLastError);
     }
-#endif
     return ERgssVmErrorScript;
 }
 }
@@ -2134,7 +2144,6 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
     gVersion = version;
     RUBY_INIT_STACK;
     ruby_init();
-#ifdef EASYRPG_RUBY300
     EasyRpgRgssVmTraceHeap("ruby init done");
     rb_define_const(rb_cEncoding, "ASCII_8BIT", rb_enc_from_encoding(rb_ascii8bit_encoding()));
     rb_define_const(rb_cEncoding, "UTF_8", rb_enc_from_encoding(rb_utf8_encoding()));
@@ -2142,7 +2151,6 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
     rb_enc_alias("BINARY", "ASCII-8BIT");
     rb_enc_alias("ASCII", "US-ASCII");
     rb_call_builtin_inits();
-#endif
     BindNative();
     const char* bootstrapChunks[] = {
         KEasyRpgRgssBootstrapCore,
@@ -2159,16 +2167,13 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
             return bootstrapResult;
         }
     }
-#ifdef EASYRPG_RUBY300
     EasyRpgRgssVmTraceHeap("bootstrap done");
-#endif
     gInitialized = 1;
     return ERgssVmOk;
 }
 
 namespace
 {
-#ifdef EASYRPG_RUBY300
 int ModernScriptName(int index, char* name, int capacity)
 {
     int id = 0;
@@ -2296,7 +2301,6 @@ VALUE NLoadDeferredOptional(VALUE)
     gDeferredOptionalLoading = 0;
     return Qtrue;
 }
-#endif
 }
 
 extern "C" int EasyRpgRgssVmLoadScripts(const char*)
@@ -2309,7 +2313,6 @@ extern "C" int EasyRpgRgssVmLoadScripts(const char*)
 
     for (int index = 0; index < count; ++index)
     {
-#ifdef EASYRPG_RUBY300
         if (SkipModernReleaseScript(index))
             continue;
         if (DeferModernBattleScript(index))
@@ -2327,22 +2330,9 @@ extern "C" int EasyRpgRgssVmLoadScripts(const char*)
             continue;
         }
         const int evalResult = EvalScriptIndex(index);
-#else
-        unsigned char* source = 0;
-        int sourceLength = 0;
-        const int inflateResult = gHost.script_inflate(gHost.context,
-                                                       index,
-                                                       &source,
-                                                       &sourceLength);
-        if (inflateResult != ERgssVmOk || !source || sourceLength < 0)
-            return ERgssVmErrorScript;
-        const int evalResult = EvalProtected(reinterpret_cast<const char*>(source), index);
-        gHost.release(gHost.context, source);
-#endif
         if (evalResult != ERgssVmOk)
             return evalResult;
     }
-#ifdef EASYRPG_RUBY300
     if (gDeferredBattleScriptCount > 0)
     {
         const char* hook =
@@ -2371,7 +2361,6 @@ extern "C" int EasyRpgRgssVmLoadScripts(const char*)
         if (hookResult != ERgssVmOk)
             return hookResult;
     }
-#endif
     return ERgssVmOk;
 }
 

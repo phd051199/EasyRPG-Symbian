@@ -35,7 +35,6 @@ SOURCES=(
     "$PROJECT_DIR/src/rgss/RgssViewport.cpp"
     "$PROJECT_DIR/src/rgss/RgssTable.cpp"
     "$PROJECT_DIR/src/rgss/RgssTilemap.cpp"
-    "$PROJECT_DIR/src/rgss/RgssOutputCompat.cpp"
     "$PROJECT_DIR/src/core/MidiLite.cpp"
     "$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src/midisequencer.cpp"
     "$PROJECT_DIR/src/core/GohuFontData.cpp"

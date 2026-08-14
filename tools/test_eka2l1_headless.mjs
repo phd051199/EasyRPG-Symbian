@@ -38,7 +38,8 @@ function parseArgs(argv) {
         keysAfterScene: '',
         noStartGame: false,
         enterGame: false,
-        resetProfile: false
+        resetProfile: false,
+        reuseSis: false
     };
 
     for (let i = 0; i < argv.length; ++i) {
@@ -65,6 +66,7 @@ function parseArgs(argv) {
         else if (arg === '--no-start-game') out.noStartGame = true;
         else if (arg === '--enter-game') out.enterGame = true;
         else if (arg === '--reset-profile') out.resetProfile = true;
+        else if (arg === '--reuse-sis') out.reuseSis = true;
         else if (arg === '-h' || arg === '--help') out.help = true;
         else throw new Error(`Unknown argument: ${arg}`);
     }
@@ -94,6 +96,7 @@ function usage() {
         '  --no-start-game',
         '  --enter-game',
         '  --reset-profile',
+        '  --reuse-sis',
         ''
     ].join('\n'));
 }
@@ -231,7 +234,7 @@ async function main() {
         return;
     }
 
-    assertFile(options.sis, 'SIS');
+    if (!options.reuseSis) assertFile(options.sis, 'SIS');
     if (path.isAbsolute(options.chrome)) assertFile(options.chrome, 'Chrome');
 
     if (options.resetProfile) fs.rmSync(options.profile, { recursive: true, force: true });
@@ -482,46 +485,55 @@ async function main() {
         result.deviceInstalled = true;
         pushLog('device: ready');
 
-        const uninstallResult = await evaluate(`(() => {
-            const uid = ${options.uid >>> 0};
-            const apps = EKA2L1.appList();
-            if (!apps.some(app => (app.uid >>> 0) === uid)) return null;
-            return EKA2L1.module.ccall('wasm_uninstall_package', 'number', ['number'], [uid]);
-        })()`);
-        if (uninstallResult !== null) {
-            if (uninstallResult !== 0) throw new Error(`Existing EasyRPG uninstall failed: ${uninstallResult}`);
-            pushLog('sis: removed previous EasyRPG package');
-        }
+        if (options.reuseSis) {
+            const apps = await evaluate('EKA2L1.appList()');
+            if (!apps.some(app => (app.uid >>> 0) === (options.uid >>> 0))) {
+                throw new Error(`--reuse-sis requested but UID 0x${(options.uid >>> 0).toString(16)} is not installed`);
+            }
+            result.sisInstalled = true;
+            pushLog(`sis: reusing installed UID 0x${(options.uid >>> 0).toString(16)}`);
+        } else {
+            const uninstallResult = await evaluate(`(() => {
+                const uid = ${options.uid >>> 0};
+                const apps = EKA2L1.appList();
+                if (!apps.some(app => (app.uid >>> 0) === uid)) return null;
+                return EKA2L1.module.ccall('wasm_uninstall_package', 'number', ['number'], [uid]);
+            })()`);
+            if (uninstallResult !== null) {
+                if (uninstallResult !== 0) throw new Error(`Existing EasyRPG uninstall failed: ${uninstallResult}`);
+                pushLog('sis: removed previous EasyRPG package');
+            }
 
-        await evaluate(`(() => {
-            const old = document.getElementById('headlessSisInput');
-            if (old) old.remove();
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.id = 'headlessSisInput';
-            input.style.display = 'none';
-            document.body.appendChild(input);
-            return true;
-        })()`);
-        await setInputFiles('#headlessSisInput', [options.sis]);
-        const sisResult = await evaluate(`(async () => {
-            const input = document.getElementById('headlessSisInput');
-            const file = input.files[0];
-            if (!file) throw new Error('SIS file input is empty');
-            const target = '/eka2l1/temp/headless-easyrpg.sis';
-            await EKA2L1.writeFileToVFS(file, target);
-            const code = EKA2L1.installPackage(target);
-            try { EKA2L1.module.FS.unlink(target); } catch (e) {}
-            if (code !== 0) return { code, apps: EKA2L1.appList() };
-            await EKA2L1.save();
-            return { code, apps: EKA2L1.appList() };
-        })()`, true);
-        if (!sisResult || sisResult.code !== 0) throw new Error(`SIS install failed: ${JSON.stringify(sisResult)}`);
-        if (!sisResult.apps.some(app => (app.uid >>> 0) === (options.uid >>> 0))) {
-            throw new Error(`SIS installed but UID 0x${(options.uid >>> 0).toString(16)} is absent from app list`);
+            await evaluate(`(() => {
+                const old = document.getElementById('headlessSisInput');
+                if (old) old.remove();
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.id = 'headlessSisInput';
+                input.style.display = 'none';
+                document.body.appendChild(input);
+                return true;
+            })()`);
+            await setInputFiles('#headlessSisInput', [options.sis]);
+            const sisResult = await evaluate(`(async () => {
+                const input = document.getElementById('headlessSisInput');
+                const file = input.files[0];
+                if (!file) throw new Error('SIS file input is empty');
+                const target = '/eka2l1/temp/headless-easyrpg.sis';
+                await EKA2L1.writeFileToVFS(file, target);
+                const code = EKA2L1.installPackage(target);
+                try { EKA2L1.module.FS.unlink(target); } catch (e) {}
+                if (code !== 0) return { code, apps: EKA2L1.appList() };
+                await EKA2L1.save();
+                return { code, apps: EKA2L1.appList() };
+            })()`, true);
+            if (!sisResult || sisResult.code !== 0) throw new Error(`SIS install failed: ${JSON.stringify(sisResult)}`);
+            if (!sisResult.apps.some(app => (app.uid >>> 0) === (options.uid >>> 0))) {
+                throw new Error(`SIS installed but UID 0x${(options.uid >>> 0).toString(16)} is absent from app list`);
+            }
+            result.sisInstalled = true;
+            pushLog(`sis: installed UID 0x${(options.uid >>> 0).toString(16)}`);
         }
-        result.sisInstalled = true;
-        pushLog(`sis: installed UID 0x${(options.uid >>> 0).toString(16)}`);
 
         if (fs.existsSync(options.game) && fs.statSync(options.game).isFile()) {
             await evaluate(`(() => {

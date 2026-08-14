@@ -481,7 +481,8 @@ The XP/VX/VX Ace runtime is isolated from the RPG Maker 2000/2003 player. It use
 - [x] ZIP project-root detection for `Game.ini` plus RGSS1/2/3 script archives
 - [x] launcher metadata labels for XP, VX and VX Ace
 - [x] separate `EasyRPGRgss.exe` process and SIS packaging
-- [x] launcher dispatches XP/VX/VX Ace to `EasyRPGRgss.exe` and keeps 2000/2003 on `EasyRPGGame.exe`
+- [x] single RGSS MRI runtime based on Ruby 3.0.7; Ruby 1.8.7 and the split `EasyRPGRgssModern.exe` target are removed from the active build/package graph
+- [x] launcher dispatches XP/VX/VX Ace to the Ruby 3 `EasyRPGRgss.exe` runtime and keeps 2000/2003 on `EasyRPGGame.exe`
 - [x] ARMV5 UREL full build and SIS packaging with the RGSS process
 - [x] ARMV5 UDEB full build and debug SIS packaging with the RGSS process
 - [x] dedicated RGSS RGB565 framebuffer, DSA presenter and dirty-region path

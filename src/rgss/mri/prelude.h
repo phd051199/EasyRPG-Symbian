@@ -9,7 +9,6 @@ typedef unsigned long long Uint64;
 
 #include <sys/select.h>
 
-#ifdef EASYRPG_RUBY300
 struct __siginfo
 {
     void* si_addr;
@@ -46,7 +45,6 @@ extern "C" {
 int poll(struct pollfd* fds, nfds_t count, int timeout);
 #ifdef __cplusplus
 }
-#endif
 #endif
 
 #ifdef __cplusplus

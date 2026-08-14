@@ -23,6 +23,8 @@ struct TBitmapState
 
 TBitmapState gBitmaps;
 
+enum { KFastBlitWidth = 320 };
+
 #if defined(__arm__)
 extern "C" int __aeabi_idiv(int numerator, int denominator);
 #endif
@@ -1016,6 +1018,14 @@ extern "C" int EasyRpgRgssBitmapBlit(int handle,
         return ERgssBitmapErrorFramebuffer;
 
     const int globalOpacity = ClampByte(opacity);
+    int sourceXLookup[KFastBlitWidth];
+    const int useSourceXLookup = physicalRect.width <= KFastBlitWidth;
+    if (useSourceXLookup)
+    {
+        for (int px = 0; px < physicalRect.width; ++px)
+            sourceXLookup[px] = sourceX + (px * logicalWidth) / physicalRect.width;
+    }
+
     unsigned char* targetBytes = static_cast<unsigned char*>(framebuffer);
     for (int py = 0; py < physicalRect.height; ++py)
     {
@@ -1025,11 +1035,14 @@ extern "C" int EasyRpgRgssBitmapBlit(int handle,
             targetBytes + (physicalRect.y + py) * framebufferPitch);
         for (int px = 0; px < physicalRect.width; ++px)
         {
-            const int sourceOffsetX = (px * logicalWidth) / physicalRect.width;
-            const int sx = sourceX + sourceOffsetX;
+            const int sx = useSourceXLookup
+                ? sourceXLookup[px]
+                : sourceX + (px * logicalWidth) / physicalRect.width;
             const int sourceIndex = sy * slot->width + sx;
-            const int effectiveAlpha = Divide255Round(
-                static_cast<int>(slot->alpha[sourceIndex]) * globalOpacity);
+            const int sourceAlpha = slot->alpha[sourceIndex];
+            const int effectiveAlpha = globalOpacity == 255
+                ? sourceAlpha
+                : Divide255Round(sourceAlpha * globalOpacity);
             const int targetX = physicalRect.x + px;
             if (targetX < 0 || targetX >= framebufferWidth ||
                 physicalRect.y + py < 0 || physicalRect.y + py >= framebufferHeight)
@@ -1132,6 +1145,23 @@ static int BitmapBlitEffectsInternal(int handle,
         return ERgssBitmapErrorFramebuffer;
 
     const int globalOpacity = ClampByte(opacity);
+    int sourceXLookup[KFastBlitWidth];
+    const int useSourceXLookup = physicalRect.width <= KFastBlitWidth;
+    if (useSourceXLookup)
+    {
+        for (int px = 0; px < physicalRect.width; ++px)
+        {
+            const int logicalX = clippedDestination.x +
+                (px * clippedDestination.width) / physicalRect.width;
+            const int relativeX = logicalX - destination_rect->x;
+            int sourceOffsetX =
+                (relativeX * source_rect->width) / destination_rect->width;
+            if (mirror)
+                sourceOffsetX = source_rect->width - 1 - sourceOffsetX;
+            sourceXLookup[px] = source_rect->x + sourceOffsetX;
+        }
+    }
+
     unsigned char* targetBytes = static_cast<unsigned char*>(framebuffer);
     for (int py = 0; py < physicalRect.height; ++py)
     {
@@ -1149,21 +1179,31 @@ static int BitmapBlitEffectsInternal(int handle,
             targetBytes + targetY * framebufferPitch);
         for (int px = 0; px < physicalRect.width; ++px)
         {
-            const int logicalX = clippedDestination.x +
-                (px * clippedDestination.width) / physicalRect.width;
-            const int relativeX = logicalX - destination_rect->x;
-            int sourceOffsetX =
-                (relativeX * source_rect->width) / destination_rect->width;
-            if (mirror)
-                sourceOffsetX = source_rect->width - 1 - sourceOffsetX;
-            const int sourceX = source_rect->x + sourceOffsetX;
+            int sourceX = 0;
+            if (useSourceXLookup)
+            {
+                sourceX = sourceXLookup[px];
+            }
+            else
+            {
+                const int logicalX = clippedDestination.x +
+                    (px * clippedDestination.width) / physicalRect.width;
+                const int relativeX = logicalX - destination_rect->x;
+                int sourceOffsetX =
+                    (relativeX * source_rect->width) / destination_rect->width;
+                if (mirror)
+                    sourceOffsetX = source_rect->width - 1 - sourceOffsetX;
+                sourceX = source_rect->x + sourceOffsetX;
+            }
             const int targetX = physicalRect.x + px;
             if (sourceX < 0 || sourceX >= slot->width ||
                 targetX < 0 || targetX >= framebufferWidth)
                 continue;
             const int sourceIndex = sourceY * slot->width + sourceX;
-            int effectiveAlpha = Divide255Round(
-                static_cast<int>(slot->alpha[sourceIndex]) * globalOpacity);
+            const int sourceAlpha = slot->alpha[sourceIndex];
+            int effectiveAlpha = globalOpacity == 255
+                ? sourceAlpha
+                : Divide255Round(sourceAlpha * globalOpacity);
             unsigned short sourceColor = slot->color[sourceIndex];
             if (effects)
             {
@@ -1327,6 +1367,24 @@ extern "C" int EasyRpgRgssBitmapTile(int handle,
         return ERgssBitmapErrorFramebuffer;
 
     const int globalOpacity = ClampByte(opacity);
+    int sourceXLookup[KFastBlitWidth];
+    const int useSourceXLookup = physicalRect.width <= KFastBlitWidth;
+    if (useSourceXLookup)
+    {
+        for (int px = 0; px < physicalRect.width; ++px)
+        {
+            const int logicalX = clippedDestination.x +
+                (px * clippedDestination.width) / physicalRect.width;
+            int tileX = (logicalX - destination_rect->x + normalizedOffsetX) % periodX;
+            if (tileX < 0)
+                tileX += periodX;
+            int sourceOffsetX = (tileX * 1000) / zoom_x_milli;
+            if (sourceOffsetX >= source_rect->width)
+                sourceOffsetX = source_rect->width - 1;
+            sourceXLookup[px] = source_rect->x + sourceOffsetX;
+        }
+    }
+
     unsigned char* targetBytes = static_cast<unsigned char*>(framebuffer);
     for (int py = 0; py < physicalRect.height; ++py)
     {
@@ -1346,21 +1404,31 @@ extern "C" int EasyRpgRgssBitmapTile(int handle,
             targetBytes + targetY * framebufferPitch);
         for (int px = 0; px < physicalRect.width; ++px)
         {
-            const int logicalX = clippedDestination.x +
-                (px * clippedDestination.width) / physicalRect.width;
-            int tileX = (logicalX - destination_rect->x + normalizedOffsetX) % periodX;
-            if (tileX < 0)
-                tileX += periodX;
-            int sourceOffsetX = (tileX * 1000) / zoom_x_milli;
-            if (sourceOffsetX >= source_rect->width)
-                sourceOffsetX = source_rect->width - 1;
-            const int sourceX = source_rect->x + sourceOffsetX;
+            int sourceX = 0;
+            if (useSourceXLookup)
+            {
+                sourceX = sourceXLookup[px];
+            }
+            else
+            {
+                const int logicalX = clippedDestination.x +
+                    (px * clippedDestination.width) / physicalRect.width;
+                int tileX = (logicalX - destination_rect->x + normalizedOffsetX) % periodX;
+                if (tileX < 0)
+                    tileX += periodX;
+                int sourceOffsetX = (tileX * 1000) / zoom_x_milli;
+                if (sourceOffsetX >= source_rect->width)
+                    sourceOffsetX = source_rect->width - 1;
+                sourceX = source_rect->x + sourceOffsetX;
+            }
             const int targetX = physicalRect.x + px;
             if (targetX < 0 || targetX >= framebufferWidth)
                 continue;
             const int sourceIndex = sourceY * slot->width + sourceX;
-            const int effectiveAlpha = Divide255Round(
-                static_cast<int>(slot->alpha[sourceIndex]) * globalOpacity);
+            const int sourceAlpha = slot->alpha[sourceIndex];
+            const int effectiveAlpha = globalOpacity == 255
+                ? sourceAlpha
+                : Divide255Round(sourceAlpha * globalOpacity);
             target[targetX] = Composite565(target[targetX],
                                            slot->color[sourceIndex],
                                            effectiveAlpha,

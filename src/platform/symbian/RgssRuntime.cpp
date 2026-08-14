@@ -240,7 +240,7 @@ void CRgssRuntime::StartVmL()
     iVmStarted = ETrue;
 }
 
-TBool CRgssRuntime::AdvanceVmFrameL(TBool aCompose)
+TBool CRgssRuntime::AdvanceVmFrameL(TBool aCompose, TUint32 aInputWord0)
 {
     if (!iVmStarted || !iVmWorker)
         User::Leave(KErrNotReady);
@@ -259,6 +259,11 @@ TBool CRgssRuntime::AdvanceVmFrameL(TBool aCompose)
 
     if (frameRate > 0)
         iLogicFps = Min(frameRate, 60);
+
+    // The VM is blocked inside Graphics.update at this point. Publish the
+    // input state immediately before resuming it so one-shot Symbian key
+    // events cannot be lost between window-server callbacks and Input.update.
+    SetInputWord(0, aInputWord0);
 
     ProcessAudioCommands();
     EasyRpgAudioUpdate();

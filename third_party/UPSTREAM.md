@@ -34,6 +34,21 @@ The Symbian ARMv5 build vendors the dependency-driven libc++ 4.0.1 header subset
 
 The ARMv5 lane uses only the referenced libc++ headers. Symbian configuration and runtime compatibility live in the platform glue instead of a vendored libc++abi tree.
 
+## Ruby MRI
+
+The RGSS runtime vendors a curated Ruby MRI core subset rather than keeping an extracted upstream tarball in the build tree.
+
+- Upstream: Ruby MRI
+- Version: 3.0.7
+- Official source archive: `https://cache.ruby-lang.org/pub/ruby/3.0/ruby-3.0.7.tar.gz`
+- Archive SHA-256: `2a3411977f2850431136b0fab8ad53af09fb74df2ee2f4fb7f11b378fe034388`
+- Vendored path: `third_party/ruby-3.0.7/`
+- License: Ruby License / BSD-2-Clause components; retain upstream `COPYING` and `LEGAL`
+- Scope: only MRI core translation units compiled by `tools/build_rgss_mri.sh`, directly included core fragments, required root headers/generated includes, public/internal Ruby headers, ARM coroutine support, selected `missing/` compatibility code, and Unicode data used by the compiled encoders
+- Explicitly excluded: `ext/`, `test/`, `spec/`, `doc/`, `benchmark/`, `sample/`, `gems/`, `lib/`, `tool/`, platform source trees not used by the Symbian ARM build, and other release-package material unrelated to the embedded VM
+
+`tools/fetch_rgss_mri.sh` is a maintenance importer for refreshing this curated dependency. Normal builds never fetch Ruby and compile only the checked-in `third_party/ruby-3.0.7` tree.
+
 ## Symbian port policy
 
 The vendored source is the implementation of RPG Maker semantics. Do not recreate Player scenes, event commands, map logic, battle logic or liblcf structures in a parallel Symbian-specific engine.

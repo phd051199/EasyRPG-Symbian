@@ -34,6 +34,9 @@ private:
     void HandleKeyEvent(TInt aType, const TKeyEvent& aKey);
     TUint32 MapScanKey(const TKeyEvent& aKey) const;
     TUint32 MapCharacterKey(TInt aCode) const;
+    TUint32 FindDynamicScanKey(TInt aScanCode) const;
+    void RememberDynamicScanKey(TInt aScanCode, TUint32 aMask);
+    void ForgetDynamicScanKey(TInt aScanCode);
     void SetInput(TUint32 aMask, TBool aPressed);
     void ClearInput();
 
@@ -49,6 +52,10 @@ private:
     CRgssDirectScreenAccess* iDirectScreen;
     TFileName iGamePath;
     TUint32 iInputWord;
+    TUint32 iPendingInputPulses;
+    TInt iDynamicScanCodes[16];
+    TUint32 iDynamicScanMasks[16];
+    TInt iDynamicScanCount;
     TInt iLogicAccumulator;
     TInt iPresentAccumulator;
     TInt iFrameError;

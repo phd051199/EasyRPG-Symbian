@@ -22,12 +22,7 @@ TInt DetectEngine(CZipVfs& aResources)
     if (rgssMatches > 1 || (hasLdb && hasLmt && rgssMatches != 0))
         return EGameEngineUnknown;
     if (hasXp)
-    {
-        const TBool hasRuby300 = aResources.Exists(_L("x64-msvcrt-ruby300.dll")) ||
-                                 aResources.Exists(_L("x86-msvcrt-ruby300.dll")) ||
-                                 aResources.Exists(_L("ruby300.dll"));
-        return hasRuby300 ? EGameEngineRpgXpModern : EGameEngineRpgXp;
-    }
+        return EGameEngineRpgXp;
     if (hasVx)
         return EGameEngineRpgVx;
     if (hasVxa)
@@ -167,7 +162,6 @@ void ReadIniTitleL(CZipVfs& aResources,
 void ReadGameTitleL(CZipVfs& aResources, TInt aVersion, TDes& aTitle)
 {
     if (aVersion == EGameEngineRpgXp ||
-        aVersion == EGameEngineRpgXpModern ||
         aVersion == EGameEngineRpgVx ||
         aVersion == EGameEngineRpgVxAce)
     {
@@ -210,7 +204,7 @@ void FormatGameSubtitle(RFs& aFs,
     const TInt fraction = static_cast<TInt>(tenths % 10);
     if (aVersion == EGameEngineRpg2000 || aVersion == EGameEngineRpg2003)
         aSubtitle.Format(_L("%d.%d MB (RPG Maker %d)"), whole, fraction, aVersion);
-    else if (aVersion == EGameEngineRpgXp || aVersion == EGameEngineRpgXpModern)
+    else if (aVersion == EGameEngineRpgXp)
         aSubtitle.Format(_L("%d.%d MB (RPG Maker XP)"), whole, fraction);
     else if (aVersion == EGameEngineRpgVx)
         aSubtitle.Format(_L("%d.%d MB (RPG Maker VX)"), whole, fraction);
