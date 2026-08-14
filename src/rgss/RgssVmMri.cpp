@@ -22,6 +22,8 @@
 #ifdef EASYRPG_RUBY300
 extern "C" void rb_call_builtin_inits(void);
 #endif
+extern "C" void EasyRpgRgssVmTrace(const char* aText);
+extern "C" void EasyRpgRgssVmTraceHeap(const char* aText);
 
 namespace
 {
@@ -304,6 +306,23 @@ VALUE NInputRepeat(VALUE, VALUE mask)
 VALUE NSystemDelta(VALUE)
 {
     return ULONG2NUM(gHost.ticks(gHost.context));
+}
+
+VALUE NTraceScene(VALUE, VALUE name)
+{
+    if (!NIL_P(name))
+    {
+        const char* text = StringValuePtr(name);
+        char line[256];
+        int length = 0;
+        while (text[length] && length < static_cast<int>(sizeof(line)) - 8)
+            ++length;
+        memcpy(line, "scene ", 6);
+        memcpy(line + 6, text, length);
+        line[6 + length] = 0;
+        EasyRpgRgssVmTrace(line);
+    }
+    return Qnil;
 }
 
 VALUE NZlibInflate(VALUE, VALUE input)
@@ -1972,6 +1991,7 @@ void BindNative()
     DefineNativeMethod("input_trigger", RUBY_METHOD_FUNC(NInputTrigger), 1);
     DefineNativeMethod("input_repeat", RUBY_METHOD_FUNC(NInputRepeat), 1);
     DefineNativeMethod("system_delta", RUBY_METHOD_FUNC(NSystemDelta), 0);
+    DefineNativeMethod("trace_scene", RUBY_METHOD_FUNC(NTraceScene), 1);
     DefineNativeMethod("zlib_inflate", RUBY_METHOD_FUNC(NZlibInflate), 1);
     DefineNativeMethod("zlib_deflate", RUBY_METHOD_FUNC(NZlibDeflate), 1);
     DefineNativeMethod("file_size", RUBY_METHOD_FUNC(NFileSize), 1);
@@ -2079,6 +2099,14 @@ int EvalProtected(const char* source, int scriptIndex)
         strncpy(gLastError, "Ruby script error", sizeof(gLastError) - 1);
         gLastError[sizeof(gLastError) - 1] = 0;
     }
+#ifdef EASYRPG_RUBY300
+    {
+        char prefix[64];
+        snprintf(prefix, sizeof(prefix), "ruby error script=%d:", scriptIndex);
+        EasyRpgRgssVmTraceHeap(prefix);
+        EasyRpgRgssVmTrace(gLastError);
+    }
+#endif
     return ERgssVmErrorScript;
 }
 }
@@ -2107,6 +2135,7 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
     RUBY_INIT_STACK;
     ruby_init();
 #ifdef EASYRPG_RUBY300
+    EasyRpgRgssVmTraceHeap("ruby init done");
     rb_define_const(rb_cEncoding, "ASCII_8BIT", rb_enc_from_encoding(rb_ascii8bit_encoding()));
     rb_define_const(rb_cEncoding, "UTF_8", rb_enc_from_encoding(rb_utf8_encoding()));
     rb_define_const(rb_cEncoding, "US_ASCII", rb_enc_from_encoding(rb_usascii_encoding()));
@@ -2130,6 +2159,9 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
             return bootstrapResult;
         }
     }
+#ifdef EASYRPG_RUBY300
+    EasyRpgRgssVmTraceHeap("bootstrap done");
+#endif
     gInitialized = 1;
     return ERgssVmOk;
 }

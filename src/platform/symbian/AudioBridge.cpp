@@ -969,11 +969,7 @@ void DecodePcmWavLC(const TDesC8& aFile,
     TInt sample = 0;
     if (bits == 16)
     {
-        for (sample = 0; sample < sampleCount; ++sample)
-        {
-            destination[sample * 2] = sampleData[sample * 2];
-            destination[sample * 2 + 1] = sampleData[sample * 2 + 1];
-        }
+        Mem::Copy(destination, sampleData, pcmBytes);
     }
     else
     {
@@ -1113,6 +1109,48 @@ void PumpBgm(TInt aMaxFrames)
             if (written <= 0)
                 break;
             gBgmPhase += static_cast<TInt64>(written) << 16;
+            while (gBgmPhase >= totalPhase)
+            {
+                gBgmPhase -= totalPhase;
+                ++gBgmLoopCount;
+            }
+            gBgmFramesQueued += static_cast<TUint64>(written);
+            freeFrames -= written;
+            if (written != batch)
+                break;
+        }
+        return;
+    }
+
+    if (gBgmStep == (static_cast<TInt64>(2) << 16) && gBgmChannels == 2 &&
+        (gBgmPhase & 0xffff) == 0)
+    {
+        const TInt16* samples = reinterpret_cast<const TInt16*>(gBgmPcm->Ptr());
+        while (freeFrames > 0)
+        {
+            const TInt batch = Min(freeFrames, 512);
+            TInt16 output[512 * 2];
+            TInt sourceFrame = static_cast<TInt>(gBgmPhase >> 16);
+            TInt frame = 0;
+            for (; frame < batch; ++frame)
+            {
+                output[frame * 2] = samples[sourceFrame * 2];
+                output[frame * 2 + 1] = samples[sourceFrame * 2 + 1];
+                sourceFrame += 2;
+                if (sourceFrame >= gBgmFrameCount)
+                {
+                    sourceFrame -= gBgmFrameCount;
+                    if (sourceFrame >= gBgmFrameCount)
+                        sourceFrame %= gBgmFrameCount;
+                }
+            }
+
+            const TInt written = gMixer->WriteStreamPcm16(CAudioMixer::EStreamBgm,
+                                                           output,
+                                                           batch);
+            if (written <= 0)
+                break;
+            gBgmPhase += static_cast<TInt64>(written) << 17;
             while (gBgmPhase >= totalPhase)
             {
                 gBgmPhase -= totalPhase;

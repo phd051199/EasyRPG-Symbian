@@ -87,6 +87,56 @@ TInt CopyAsciiPath(const char* aSource, TDes& aTarget)
     return aTarget.Length() > 0 ? KErrNone : KErrArgument;
 }
 
+void ResolveBitmapPathL(CZipVfs& aResources,
+                        const char* aRelativePath,
+                        TDes& aResolvedPath)
+{
+    User::LeaveIfError(CopyAsciiPath(aRelativePath, aResolvedPath));
+    if (aResources.Exists(aResolvedPath))
+        return;
+
+    // RGSS accepts extensionless Bitmap paths (for example
+    // "Graphics/Titles/title") and resolves them to an image file. Keep an
+    // explicitly supplied extension strict, but emulate that lookup for the
+    // extensionless form used by RPG Maker XP games.
+    TInt separator = aResolvedPath.LocateReverse('/');
+    const TInt backslash = aResolvedPath.LocateReverse('\\');
+    if (backslash > separator)
+        separator = backslash;
+    const TInt dot = aResolvedPath.LocateReverse('.');
+    if (dot > separator)
+        User::Leave(KErrNotFound);
+
+    _LIT(KPngExtension, ".png");
+    _LIT(KJpgExtension, ".jpg");
+    _LIT(KJpegExtension, ".jpeg");
+    _LIT(KBmpExtension, ".bmp");
+    _LIT(KGifExtension, ".gif");
+    const TPtrC extensions[] = {
+        KPngExtension(),
+        KJpgExtension(),
+        KJpegExtension(),
+        KBmpExtension(),
+        KGifExtension()
+    };
+
+    TFileName candidate;
+    for (TUint index = 0; index < sizeof(extensions) / sizeof(extensions[0]); ++index)
+    {
+        if (aResolvedPath.Length() + extensions[index].Length() > candidate.MaxLength())
+            continue;
+        candidate.Copy(aResolvedPath);
+        candidate.Append(extensions[index]);
+        if (aResources.Exists(candidate))
+        {
+            aResolvedPath.Copy(candidate);
+            return;
+        }
+    }
+
+    User::Leave(KErrNotFound);
+}
+
 void CopyDecodedBitmapL(const CFbsBitmap& aColor,
                         const CFbsBitmap* aMask,
                         TInt& aBitmapHandle)
@@ -161,7 +211,7 @@ void EasyRpgRgssLoadBitmapL(RFs& aFs,
 {
     aBitmapHandle = 0;
     TFileName path;
-    User::LeaveIfError(CopyAsciiPath(aRelativePath, path));
+    ResolveBitmapPathL(aResources, aRelativePath, path);
 
     HBufC8* imageData = aResources.ReadFileLC(path, 16 * 1024 * 1024);
     CImageDecoder* decoder = CImageDecoder::DataNewL(aFs, *imageData);

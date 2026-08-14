@@ -19,6 +19,80 @@
 namespace
 {
 _LIT(KRgssVmThreadName, "EasyRPG-RGSS-VM");
+_LIT(KRgssTracePath, "C:\\Data\\EasyRPG\\rgss.trace");
+
+RFs gTraceFs;
+RFile gTraceFile;
+TBool gTraceOpen = EFalse;
+
+void TraceClose()
+{
+    gTraceFile.Close();
+    gTraceFs.Close();
+    gTraceOpen = EFalse;
+}
+
+void TraceOpen()
+{
+    if (gTraceOpen)
+        return;
+    if (gTraceFs.Connect() != KErrNone)
+    {
+        RDebug::Print(_L("EasyRPG trace: fs connect failed"));
+        return;
+    }
+    TInt error = gTraceFile.Open(gTraceFs, KRgssTracePath, EFileWrite | EFileShareAny);
+    if (error != KErrNone)
+        error = gTraceFile.Replace(gTraceFs, KRgssTracePath, EFileWrite | EFileShareAny);
+    if (error != KErrNone)
+    {
+        RDebug::Print(_L("EasyRPG trace: open failed %d"), error);
+        gTraceFs.Close();
+        return;
+    }
+    TInt position = 0;
+    if (gTraceFile.Size(position) == KErrNone && position > 0)
+        gTraceFile.Seek(ESeekEnd, position);
+    gTraceOpen = ETrue;
+}
+}
+
+extern "C" void EasyRpgRgssVmTrace(const char* aText)
+{
+    if (!aText)
+        return;
+    TraceOpen();
+    if (!gTraceOpen)
+        return;
+    const TInt length = User::StringLength(reinterpret_cast<const TUint8*>(aText));
+    if (length <= 0)
+        return;
+    TPtrC8 line(reinterpret_cast<const TUint8*>(aText),
+                length < 400 ? length : 400);
+    TRAP_IGNORE(
+        gTraceFile.Write(_L8("\n"));
+        gTraceFile.Write(line);
+    );
+}
+
+extern "C" void EasyRpgRgssVmTraceHeap(const char* aText)
+{
+    if (!aText)
+        return;
+    char line[512];
+    TInt allocated = 0;
+    User::Heap().AllocSize(allocated);
+    TInt largest = 0;
+    const TInt freeBytes = User::Heap().Available(largest);
+    snprintf(line, sizeof(line), "%s heap size=%dKB alloc=%dKB free=%dKB max=%dKB tls8=%08x",
+             aText,
+             User::Heap().Size() / 1024,
+             allocated / 1024,
+             freeBytes / 1024,
+             User::Heap().MaxLength() / 1024,
+             reinterpret_cast<TUint>(User::TrapHandler()));
+    EasyRpgRgssVmTrace(line);
+}
 const char* const KAudioExtensions[] = { ".ogg", ".mp3", ".wav", ".mid", ".midi", ".wma" };
 const TInt KAudioExtensionCount = sizeof(KAudioExtensions) / sizeof(KAudioExtensions[0]);
 _LIT(KSaveBasePath, "C:\\Data\\EasyRPG\\Saves\\");
@@ -94,7 +168,6 @@ TInt VmResultToError(TInt aResult)
     default:
         return KErrGeneral;
     }
-}
 }
 
 CRgssVmWorker* CRgssVmWorker::NewL(const TDesC& aGamePath, TInt aVersion)
@@ -258,6 +331,12 @@ void CRgssVmWorker::SetInputWord(TInt aWord, TUint32 aValue)
 {
     if (aWord < 0 || aWord >= 4)
         return;
+    if (iInputWords[aWord] != aValue)
+    {
+        char line[48];
+        snprintf(line, sizeof(line), "input %d %08x", aWord, aValue);
+        EasyRpgRgssVmTrace(line);
+    }
     iInputWords[aWord] = aValue;
 }
 
@@ -347,8 +426,18 @@ TAny* CRgssVmWorker::PthreadEntry(TAny* aContext)
         self->SignalStarted(KErrNoMemory);
         return NULL;
     }
+    {
+        char line[96];
+        snprintf(line, sizeof(line), "vm handler=%08x cleanup=%08x",
+                 reinterpret_cast<TUint>(User::TrapHandler()),
+                 reinterpret_cast<TUint>(cleanup));
+        EasyRpgRgssVmTrace(line);
+    }
+    EasyRpgRgssVmTraceHeap("vm pthread begin");
     self->ThreadMain();
     delete cleanup;
+    EasyRpgRgssVmTrace("vm pthread end");
+    TraceClose();
     return NULL;
 }
 #endif
@@ -359,6 +448,13 @@ TInt CRgssVmWorker::ThreadMain()
     iExitResult = result;
     if (!iStartSignaled)
         SignalStarted(result);
+#ifdef EASYRPG_RUBY300
+    {
+        char line[96];
+        snprintf(line, sizeof(line), "vm thread main result=%d", result);
+        EasyRpgRgssVmTraceHeap(line);
+    }
+#endif
     iResources = NULL;
     iFs.Close();
     return result;
@@ -543,26 +639,6 @@ int CRgssVmWorker::VmFileSize(void* aContext, const char* aRelativePath)
 {
     if (!aContext)
         return ERgssVmErrorInvalidArgument;
-#ifdef EASYRPG_RUBY300
-    if (aRelativePath && strncmp(aRelativePath, "Data/", 5) == 0)
-    {
-        const char* name = strrchr(aRelativePath, '/');
-        name = name ? name + 1 : aRelativePath;
-        TBuf<64> threadName;
-        TBuf<16> shortName;
-        while (*name && *name != '.' && shortName.Length() < shortName.MaxLength())
-            shortName.Append(static_cast<TUint16>(*name++));
-        TInt allocated = 0;
-        User::Heap().AllocSize(allocated);
-        TInt largest = 0;
-        const TInt free = User::Heap().Available(largest);
-        threadName.Format(_L("D%S-S%d-A%d-F%d"), &shortName,
-                          User::Heap().Size() / 1024,
-                          allocated / 1024,
-                          free / 1024);
-        User::RenameThread(threadName);
-    }
-#endif
     return static_cast<CRgssVmWorker*>(aContext)->FileSize(aRelativePath);
 }
 
@@ -574,14 +650,6 @@ int CRgssVmWorker::VmFileRead(void* aContext,
 {
     if (!aContext)
         return ERgssVmErrorInvalidArgument;
-#ifdef EASYRPG_RUBY300
-    if (aRelativePath && strcmp(aRelativePath, "Data/Map001.rxdata") == 0)
-    {
-        TBuf<32> threadName;
-        threadName.Format(_L("RGSS-M1-O%d-N%d"), aOffset, aBytes);
-        User::RenameThread(threadName);
-    }
-#endif
     return static_cast<CRgssVmWorker*>(aContext)->ReadFile(aRelativePath,
                                                            aOffset,
                                                            aBuffer,
@@ -618,22 +686,13 @@ int CRgssVmWorker::VmBitmapLoad(void* aContext,
     CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
     if (!self->iResources)
         return ERgssVmErrorNotInitialized;
+
 #ifdef EASYRPG_RUBY300
-    const char* name = strrchr(aRelativePath, '/');
-    name = name ? name + 1 : aRelativePath;
-    TBuf<64> threadName;
-    TBuf<20> shortName;
-    while (*name && *name != '.' && shortName.Length() < shortName.MaxLength())
-        shortName.Append(static_cast<TUint16>(*name++));
-    TInt allocated = 0;
-    User::Heap().AllocSize(allocated);
-    TInt largest = 0;
-    const TInt free = User::Heap().Available(largest);
-    threadName.Format(_L("B%S-S%d-A%d-F%d"), &shortName,
-                      User::Heap().Size() / 1024,
-                      allocated / 1024,
-                      free / 1024);
-    User::RenameThread(threadName);
+    {
+        char line[160];
+        snprintf(line, sizeof(line), "bitmap load %s", aRelativePath);
+        EasyRpgRgssVmTraceHeap(line);
+    }
 #endif
 
     TInt handle = 0;
@@ -765,11 +824,6 @@ int CRgssVmWorker::VmScriptInflate(void* aContext,
         return ERgssVmErrorNotInitialized;
     if (aIndex < 0 || aIndex >= self->iScriptCount)
         return ERgssVmErrorInvalidArgument;
-#ifdef EASYRPG_RUBY300
-    TBuf<24> threadName;
-    threadName.Format(_L("RGSS-S%d"), aIndex);
-    User::RenameThread(threadName);
-#endif
 
     EasyRpgRgssScriptArchiveReader reader;
     reader.context = self;
@@ -806,6 +860,15 @@ int CRgssVmWorker::VmFrameSync(void* aContext,
     CRgssVmWorker* self = static_cast<CRgssVmWorker*>(aContext);
     if (self->iStopRequested)
         return ERgssVmErrorRuntime;
+
+#ifdef EASYRPG_RUBY300
+    if ((aFrameCount & 127) == 0)
+    {
+        char line[96];
+        snprintf(line, sizeof(line), "frame %d ticks=%u", aFrameCount, VmTicks(NULL));
+        EasyRpgRgssVmTraceHeap(line);
+    }
+#endif
 
     self->iFrameRate = aFrameRate;
     self->iFrameCount = aFrameCount;

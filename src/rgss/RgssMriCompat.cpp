@@ -44,10 +44,14 @@ struct TRubyGcPage
     TRubyGcPage* next;
 };
 
+extern "C" void EasyRpgRgssVmTrace(const char* aText);
+extern "C" void EasyRpgRgssVmTraceHeap(const char* aText);
+
 pthread_mutex_t gRubyGcPageLock = PTHREAD_MUTEX_INITIALIZER;
 TRubyGcPage* gRubyGcFreePages = NULL;
 unsigned char* gRubyGcPageNext = NULL;
 unsigned char* gRubyGcPageEnd = NULL;
+int gRubyGcBlockCount = 0;
 #endif
 }
 
@@ -97,6 +101,7 @@ void* easyrpg_symbian_gc_page_alloc(size_t alignment, size_t size)
         void* raw = malloc(blockSize + alignment - 1);
         if (!raw)
         {
+            EasyRpgRgssVmTraceHeap("gc page block alloc failed");
             pthread_mutex_unlock(&gRubyGcPageLock);
             return NULL;
         }
@@ -104,6 +109,13 @@ void* easyrpg_symbian_gc_page_alloc(size_t alignment, size_t size)
         const unsigned long aligned = (address + alignment - 1) & ~(static_cast<unsigned long>(alignment) - 1);
         gRubyGcPageNext = reinterpret_cast<unsigned char*>(aligned);
         gRubyGcPageEnd = gRubyGcPageNext + blockSize;
+        ++gRubyGcBlockCount;
+        if ((gRubyGcBlockCount & 7) == 1)
+        {
+            char line[64];
+            snprintf(line, sizeof(line), "gc page blocks=%d", gRubyGcBlockCount);
+            EasyRpgRgssVmTraceHeap(line);
+        }
     }
     void* page = gRubyGcPageNext;
     gRubyGcPageNext += size;

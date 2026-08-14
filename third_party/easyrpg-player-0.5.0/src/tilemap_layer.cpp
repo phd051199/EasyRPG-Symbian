@@ -465,7 +465,6 @@ void TilemapLayer::Draw(int z_order) {
 						((dirty_ab && tile.source == SourceAutotileAB) ||
 						 (dirty_c && tile.source == SourceChipsetAnimatedC))) {
 						const Rect tile_dirty(map_draw_x, map_draw_y, TILE_SIZE, TILE_SIZE);
-						SymbianRenderDamage::MarkDirty(tile_dirty);
 						if (!has_animated_dirty) {
 							animated_dirty = tile_dirty;
 							has_animated_dirty = true;
@@ -487,6 +486,8 @@ void TilemapLayer::Draw(int z_order) {
 					map_x = 0;
 				map_draw_x += TILE_SIZE;
 			}
+			if (has_animated_dirty)
+				SymbianRenderDamage::MarkDirty(animated_dirty);
 			if (has_animated_dirty && symbian_cache &&
 				symbian_cache->bitmap && symbian_cache->bitmap->pixels() &&
 				symbian_cache->bitmap->GetWidth() == display_width &&

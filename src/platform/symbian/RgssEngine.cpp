@@ -1,10 +1,15 @@
 #include <e32keys.h>
 #include <gdi.h>
+#include <stdio.h>
 
 #include "RgssDisplaySurface.h"
 #include "RgssEngine.h"
 #include "RgssRuntime.h"
 #include "RgssVmBridge.h"
+
+#ifdef EASYRPG_RUBY300
+extern "C" void EasyRpgRgssVmTrace(const char* aText);
+#endif
 
 class CRgssWindowEventPump : public CActive
 {
@@ -195,6 +200,36 @@ void CRgssEngine::ConstructL()
     iWindow->SetVisible(ETrue);
     iWs.Flush();
 
+    // Re-assert the window group order once the window exists. Some window
+    // server implementations (and emulators) only re-evaluate keyboard focus
+    // when a group actually moves, and ignore AutoForeground.
+    iWindowGroup->SetOrdinalPosition(0, 10);
+    iWs.Flush();
+
+    // Full-screen games must keep receiving keys even while window server
+    // focus bookkeeping is incomplete (observed with spawned game processes
+    // on some devices/emulators). Capture the keys this engine maps so the
+    // events are routed to this window group explicitly. Both scan codes and
+    // key codes are registered because capture matching differs between
+    // window server implementations. Requires the SwEvent capability.
+    const TUint scanCaptures[] = {
+        EStdKeyUpArrow, EStdKeyDownArrow, EStdKeyLeftArrow, EStdKeyRightArrow,
+        EStdKeyDevice3, EStdKeyDevice1, EStdKeyEnter, EStdKeyEscape,
+        EStdKeySpace, EStdKeyLeftShift, EStdKeyRightShift,
+        'W', 'S', 'A', 'D', 'Z', 'X', 'Q', 'E'
+    };
+    for (TUint index = 0; index < sizeof(scanCaptures) / sizeof(scanCaptures[0]); ++index)
+        iWindowGroup->CaptureKeyUpAndDowns(scanCaptures[index], 0, 0, 0);
+    const TUint codeCaptures[] = {
+        EKeyEnter, EKeyEscape, EKeySpace,
+        EKeyLeftArrow, EKeyRightArrow, EKeyUpArrow, EKeyDownArrow,
+        EKeyDevice1, EKeyDevice3,
+        'W', 'S', 'A', 'D', 'Z', 'X', 'Q', 'E'
+    };
+    for (TUint index = 0; index < sizeof(codeCaptures) / sizeof(codeCaptures[0]); ++index)
+        iWindowGroup->CaptureKey(codeCaptures[index], 0, 0, 0);
+    iWs.Flush();
+
     iForeground = ETrue;
     iRuntime = CRgssRuntime::NewL(iGamePath);
     iEventPump = CRgssWindowEventPump::NewL(iWs, *this);
@@ -303,7 +338,20 @@ void CRgssEngine::FrameTickL(TUint32, TBool)
 {
     if (!iRuntime)
         return;
-    const TBool ownsFocus = iWs.GetFocusWindowGroup() == iWindowGroup->Identifier();
+    const TInt focusGroup = iWs.GetFocusWindowGroup();
+    const TBool ownsFocus = focusGroup == iWindowGroup->Identifier();
+#ifdef EASYRPG_RUBY300
+    {
+        static TUint frameTick = 0;
+        if ((++frameTick & 127) == 0)
+        {
+            char line[96];
+            snprintf(line, sizeof(line), "focus me=%d focus=%d fg=%d",
+                     iWindowGroup->Identifier(), focusGroup, static_cast<int>(iForeground));
+            EasyRpgRgssVmTrace(line);
+        }
+    }
+#endif
     if (ownsFocus || !iPresentedFrame)
         iForeground = ETrue;
     if (!iForeground)
@@ -441,6 +489,16 @@ void CRgssEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
 void CRgssEngine::HandleWindowEvent(const TWsEvent& aEvent)
 {
+#ifdef EASYRPG_RUBY300
+    if (aEvent.Type() == EEventFocusGained || aEvent.Type() == EEventFocusLost ||
+        aEvent.Type() == EEventKeyDown || aEvent.Type() == EEventKeyUp || aEvent.Type() == EEventKey)
+    {
+        char line[64];
+        snprintf(line, sizeof(line), "ws event type=%d code=%d scan=%d",
+                 aEvent.Type(), aEvent.Key()->iCode, aEvent.Key()->iScanCode);
+        EasyRpgRgssVmTrace(line);
+    }
+#endif
     switch (aEvent.Type())
     {
     case EEventFocusLost:

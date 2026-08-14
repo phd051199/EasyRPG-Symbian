@@ -1556,6 +1556,12 @@ void Bitmap::Blit(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity
 	}
 	if (this != &src && pixman_format == PIXMAN_r5g6b5) {
 		Rect written;
+		if (opacity.Value() == 255 && src.pixman_format == PIXMAN_a1r5g5b5 &&
+			SymbianBlitA1555Spans565(x, y, src, src_rect, written)) {
+			if (!written.IsEmpty())
+				Touch(written);
+			return;
+		}
 		if (SymbianBlitTo565(pixels(), pitch(), width(), height(),
 			src.pixels(), src.pitch(), src.width(), src.height(), src.pixman_format,
 			x, y, src_rect, opacity.Value(), written)) {
@@ -1676,6 +1682,12 @@ void Bitmap::BlitFast(int x, int y, Bitmap const & src, Rect const & src_rect, O
 		return;
 	if (this != &src && !opacity.IsSplit() && pixman_format == PIXMAN_r5g6b5) {
 		Rect written;
+		if (opacity.Value() == 255 && src.pixman_format == PIXMAN_a1r5g5b5 &&
+			SymbianBlitA1555Spans565(x, y, src, src_rect, written)) {
+			if (!written.IsEmpty())
+				Touch(written);
+			return;
+		}
 		if (SymbianBlitTo565(pixels(), pitch(), width(), height(),
 			src.pixels(), src.pitch(), src.width(), src.height(), src.pixman_format,
 			x, y, src_rect, opacity.Value(), written)) {
@@ -1724,6 +1736,48 @@ void Bitmap::TiledBlit(int ox, int oy, Rect const& src_rect, Bitmap const& src, 
 	signature = SymbianHashOpacity(signature, opacity);
 	if (SymbianRecordDraw(this, signature, dst_rect))
 		return;
+	if (this != &src && !opacity.IsSplit() && opacity.Value() == 255 &&
+		pixman_format == PIXMAN_r5g6b5 && src.pixman_format == PIXMAN_r5g6b5 &&
+		src_rect.width > 0 && src_rect.height > 0 &&
+		src_rect.x >= 0 && src_rect.y >= 0 &&
+		src_rect.x + src_rect.width <= src.width() &&
+		src_rect.y + src_rect.height <= src.height()) {
+		Rect destination = dst_rect;
+		destination.Adjust(GetRect());
+		const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+		if (paint_clip)
+			destination.Adjust(*paint_clip);
+		if (!destination.IsEmpty()) {
+			int source_y_offset = (destination.y - dst_rect.y + oy) % src_rect.height;
+			if (source_y_offset < 0)
+				source_y_offset += src_rect.height;
+			uint8_t* destination_base = static_cast<uint8_t*>(pixels());
+			const uint8_t* source_base = static_cast<const uint8_t*>(src.pixels());
+			for (int row = 0; row < destination.height; ++row) {
+				const int source_y = src_rect.y + source_y_offset;
+				uint8_t* destination_row = destination_base +
+					(destination.y + row) * pitch() + destination.x * 2;
+				const uint8_t* source_row = source_base + source_y * src.pitch();
+				int source_x_offset = (destination.x - dst_rect.x + ox) % src_rect.width;
+				if (source_x_offset < 0)
+					source_x_offset += src_rect.width;
+				int remaining = destination.width;
+				while (remaining > 0) {
+					const int pixels_to_copy = std::min(remaining, src_rect.width - source_x_offset);
+					std::memcpy(destination_row,
+						source_row + (src_rect.x + source_x_offset) * 2,
+						static_cast<size_t>(pixels_to_copy) * 2u);
+					destination_row += pixels_to_copy * 2;
+					remaining -= pixels_to_copy;
+					source_x_offset = 0;
+				}
+				if (++source_y_offset == src_rect.height)
+					source_y_offset = 0;
+			}
+			Touch(destination);
+		}
+		return;
+	}
 #endif
 
 	if (ox >= src_rect.width)	ox %= src_rect.width;

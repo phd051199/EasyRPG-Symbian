@@ -294,6 +294,9 @@ async function main() {
     let crashed = false;
     let monitorGuestFatal = false;
     let guestFatal = '';
+    let fatalTrace = null;
+    let cachedTrace = null;
+    let lastTracePoll = 0;
 
     try {
         await waitHttp(`http://127.0.0.1:${port}/json/version`, 15000);
@@ -321,6 +324,17 @@ async function main() {
                  text.includes('KERN-EXEC') ||
                  text.includes('E32USER-CBase'))) {
                 guestFatal = text;
+                // The page may become unusable right after the fatal; grab the
+                // rgss.trace snapshot now through a direct CDP call.
+                cdp.call('Runtime.evaluate', {
+                    expression: `EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/rgss.trace', { encoding: 'utf8' })`,
+                    returnByValue: true
+                }).then(response => {
+                    const value = response && response.result && response.result.value;
+                    if (typeof value === 'string' && value.length) {
+                        fatalTrace = value;
+                    }
+                }).catch(() => {});
             }
         });
         cdp.on('Runtime.exceptionThrown', params => {
@@ -645,7 +659,27 @@ async function main() {
         }
 
         if (options.keySequence) {
-            await sleep(options.keyWait);
+            if (options.keysAfterScene) {
+                const wanted = options.keysAfterScene.toLowerCase();
+                const sceneDeadline = Date.now() + options.launchTimeout * 1000;
+                let seen = false;
+                while (Date.now() < sceneDeadline) {
+                    let traceText = '';
+                    try {
+                        traceText = await evaluate(`EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/rgss.trace', { encoding: 'utf8' })`);
+                    } catch (error) {}
+                    if (typeof traceText === 'string' && traceText.toLowerCase().includes(wanted)) {
+                        seen = true;
+                        break;
+                    }
+                    await sleep(500);
+                }
+                if (seen) pushLog(`keys-after-scene: scene "${options.keysAfterScene}" observed`);
+                else pushLog(`keys-after-scene: scene "${options.keysAfterScene}" not observed, sending keys anyway`);
+                await sleep(1000);
+            } else {
+                await sleep(options.keyWait);
+            }
             const sequence = [];
             for (const rawToken of options.keySequence.split(',')) {
                 const token = rawToken.trim();
@@ -681,6 +715,12 @@ async function main() {
                 redraw: EKA2L1.module && EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0,
                 exit: EKA2L1.module && EKA2L1.lastAppExit ? EKA2L1.lastAppExit() : null
             })`);
+            if (Date.now() - lastTracePoll > 2000) {
+                lastTracePoll = Date.now();
+                try {
+                    cachedTrace = await evaluate(`EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/rgss.trace', { encoding: 'utf8' })`);
+                } catch (error) {}
+            }
             if (state.exit && appExitKey(state.exit) !== handoffExitKey) {
                 const cleanLauncherHandoff = (state.exit.uid >>> 0) === (options.uid >>> 0) && state.exit.type === 0 && state.exit.reason === 0;
                 if (cleanLauncherHandoff && !handoffExitKey) {
@@ -688,6 +728,10 @@ async function main() {
                     pushLog(`app: launcher handed off to runtime late, exit=${state.exit.reason}`);
                 } else {
                     result.appExit = state.exit;
+                    if (cachedTrace !== null) {
+                        result.guestLog = cachedTrace;
+                        fs.writeFileSync(path.join(options.output, 'rgss.trace'), cachedTrace);
+                    }
                     throw new Error(`App exited during test: ${JSON.stringify(state.exit)}`);
                 }
             }
@@ -710,6 +754,11 @@ async function main() {
         try {
             result.guestLog = await evaluate(`EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/rgss.trace', { encoding: 'utf8' })`);
             pushLog(`rgss-trace: ${JSON.stringify(result.guestLog)}`);
+        } catch (error) {}
+        try {
+            const ekaLog = await evaluate(`EKA2L1.module.FS.readFile('/EKA2L1.log', { encoding: 'utf8' })`);
+            if (typeof ekaLog === 'string' && ekaLog.length)
+                fs.writeFileSync(path.join(options.output, 'EKA2L1.log'), ekaLog);
         } catch (error) {}
         if (handoffExitKey && redrawEnd <= redrawStart) throw new Error('Runtime produced no redraws after launcher handoff');
         pushLog(`app: redraw rate ${result.redrawFps.toFixed(2)} fps over ${((sampleEnd - sampleStart) / 1000).toFixed(1)}s`);
@@ -734,6 +783,10 @@ async function main() {
         result.finishedAt = new Date().toISOString();
         result.error = error.stack || String(error);
         pushLog(`result: FAIL: ${error.message || error}`);
+        if (cachedTrace !== null && !fs.existsSync(path.join(options.output, 'rgss.trace'))) {
+            result.guestLog = cachedTrace;
+            fs.writeFileSync(path.join(options.output, 'rgss.trace'), cachedTrace);
+        }
         if (cdp) {
             try {
                 const image = await cdp.call('Page.captureScreenshot', {
@@ -796,6 +849,10 @@ async function main() {
                     fs.writeFileSync(path.join(options.output, 'rgss.trace'), guestTrace);
                 }
             } catch {}
+            if (!fs.existsSync(path.join(options.output, 'rgss.trace')) && fatalTrace) {
+                result.guestLog = fatalTrace;
+                fs.writeFileSync(path.join(options.output, 'rgss.trace'), fatalTrace);
+            }
         }
         guestFatal = finalGuestFatal;
         fs.writeFileSync(path.join(options.output, 'console.log'), consoleLines.join('\n') + '\n');
