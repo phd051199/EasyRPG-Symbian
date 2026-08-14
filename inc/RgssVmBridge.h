@@ -121,6 +121,7 @@ int EasyRpgRgssVmLoadScripts(const char* relative_path);
 int EasyRpgRgssVmTick(void);
 int EasyRpgRgssVmCollect(void);
 int EasyRpgRgssVmHeapBytes(void);
+int EasyRpgRgssVmLastError(char* buffer, int capacity, int* script_index);
 void EasyRpgRgssVmShutdown(void);
 
 #ifdef __cplusplus

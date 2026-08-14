@@ -1,0 +1,70 @@
+TARGET            EasyRPGRgssModern.exe
+TARGETTYPE        exe
+UID               0x100039CE 0xE31EA5A4
+
+EPOCHEAPSIZE      0x100000 0x03800000
+EPOCSTACKSIZE     0x18000
+OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
+MACRO             EASYRPG_LAUNCHER_PROCESS
+MACRO             EASYRPG_RGSS_PROCESS
+MACRO             EASYRPG_RUBY300
+
+SOURCEPATH        ..\src\platform\symbian
+SOURCE            RgssRuntimeMain.cpp
+SOURCE            RgssEngine.cpp
+SOURCE            RgssRuntime.cpp
+SOURCE            RgssVmWorker.cpp
+SOURCE            RgssGlyphCache.cpp
+SOURCE            RgssDisplaySurface.cpp
+SOURCE            RgssImageLoader.cpp
+SOURCE            FrameTimer.cpp
+SOURCE            AudioMixer.cpp
+SOURCE            AudioBridge.cpp
+SOURCE            ZipVfs.cpp
+SOURCE            Encoding.cpp
+SOURCE            Dirent.cpp
+
+SOURCEPATH        ..\src\rgss
+SOURCE            RgssVmMri.cpp
+SOURCE            RgssBootstrap.cpp
+SOURCE            RgssMriCompat.cpp
+
+USERINCLUDE       ..\inc
+USERINCLUDE       ..\src\rgss\mri300
+USERINCLUDE       ..\src\rgss\mri
+USERINCLUDE       ..\build\vendor\ruby-3.0.7
+USERINCLUDE       ..\build\vendor\ruby-3.0.7\include
+SYSTEMINCLUDE     \epoc32\include
+SYSTEMINCLUDE     \epoc32\include\stdapis
+SYSTEMINCLUDE     \epoc32\include\libc
+
+LIBRARY           euser.lib
+LIBRARY           apparc.lib
+LIBRARY           apgrfx.lib
+LIBRARY           fbscli.lib
+LIBRARY           bitgdi.lib
+LIBRARY           gdi.lib
+LIBRARY           hal.lib
+LIBRARY           efsrv.lib
+LIBRARY           bafl.lib
+LIBRARY           charconv.lib
+LIBRARY           imageconversion.lib
+LIBRARY           libc.lib
+LIBRARY           libm.lib
+LIBRARY           libz.lib
+LIBRARY           libpthread.lib
+LIBRARY           mediaclientaudio.lib
+LIBRARY           mediaclientaudiostream.lib
+LIBRARY           ws32.lib
+STATICLIBRARY     EasyRpgRgssCore.lib
+STATICLIBRARY     EasyRpgRuby300.lib
+
+LANG              SC
+
+VENDORID          0
+SECUREID          0xE31EA5A4
+CAPABILITY        None
+
+#ifdef ENABLE_ABIV2_MODE
+DEBUGGABLE_UDEBONLY
+#endif

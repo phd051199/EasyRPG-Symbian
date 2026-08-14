@@ -8,6 +8,7 @@
 #include "color.h"
 #include "filefinder.h"
 #include "graphics.h"
+#include "game_system.h"
 #include "input.h"
 #include "main_data.h"
 #include "output.h"
@@ -321,6 +322,15 @@ extern "C" int EasyRpgUpstreamPlayerShouldRender(void) {
     return gRenderFrame ? 1 : 0;
 }
 
+extern "C" void EasyRpgUpstreamPlayerRefreshAudio(void) {
+    if (!gPlayerStarted || !EasyRpgAudioEnabled())
+        return;
+    RPG::Music current = Game_System::GetCurrentBGM();
+    if (current.name.empty() || current.name == "(OFF)" || current.name == "(Brak)")
+        return;
+    Game_System::BgmPlay(current);
+}
+
 extern "C" int EasyRpgUpstreamPlayerDirtyRegionCount(void) {
     return SymbianRenderDamage::DamageValid()
         ? SymbianRenderDamage::DirtyCount()
@@ -340,6 +350,18 @@ extern "C" int EasyRpgUpstreamPlayerDirtyRegion(int index,
     *y = rect.y;
     *width = rect.width;
     *height = rect.height;
+    return 1;
+}
+
+extern "C" int EasyRpgUpstreamPlayerPresentScroll(int* x, int* y) {
+    if (!x || !y)
+        return 0;
+    int shiftX = 0;
+    int shiftY = 0;
+    if (!SymbianRenderDamage::PendingScroll(shiftX, shiftY))
+        return 0;
+    *x = shiftX;
+    *y = shiftY;
     return 1;
 }
 

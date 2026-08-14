@@ -9,6 +9,46 @@ typedef unsigned long long Uint64;
 
 #include <sys/select.h>
 
+#ifdef EASYRPG_RUBY300
+struct __siginfo
+{
+    void* si_addr;
+};
+typedef struct __siginfo siginfo_t;
+typedef unsigned int nfds_t;
+struct pollfd
+{
+    int fd;
+    short events;
+    short revents;
+};
+#ifndef POLLIN
+#define POLLIN 0x0001
+#endif
+#ifndef POLLOUT
+#define POLLOUT 0x0004
+#endif
+#ifndef POLLERR
+#define POLLERR 0x0008
+#endif
+#ifndef POLLHUP
+#define POLLHUP 0x0010
+#endif
+#ifndef POLLNVAL
+#define POLLNVAL 0x0020
+#endif
+#ifndef sa_sigaction
+#define sa_sigaction __sigaction_u.__sa_sigaction
+#endif
+#ifdef __cplusplus
+extern "C" {
+#endif
+int poll(struct pollfd* fds, nfds_t count, int timeout);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

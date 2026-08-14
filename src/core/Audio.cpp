@@ -10,6 +10,8 @@ public:
     }
 
     void Update() override {
+        if (!EasyRpgAudioEnabled())
+            return;
         EasyRpgAudioUpdate();
         const int error = EasyRpgAudioConsumeError();
         if (error != 0)
@@ -90,4 +92,8 @@ private:
 AudioInterface& EasyRpgAudio() {
     static AudioBackend audio;
     return audio;
+}
+
+bool EasyRpgAudioEnabled() {
+    return EasyRpgAudioIsEnabled() != 0;
 }

@@ -114,7 +114,9 @@ CDisplaySurface::CDisplaySurface()
       iBitmapLocked(EFalse),
       iSize(0, 0),
       iHasFrame(EFalse),
-      iDirtyRegionCount(0)
+      iDirtyRegionCount(0),
+      iPresentScrollX(0),
+      iPresentScrollY(0)
 {
 }
 
@@ -166,9 +168,22 @@ const TRect& CDisplaySurface::DirtyRegion(TInt aIndex) const
     return iDirtyRegions[aIndex].iRect;
 }
 
+TBool CDisplaySurface::HasPresentScroll() const
+{
+    return iPresentScrollX != 0 || iPresentScrollY != 0;
+}
+
+void CDisplaySurface::PresentScroll(TInt& aShiftX, TInt& aShiftY) const
+{
+    aShiftX = iPresentScrollX;
+    aShiftY = iPresentScrollY;
+}
+
 void CDisplaySurface::ClearDirtyRegions()
 {
     iDirtyRegionCount = 0;
+    iPresentScrollX = 0;
+    iPresentScrollY = 0;
 }
 
 void CDisplaySurface::ClearL()
@@ -178,6 +193,8 @@ void CDisplaySurface::ClearL()
     EndRender();
     iHasFrame = EFalse;
     iDirtyRegionCount = 0;
+    iPresentScrollX = 0;
+    iPresentScrollY = 0;
 }
 
 TUint16* CDisplaySurface::BeginRenderL()
@@ -213,18 +230,24 @@ void CDisplaySurface::PresentL()
     if (!iBitmap)
         User::Leave(KErrNotReady);
 
+    TInt coreScrollX = 0;
+    TInt coreScrollY = 0;
+    const TBool coreHasScroll =
+        EasyRpgUpstreamPlayerPresentScroll(&coreScrollX, &coreScrollY) != 0;
     const TInt coreDirtyCount = EasyRpgUpstreamPlayerDirtyRegionCount();
-    if (iHasFrame && coreDirtyCount == 0)
+    if (iHasFrame && coreDirtyCount == 0 && !coreHasScroll)
     {
         EasyRpgUpstreamPlayerConsumeDirtyRegions();
         return;
     }
 
+    const TBool hadFrame = iHasFrame;
+    const TBool hadPendingScroll = HasPresentScroll();
     const TRect frameRect(TPoint(0, 0), iSize);
     TEasyRpgDirtyRegionSlot currentDirty[KDirtyRegionCapacity];
     TInt currentDirtyCount = 0;
 
-    if (!iHasFrame)
+    if (!hadFrame)
     {
         currentDirty[0].iRect = frameRect;
         currentDirtyCount = 1;
@@ -267,6 +290,31 @@ void CDisplaySurface::PresentL()
     if (coreDirtyCount >= 0)
         EasyRpgUpstreamPlayerConsumeDirtyRegions();
 
+    const TBool currentFull =
+        currentDirtyCount == 1 && RectsEqual(currentDirty[0].iRect, frameRect);
+    if (coreHasScroll)
+    {
+        if (!hadFrame || currentFull || iDirtyRegionCount > 0 || hadPendingScroll)
+        {
+            currentDirty[0].iRect = frameRect;
+            currentDirtyCount = 1;
+            iPresentScrollX = 0;
+            iPresentScrollY = 0;
+        }
+        else
+        {
+            iPresentScrollX = coreScrollX;
+            iPresentScrollY = coreScrollY;
+        }
+    }
+    else if (hadPendingScroll && currentDirtyCount > 0)
+    {
+        currentDirty[0].iRect = frameRect;
+        currentDirtyCount = 1;
+        iPresentScrollX = 0;
+        iPresentScrollY = 0;
+    }
+
     iHasFrame = ETrue;
 
     if (currentDirtyCount <= 0)
@@ -276,11 +324,17 @@ void CDisplaySurface::PresentL()
     {
         iDirtyRegions[0].iRect = frameRect;
         iDirtyRegionCount = 1;
+        iPresentScrollX = 0;
+        iPresentScrollY = 0;
         return;
     }
 
     if (iDirtyRegionCount == 1 && RectsEqual(iDirtyRegions[0].iRect, frameRect))
+    {
+        iPresentScrollX = 0;
+        iPresentScrollY = 0;
         return;
+    }
 
     for (TInt index = 0; index < currentDirtyCount; ++index)
     {
@@ -288,9 +342,16 @@ void CDisplaySurface::PresentL()
         {
             iDirtyRegions[0].iRect = frameRect;
             iDirtyRegionCount = 1;
+            iPresentScrollX = 0;
+            iPresentScrollY = 0;
             return;
         }
         iDirtyRegions[iDirtyRegionCount++].iRect = currentDirty[index].iRect;
     }
     OptimizeDirtyRegions(iDirtyRegions, iDirtyRegionCount, frameRect);
+    if (iDirtyRegionCount == 1 && RectsEqual(iDirtyRegions[0].iRect, frameRect))
+    {
+        iPresentScrollX = 0;
+        iPresentScrollY = 0;
+    }
 }

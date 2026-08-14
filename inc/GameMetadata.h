@@ -10,6 +10,7 @@ enum TGameEngineVersion
     EGameEngineRpgXp = 1,
     EGameEngineRpgVx = 2,
     EGameEngineRpgVxAce = 3,
+    EGameEngineRpgXpModern = 101,
     EGameEngineRpg2000 = 2000,
     EGameEngineRpg2003 = 2003
 };

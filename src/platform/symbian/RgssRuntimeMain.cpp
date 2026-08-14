@@ -9,6 +9,15 @@
 namespace
 {
 _LIT(KEasyRpgExecutable, "EasyRPG.exe");
+TBool gRendezvousSignaled = EFalse;
+
+void SignalRendezvous(TInt aResult)
+{
+    if (gRendezvousSignaled)
+        return;
+    RProcess::Rendezvous(aResult);
+    gRendezvousSignaled = ETrue;
+}
 
 void DisconnectFbs(TAny*)
 {
@@ -42,9 +51,10 @@ void RunRgssL()
     User::LeaveIfError(RFbsSession::Connect());
     CleanupStack::PushL(TCleanupItem(DisconnectFbs, NULL));
 
-    RProcess::Rendezvous(KErrNone);
     CRgssEngine* engine = CRgssEngine::NewL();
     CleanupStack::PushL(engine);
+    engine->StartL();
+    SignalRendezvous(KErrNone);
     engine->RunL();
     CleanupStack::PopAndDestroy(engine);
 
@@ -61,6 +71,8 @@ GLDEF_C TInt E32Main()
     if (!cleanup)
         return KErrNoMemory;
     TRAPD(error, RunRgssL());
+    if (error != KErrNone)
+        SignalRendezvous(error);
     delete cleanup;
     return error;
 }

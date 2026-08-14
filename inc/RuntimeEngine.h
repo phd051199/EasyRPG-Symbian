@@ -41,7 +41,6 @@ private:
     void RememberDynamicScanKey(TInt aScanCode, TUint32 aPlayerKey);
     void ForgetDynamicScanKey(TInt aScanCode);
     void SetPlayerKeyMask(TUint32 aMask, TBool aPressed);
-    void RequestInputRender();
     void ClearPlayerInput();
     void OpenMenu();
     void CloseMenu();
@@ -51,6 +50,7 @@ private:
     void AdjustVolume(TInt aDelta);
     void ToggleFrameSkip();
     void TogglePerfOverlay();
+    void PersistSettings();
     void DrawMenuOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen);
     void DrawKeyMapOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen);
     void FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame);

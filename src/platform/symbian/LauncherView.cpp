@@ -312,10 +312,13 @@ void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion)
 {
     _LIT(KEasyRpgRuntime, "EasyRPGGame.exe");
     _LIT(KEasyRpgRgssRuntime, "EasyRPGRgss.exe");
+    _LIT(KEasyRpgRgssModernRuntime, "EasyRPGRgssModern.exe");
     const TDesC* executable = &KEasyRpgRuntime;
-    if (aVersion == EGameEngineRpgXp ||
-        aVersion == EGameEngineRpgVx ||
-        aVersion == EGameEngineRpgVxAce)
+    if (aVersion == EGameEngineRpgXpModern)
+        executable = &KEasyRpgRgssModernRuntime;
+    else if (aVersion == EGameEngineRpgXp ||
+             aVersion == EGameEngineRpgVx ||
+             aVersion == EGameEngineRpgVxAce)
         executable = &KEasyRpgRgssRuntime;
     else if (aVersion != EGameEngineRpg2000 &&
              aVersion != EGameEngineRpg2003)

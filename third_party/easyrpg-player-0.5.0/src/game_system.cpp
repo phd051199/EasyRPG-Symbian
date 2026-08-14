@@ -39,6 +39,8 @@ namespace {
 
 	void PreloadSeReady(FileRequestResult* result, int tempo) {
 		se_preload_request_ids.erase(std::make_pair(result->file, tempo));
+		if (!EasyRpgAudioEnabled())
+			return;
 		if (!result->success) {
 			return;
 		}
@@ -50,6 +52,8 @@ namespace {
 
 	void WarmSeReady(FileRequestResult* result, int tempo) {
 		se_warm_request_ids.erase(std::make_pair(result->file, tempo));
+		if (!EasyRpgAudioEnabled())
+			return;
 		if (!result->success)
 			return;
 		std::string const path = FileFinder::FindSound(result->file);
@@ -58,6 +62,8 @@ namespace {
 	}
 
 	void PreloadSystemSe(const RPG::Sound& se) {
+		if (!EasyRpgAudioEnabled())
+			return;
 		if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)" || se.volume == 0) {
 			return;
 		}
@@ -129,8 +135,14 @@ void Game_System::BgmPlay(RPG::Music const& bgm) {
 		Output::Debug("BGM %s has invalid tempo %d", bgm.name.c_str(), bgm.tempo);
 	}
 
+	if (!EasyRpgAudioEnabled()) {
+		music_request_id = FileRequestBinding();
+		bgm_pending = false;
+		return;
+	}
+
 	if (!bgm.name.empty() && bgm.name != "(OFF)" && bgm.name != "(Brak)") {
-		if (previous_music.name == bgm.name) {
+		if (previous_music.name == bgm.name && (bgm_pending || Audio().BGM_IsPlaying())) {
 			if (previous_music.volume != data.current_music.volume) {
 				if (!bgm_pending) {
 					Audio().BGM_Volume(data.current_music.volume);
@@ -160,6 +172,8 @@ void Game_System::BgmStop() {
 }
 
 void Game_System::SeWarm(RPG::Sound const& se) {
+	if (!EasyRpgAudioEnabled())
+		return;
 	if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)" || se.volume == 0)
 		return;
 	if (se.name.length() >= 7 && se.name.compare(se.name.length() - 7, 7, ".script") == 0)
@@ -179,6 +193,8 @@ void Game_System::SeWarm(RPG::Sound const& se) {
 void Game_System::SePlay(RPG::Sound const& se) {
 	static bool ineluki_warning_shown = false;
 
+	if (!EasyRpgAudioEnabled())
+		return;
 	if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)")
 		return;
 
@@ -409,6 +425,8 @@ void Game_System::SetTransition(int which, int transition) {
 
 void Game_System::OnBgmReady(FileRequestResult* result) {
 	bgm_pending = false;
+	if (!EasyRpgAudioEnabled())
+		return;
 	std::string const path = FileFinder::FindMusic(result->file);
 	if (path.empty()) {
 		Output::Debug("Music not found: %s", result->file.c_str());
@@ -471,6 +489,8 @@ void Game_System::OnSeReady(FileRequestResult* result, int volume, int tempo) {
 	if (item != se_request_ids.end()) {
 		se_request_ids.erase(item);
 	}
+	if (!EasyRpgAudioEnabled())
+		return;
 
 	std::string const path = FileFinder::FindSound(result->file);
 	if (path.empty()) {

@@ -24,7 +24,8 @@ CRgssRuntime* CRgssRuntime::NewL(const TDesC& aGamePath)
 }
 
 CRgssRuntime::CRgssRuntime()
-    : iResources(NULL),
+    : iAllocator(&User::Allocator()),
+      iResources(NULL),
       iSurface(NULL),
       iVmWorker(NULL),
       iVersion(ERgssVersionUnknown),
@@ -378,14 +379,18 @@ CRgssDisplaySurface& CRgssRuntime::Surface()
     return *iSurface;
 }
 
-void* CRgssRuntime::BitmapAllocate(void*, unsigned int aBytes)
+void* CRgssRuntime::BitmapAllocate(void* aContext, unsigned int aBytes)
 {
-    if (aBytes > 0x7fffffffu)
+    if (!aContext || aBytes > 0x7fffffffu)
         return NULL;
-    return User::Alloc(static_cast<TInt>(aBytes));
+    CRgssRuntime* self = static_cast<CRgssRuntime*>(aContext);
+    return self->iAllocator->Alloc(static_cast<TInt>(aBytes));
 }
 
-void CRgssRuntime::BitmapRelease(void*, void* aMemory)
+void CRgssRuntime::BitmapRelease(void* aContext, void* aMemory)
 {
-    User::Free(aMemory);
+    if (!aContext || !aMemory)
+        return;
+    CRgssRuntime* self = static_cast<CRgssRuntime*>(aContext);
+    self->iAllocator->Free(aMemory);
 }

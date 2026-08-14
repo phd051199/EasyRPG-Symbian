@@ -114,6 +114,13 @@ if [[ $PROFILE != clean ]]; then
     EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
     EASYRPG_WINE_BIN="$WINE_BIN" \
         bash "$PROJECT_DIR/tools/build_rgss_core.sh" "$PROFILE"
+    EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
+    EASYRPG_WINE_BIN="$WINE_BIN" \
+        bash "$PROJECT_DIR/tools/build_rgss_mri.sh" "$PROFILE"
+    EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
+    EASYRPG_WINE_BIN="$WINE_BIN" \
+    EASYRPG_RGSS_RUBY_VERSION=3.0.7 \
+        bash "$PROJECT_DIR/tools/build_rgss_mri.sh" "$PROFILE"
 fi
 
 exec "$WINE_BIN" cmd.exe /d /s /c \

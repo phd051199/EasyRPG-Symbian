@@ -133,5 +133,6 @@ struct EmptyAudio : public AudioInterface {
 
 AudioInterface& Audio();
 AudioInterface& EasyRpgAudio();
+bool EasyRpgAudioEnabled();
 
 #endif

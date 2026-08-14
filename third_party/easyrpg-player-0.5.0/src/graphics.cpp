@@ -196,13 +196,17 @@ void Graphics::DrawFrame() {
 		return;
 	}
 
-	if (SymbianRenderDamage::FullFrameRequested()) {
+	int pending_scroll_x = 0;
+	int pending_scroll_y = 0;
+	const bool moving_scene = SymbianRenderDamage::PendingScroll(pending_scroll_x, pending_scroll_y);
+	if (SymbianRenderDamage::FullFrameRequested() || moving_scene) {
 		surface->ClearClipRects();
 		SymbianRenderDamage::BeginFullPaintRecord(surface->GetWidth(), surface->GetHeight());
 		if (!state->draw_background)
 			surface->Fill(Color(0, 0, 0, 255));
 		DrawFrameContents();
 		SymbianRenderDamage::EndFullPaintRecord();
+		SymbianRenderDamage::DiscardScroll();
 	} else {
 		SymbianRenderDamage::BeginRecord(surface->GetWidth(), surface->GetHeight());
 		DrawFrameContents();

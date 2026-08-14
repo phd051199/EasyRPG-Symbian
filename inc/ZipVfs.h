@@ -4,7 +4,14 @@
 #include <e32base.h>
 #include <f32file.h>
 
-class CZipVfsEntry;
+struct TZipVfsEntry
+{
+    TUint32 iHash;
+    TUint32 iFileSize;
+    TUint32 iLocalHeaderOffset;
+    TInt iCentralOffset;
+    mutable TInt iDataOffset;
+};
 
 class CZipVfs : public CBase
 {
@@ -49,12 +56,14 @@ private:
     void ResolveProjectRootL();
     void AddEntryL(const TDesC& aPath,
                    TUint32 aFileSize,
-                   TUint32 aLocalHeaderOffset);
+                   TUint32 aLocalHeaderOffset,
+                   TInt aCentralOffset);
+    void DecodeEntryPathL(const TZipVfsEntry& aEntry, TDes& aPath) const;
 
-    const CZipVfsEntry* FindEntry(const TDesC& aRelativePath) const;
-    const CZipVfsEntry* FindFullPath(const TDesC& aFullPath) const;
+    const TZipVfsEntry* FindEntry(const TDesC& aRelativePath) const;
+    const TZipVfsEntry* FindFullPath(const TDesC& aFullPath) const;
     void BuildFullPathL(const TDesC& aRelativePath, TDes& aFullPath) const;
-    TInt EntryDataOffsetL(const CZipVfsEntry& aEntry) const;
+    TInt EntryDataOffsetL(const TZipVfsEntry& aEntry) const;
 
     static TUint32 HashPath(const TDesC& aPath);
     static TBool PathEquals(const TDesC& aLeft, const TDesC& aRight);
@@ -66,7 +75,8 @@ private:
     RFile iArchive;
     TFileName iArchivePath;
     HBufC* iProjectPrefix;
-    RPointerArray<CZipVfsEntry> iEntries;
+    HBufC8* iCentralDirectory;
+    RArray<TZipVfsEntry> iEntries;
     RArray<TInt> iBuckets[KBucketCount];
 };
 

@@ -23,6 +23,7 @@ int EasyRpgUpstreamPlayerTick(unsigned int ticks,
                               unsigned int keys_3,
                               int render_frame);
 int EasyRpgUpstreamPlayerShouldRender(void);
+void EasyRpgUpstreamPlayerRefreshAudio(void);
 int EasyRpgPlatformFreeRamBytes(void);
 int EasyRpgUpstreamPlayerDirtyRegionCount(void);
 int EasyRpgUpstreamPlayerDirtyRegion(int index,
@@ -30,6 +31,7 @@ int EasyRpgUpstreamPlayerDirtyRegion(int index,
                                      int* y,
                                      int* width,
                                      int* height);
+int EasyRpgUpstreamPlayerPresentScroll(int* x, int* y);
 void EasyRpgUpstreamPlayerConsumeDirtyRegions(void);
 
 #ifdef __cplusplus

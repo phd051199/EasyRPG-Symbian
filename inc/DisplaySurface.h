@@ -29,6 +29,8 @@ public:
     TBool HasDirtyRegions() const;
     TInt DirtyRegionCount() const;
     const TRect& DirtyRegion(TInt aIndex) const;
+    TBool HasPresentScroll() const;
+    void PresentScroll(TInt& aShiftX, TInt& aShiftY) const;
     void ClearDirtyRegions();
 
 private:
@@ -43,6 +45,8 @@ private:
     enum { KMaxDirtyRegions = 16 };
     TEasyRpgDirtyRegionSlot iDirtyRegions[KMaxDirtyRegions];
     TInt iDirtyRegionCount;
+    TInt iPresentScrollX;
+    TInt iPresentScrollY;
 };
 
 #endif

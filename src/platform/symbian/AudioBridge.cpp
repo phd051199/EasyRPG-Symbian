@@ -33,6 +33,10 @@ TBool gBgmPlaying = EFalse;
 TBool gBgmPaused = EFalse;
 TInt gAudioAsyncError = KErrNone;
 TInt gMasterVolumePercent = 50;
+TBool gAudioEnabled = ETrue;
+TBool gAudioSettingLoaded = EFalse;
+_LIT(KAudioSettingsPath, "C:\\Data\\EasyRPG\\settings.ini");
+_LIT8(KAudioSoundSetting, "sound_enabled=");
 const TInt KBgmRenderPumpFrames = 256;
 const TInt KBgmLogicPumpFrames = 768;
 const TInt KBgmIdlePumpFrames = 256;
@@ -41,6 +45,35 @@ const TInt KBgmMinimumQueuedFrames = 1024;
 const TInt KBgmTargetFrames = 3072;
 
 void StartAudioIdlePump();
+
+void EnsureAudioSettingLoaded()
+{
+    if (gAudioSettingLoaded)
+        return;
+    gAudioSettingLoaded = ETrue;
+
+    RFs fs;
+    if (fs.Connect() != KErrNone)
+        return;
+    RFile file;
+    if (file.Open(fs, KAudioSettingsPath, EFileRead | EFileShareReadersOnly) != KErrNone)
+    {
+        fs.Close();
+        return;
+    }
+    TBuf8<256> data;
+    const TInt error = file.Read(data);
+    file.Close();
+    fs.Close();
+    if (error != KErrNone)
+        return;
+    const TInt position = data.Find(KAudioSoundSetting);
+    if (position < 0)
+        return;
+    const TInt valuePosition = position + KAudioSoundSetting().Length();
+    if (valuePosition < data.Length())
+        gAudioEnabled = data[valuePosition] != '0';
+}
 
 TUint16 Read16(const TUint8* aData)
 {
@@ -1364,20 +1397,43 @@ void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
 }
 }
 
+extern "C" void EasyRpgAudioSetEnabled(int aEnabled)
+{
+    gAudioSettingLoaded = ETrue;
+    const TBool enabled = aEnabled != 0;
+    if (gAudioEnabled == enabled)
+        return;
+    if (!enabled)
+        EasyRpgAudioShutdown();
+    gAudioEnabled = enabled;
+}
+
+extern "C" int EasyRpgAudioIsEnabled(void)
+{
+    EnsureAudioSettingLoaded();
+    return gAudioEnabled ? 1 : 0;
+}
+
 extern "C" int EasyRpgAudioPreloadSe(const char* aPath, int aPitch)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return KErrNone;
     TRAPD(error, PreloadSeL(aPath, aPitch));
     return error;
 }
 
 extern "C" int EasyRpgAudioWarmSe(const char* aPath, int aPitch)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return KErrNone;
     TRAPD(error, WarmSeL(aPath, aPitch));
     return error;
 }
 
 extern "C" int EasyRpgAudioPlaySe(const char* aPath, int aVolume, int aPitch)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return KErrNone;
     TRAPD(error, PlaySeL(aPath, aVolume, aPitch));
     return error;
 }
@@ -1391,6 +1447,8 @@ extern "C" void EasyRpgAudioStopSe(void)
 
 extern "C" int EasyRpgAudioPlayBgm(const char* aPath, int aVolume, int aPitch, int aFadeIn)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return KErrNone;
     TRAPD(error, PlayBgmL(aPath, aVolume, aPitch, aFadeIn));
     return error;
 }
@@ -1402,6 +1460,8 @@ extern "C" void EasyRpgAudioStopBgm(void)
 
 extern "C" int EasyRpgAudioPlayBgs(const char* aPath, int aVolume, int aPitch)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return KErrNone;
     TRAPD(error, PlayBgsL(aPath, aVolume, aPitch));
     return error;
 }
@@ -1429,6 +1489,8 @@ extern "C" void EasyRpgAudioFadeBgs(int aFade)
 
 extern "C" int EasyRpgAudioPlayMe(const char* aPath, int aVolume, int aPitch)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return KErrNone;
     TRAPD(error, PlayMeL(aPath, aVolume, aPitch));
     return error;
 }
@@ -1578,6 +1640,8 @@ extern "C" unsigned int EasyRpgAudioBgmTicks(void)
 
 extern "C" void EasyRpgAudioUpdate(void)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return;
     if (gMixer)
     {
         const TInt mixerError = gMixer->ConsumeError();
@@ -1672,6 +1736,8 @@ extern "C" void EasyRpgAudioUpdate(void)
 
 extern "C" int EasyRpgAudioConsumeError(void)
 {
+    if (!EasyRpgAudioIsEnabled())
+        return KErrNone;
     const TInt error = gAudioAsyncError;
     gAudioAsyncError = KErrNone;
     return error;

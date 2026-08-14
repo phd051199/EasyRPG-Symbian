@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+void EasyRpgAudioSetEnabled(int enabled);
+int EasyRpgAudioIsEnabled(void);
 int EasyRpgAudioPreloadSe(const char* path, int pitch);
 int EasyRpgAudioWarmSe(const char* path, int pitch);
 int EasyRpgAudioPlaySe(const char* path, int volume, int pitch);

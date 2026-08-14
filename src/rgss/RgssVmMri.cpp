@@ -10,6 +10,18 @@
 #include "RgssVmBridge.h"
 
 #include "ruby.h"
+#ifdef EASYRPG_RUBY300
+#include "ruby/encoding.h"
+#endif
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <zlib.h>
+
+#ifdef EASYRPG_RUBY300
+extern "C" void rb_call_builtin_inits(void);
+#endif
 
 namespace
 {
@@ -29,11 +41,63 @@ struct THandleToken
     int handle;
 };
 
+struct TVfsInput
+{
+    char* path;
+    int size;
+    int position;
+    int bufferStart;
+    int bufferLength;
+    unsigned char buffer[4096];
+};
+
+struct TAnimationEntry
+{
+    int offset;
+    int objectBase;
+    int objectCount;
+    int symbolBase;
+};
+
+struct TAnimationSymbol
+{
+    char* name;
+    int length;
+};
+
+struct TAnimationArchive
+{
+    char* path;
+    int size;
+    int selected;
+    TAnimationEntry* entries;
+    int entryCount;
+    TAnimationSymbol* symbols;
+    int symbolCount;
+    int symbolCapacity;
+};
+
 EasyRpgRgssVmHost gHost;
 int gVersion = 0;
 int gInitialized = 0;
 VALUE gNativeModule = Qnil;
 VALUE gHandleClass = Qnil;
+VALUE gVfsInputClass = Qnil;
+VALUE gAnimationArchiveClass = Qnil;
+int gDeferredBattleScripts[128];
+int gDeferredBattleScriptCount = 0;
+int gDeferredBattleLoaded = 0;
+int gDeferredBattleLoading = 0;
+int gDeferredOptionalScripts[64];
+int gDeferredOptionalScriptCount = 0;
+int gDeferredOptionalLoaded = 0;
+int gDeferredOptionalLoading = 0;
+int gLastErrorScript = -1;
+char gLastError[768];
+
+VALUE NLoadDeferredBattle(VALUE);
+VALUE NLoadDeferredOptional(VALUE);
+int EvalProtected(const char* source, int scriptIndex);
 
 void ResetHost()
 {
@@ -56,6 +120,16 @@ void ResetHost()
     gInitialized = 0;
     gNativeModule = Qnil;
     gHandleClass = Qnil;
+    gVfsInputClass = Qnil;
+    gAnimationArchiveClass = Qnil;
+    gDeferredBattleScriptCount = 0;
+    gDeferredBattleLoaded = 0;
+    gDeferredBattleLoading = 0;
+    gDeferredOptionalScriptCount = 0;
+    gDeferredOptionalLoaded = 0;
+    gDeferredOptionalLoading = 0;
+    gLastErrorScript = -1;
+    gLastError[0] = 0;
 }
 
 void DestroyNativeHandle(THandleToken* token)
@@ -227,6 +301,55 @@ VALUE NInputRepeat(VALUE, VALUE mask)
     return BoolValue(EasyRpgRgssInputRepeat(static_cast<unsigned int>(NUM2ULONG(mask))));
 }
 
+VALUE NSystemDelta(VALUE)
+{
+    return ULONG2NUM(gHost.ticks(gHost.context));
+}
+
+VALUE NZlibInflate(VALUE, VALUE input)
+{
+    StringValue(input);
+    z_stream stream;
+    memset(&stream, 0, sizeof(stream));
+    stream.next_in = reinterpret_cast<Bytef*>(RSTRING_PTR(input));
+    stream.avail_in = static_cast<uInt>(RSTRING_LEN(input));
+    if (inflateInit(&stream) != Z_OK)
+        rb_raise(rb_eRuntimeError, "zlib inflate init failed");
+    VALUE output = rb_str_new(0, 0);
+    unsigned char buffer[8192];
+    int result = Z_OK;
+    while (result == Z_OK)
+    {
+        stream.next_out = buffer;
+        stream.avail_out = sizeof(buffer);
+        result = inflate(&stream, Z_NO_FLUSH);
+        const int produced = static_cast<int>(sizeof(buffer) - stream.avail_out);
+        if (produced > 0)
+            rb_str_cat(output, reinterpret_cast<const char*>(buffer), produced);
+    }
+    inflateEnd(&stream);
+    if (result != Z_STREAM_END)
+        rb_raise(rb_eRuntimeError, "zlib inflate failed (%d)", result);
+    return output;
+}
+
+VALUE NZlibDeflate(VALUE, VALUE input)
+{
+    StringValue(input);
+    const uLong sourceLength = static_cast<uLong>(RSTRING_LEN(input));
+    uLongf outputLength = sourceLength + sourceLength / 1000 + 13;
+    VALUE output = rb_str_new(0, static_cast<long>(outputLength));
+    const int result = compress2(reinterpret_cast<Bytef*>(RSTRING_PTR(output)),
+                                 &outputLength,
+                                 reinterpret_cast<const Bytef*>(RSTRING_PTR(input)),
+                                 sourceLength,
+                                 Z_DEFAULT_COMPRESSION);
+    if (result != Z_OK)
+        rb_raise(rb_eRuntimeError, "zlib deflate failed (%d)", result);
+    rb_str_resize(output, static_cast<long>(outputLength));
+    return output;
+}
+
 VALUE NFileSize(VALUE, VALUE path)
 {
     const char* relative = StringValuePtr(path);
@@ -254,6 +377,864 @@ VALUE NFileRead(VALUE, VALUE path)
             return RaiseResult("file read", read);
     }
     return data;
+}
+
+void VfsInputFree(void* memory)
+{
+    TVfsInput* input = static_cast<TVfsInput*>(memory);
+    if (!input)
+        return;
+    ruby_xfree(input->path);
+    ruby_xfree(input);
+}
+
+TVfsInput* VfsInput(VALUE self)
+{
+    TVfsInput* input = 0;
+    Data_Get_Struct(self, TVfsInput, input);
+    if (!input)
+        rb_raise(rb_eRuntimeError, "invalid VFS input");
+    return input;
+}
+
+VALUE NVfsInputCreate(VALUE, VALUE path)
+{
+    StringValue(path);
+    const char* relative = RSTRING_PTR(path);
+    const int size = gHost.file_size(gHost.context, relative);
+    if (size < 0)
+        return RaiseResult("VFS input", size);
+    TVfsInput* input = ALLOC(TVfsInput);
+    memset(input, 0, sizeof(TVfsInput));
+    const int pathLength = RSTRING_LEN(path);
+    input->path = ALLOC_N(char, pathLength + 1);
+    memcpy(input->path, relative, pathLength);
+    input->path[pathLength] = 0;
+    input->size = size;
+    input->bufferStart = -1;
+    return Data_Wrap_Struct(gVfsInputClass, 0, VfsInputFree, input);
+}
+
+VALUE NVfsInputBinmode(VALUE self)
+{
+    return self;
+}
+
+VALUE NVfsInputGetbyte(VALUE self)
+{
+    TVfsInput* input = VfsInput(self);
+    if (input->position >= input->size)
+        return Qnil;
+
+    if (input->bufferStart < 0 ||
+        input->position < input->bufferStart ||
+        input->position >= input->bufferStart + input->bufferLength)
+    {
+        const int count = input->size - input->position < static_cast<int>(sizeof(input->buffer))
+            ? input->size - input->position
+            : static_cast<int>(sizeof(input->buffer));
+        const int read = gHost.file_read(gHost.context,
+                                         input->path,
+                                         input->position,
+                                         input->buffer,
+                                         count);
+        if (read <= 0)
+            return read == 0 ? Qnil : RaiseResult("VFS getbyte", read);
+        input->bufferStart = input->position;
+        input->bufferLength = read;
+    }
+
+    const int index = input->position - input->bufferStart;
+    const unsigned char value = input->buffer[index];
+    ++input->position;
+    return INT2NUM(value);
+}
+
+VALUE NVfsInputRead(int argc, VALUE* argv, VALUE self)
+{
+    VALUE lengthValue = Qnil;
+    rb_scan_args(argc, argv, "01", &lengthValue);
+    TVfsInput* input = VfsInput(self);
+    long requested = NIL_P(lengthValue)
+        ? static_cast<long>(input->size - input->position)
+        : NUM2LONG(lengthValue);
+    if (requested < 0)
+        rb_raise(rb_eArgError, "negative length");
+    if (requested == 0)
+        return rb_str_new(0, 0);
+    if (input->position >= input->size)
+        return Qnil;
+
+    const int remaining = input->size - input->position;
+    const int count = requested < remaining ? static_cast<int>(requested) : remaining;
+    VALUE data = rb_str_new(0, count);
+    const int read = gHost.file_read(gHost.context,
+                                     input->path,
+                                     input->position,
+                                     RSTRING_PTR(data),
+                                     count);
+    if (read < 0)
+        return RaiseResult("VFS read", read);
+    if (read == 0)
+        return Qnil;
+    input->position += read;
+    input->bufferStart = -1;
+    input->bufferLength = 0;
+    if (read != count)
+        rb_str_resize(data, read);
+    return data;
+}
+
+class TAnimationReader
+{
+public:
+    TAnimationReader(TAnimationArchive* archive, int position)
+        : iArchive(archive), iPosition(position), iBufferStart(-1), iBufferLength(0)
+    {
+    }
+
+    int Position() const
+    {
+        return iPosition;
+    }
+
+    int ReadByte(unsigned char& value)
+    {
+        if (!iArchive || iPosition < 0 || iPosition >= iArchive->size)
+            return -1;
+        if (iBufferStart < 0 || iPosition < iBufferStart ||
+            iPosition >= iBufferStart + iBufferLength)
+        {
+            if (Fill() != 0)
+                return -1;
+        }
+        value = iBuffer[iPosition - iBufferStart];
+        ++iPosition;
+        return 0;
+    }
+
+    int ReadRaw(void* output, int bytes)
+    {
+        if (bytes < 0 || !iArchive || iPosition < 0 ||
+            iPosition > iArchive->size || bytes > iArchive->size - iPosition)
+            return -1;
+        unsigned char* destination = static_cast<unsigned char*>(output);
+        int remaining = bytes;
+        while (remaining > 0)
+        {
+            if (iBufferStart < 0 || iPosition < iBufferStart ||
+                iPosition >= iBufferStart + iBufferLength)
+            {
+                if (Fill() != 0)
+                    return -1;
+            }
+            const int offset = iPosition - iBufferStart;
+            const int available = iBufferLength - offset;
+            const int count = remaining < available ? remaining : available;
+            if (destination)
+            {
+                memcpy(destination, iBuffer + offset, count);
+                destination += count;
+            }
+            iPosition += count;
+            remaining -= count;
+        }
+        return 0;
+    }
+
+    int Skip(int bytes)
+    {
+        if (bytes < 0 || !iArchive || iPosition < 0 ||
+            iPosition > iArchive->size || bytes > iArchive->size - iPosition)
+            return -1;
+        iPosition += bytes;
+        return 0;
+    }
+
+    int ReadLong(int& value)
+    {
+        unsigned char firstByte = 0;
+        if (ReadByte(firstByte) != 0)
+            return -1;
+        int first = static_cast<int>(firstByte);
+        if (first >= 128)
+            first -= 256;
+        if (first == 0)
+        {
+            value = 0;
+            return 0;
+        }
+        if (first > 4)
+        {
+            value = first - 5;
+            return 0;
+        }
+        if (first < -4)
+        {
+            value = first + 5;
+            return 0;
+        }
+        if (first > 0)
+        {
+            unsigned int raw = 0;
+            for (int index = 0; index < first; ++index)
+            {
+                unsigned char byte = 0;
+                if (ReadByte(byte) != 0)
+                    return -1;
+                raw |= static_cast<unsigned int>(byte) << (index * 8);
+            }
+            value = static_cast<int>(raw);
+            return 0;
+        }
+        const int length = -first;
+        unsigned int raw = 0xffffffffu;
+        for (int index = 0; index < length; ++index)
+        {
+            unsigned char byte = 0;
+            if (ReadByte(byte) != 0)
+                return -1;
+            const unsigned int shift = static_cast<unsigned int>(index * 8);
+            raw &= ~(0xffu << shift);
+            raw |= static_cast<unsigned int>(byte) << shift;
+        }
+        value = static_cast<int>(raw);
+        return 0;
+    }
+
+private:
+    int Fill()
+    {
+        if (!iArchive || !gHost.file_read || iPosition < 0 || iPosition >= iArchive->size)
+            return -1;
+        int count = iArchive->size - iPosition;
+        if (count > static_cast<int>(sizeof(iBuffer)))
+            count = static_cast<int>(sizeof(iBuffer));
+        const int read = gHost.file_read(gHost.context,
+                                         iArchive->path,
+                                         iPosition,
+                                         iBuffer,
+                                         count);
+        if (read != count)
+            return -1;
+        iBufferStart = iPosition;
+        iBufferLength = read;
+        return 0;
+    }
+
+private:
+    TAnimationArchive* iArchive;
+    int iPosition;
+    int iBufferStart;
+    int iBufferLength;
+    unsigned char iBuffer[4096];
+};
+
+struct TAnimationScanState
+{
+    int objectCount;
+};
+
+int AnimationAddSymbol(TAnimationArchive* archive, TAnimationReader& reader, int length)
+{
+    if (!archive || length < 0 || length > 4096)
+        return -1;
+    if (archive->symbolCount >= archive->symbolCapacity)
+    {
+        int capacity = archive->symbolCapacity == 0 ? 32 : archive->symbolCapacity * 2;
+        REALLOC_N(archive->symbols, TAnimationSymbol, capacity);
+        archive->symbolCapacity = capacity;
+    }
+    TAnimationSymbol& symbol = archive->symbols[archive->symbolCount];
+    symbol.name = ALLOC_N(char, length + 1);
+    symbol.length = length;
+    if (reader.ReadRaw(symbol.name, length) != 0)
+    {
+        ruby_xfree(symbol.name);
+        symbol.name = 0;
+        return -1;
+    }
+    symbol.name[length] = 0;
+    ++archive->symbolCount;
+    return archive->symbolCount - 1;
+}
+
+int AnimationReadSymbol(TAnimationArchive* archive, TAnimationReader& reader, int& symbolId)
+{
+    unsigned char marker = 0;
+    if (reader.ReadByte(marker) != 0)
+        return -1;
+    if (marker == ':')
+    {
+        int length = 0;
+        if (reader.ReadLong(length) != 0)
+            return -1;
+        symbolId = AnimationAddSymbol(archive, reader, length);
+        return symbolId >= 0 ? 0 : -1;
+    }
+    if (marker == ';')
+    {
+        if (reader.ReadLong(symbolId) != 0 || symbolId < 0 || symbolId >= archive->symbolCount)
+            return -1;
+        return 0;
+    }
+    return -1;
+}
+
+int AnimationScanObject(TAnimationArchive* archive,
+                        TAnimationReader& reader,
+                        TAnimationScanState& state);
+
+int AnimationScanIvars(TAnimationArchive* archive,
+                       TAnimationReader& reader,
+                       TAnimationScanState& state)
+{
+    int count = 0;
+    if (reader.ReadLong(count) != 0 || count < 0 || count > 100000)
+        return -1;
+    for (int index = 0; index < count; ++index)
+    {
+        if (AnimationScanObject(archive, reader, state) != 0 ||
+            AnimationScanObject(archive, reader, state) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+int AnimationScanSizedBytes(TAnimationReader& reader)
+{
+    int length = 0;
+    if (reader.ReadLong(length) != 0 || length < 0)
+        return -1;
+    return reader.Skip(length);
+}
+
+int AnimationScanArray(TAnimationArchive* archive,
+                       TAnimationReader& reader,
+                       TAnimationScanState& state)
+{
+    int count = 0;
+    if (reader.ReadLong(count) != 0 || count < 0 || count > 10000000)
+        return -1;
+    ++state.objectCount;
+    for (int index = 0; index < count; ++index)
+    {
+        if (AnimationScanObject(archive, reader, state) != 0)
+            return -1;
+    }
+    return 0;
+}
+
+int AnimationScanObject(TAnimationArchive* archive,
+                        TAnimationReader& reader,
+                        TAnimationScanState& state)
+{
+    unsigned char marker = 0;
+    if (reader.ReadByte(marker) != 0)
+        return -1;
+    switch (marker)
+    {
+    case '0':
+    case 'T':
+    case 'F':
+        return 0;
+    case 'i':
+    {
+        int value = 0;
+        return reader.ReadLong(value);
+    }
+    case ':':
+    {
+        int length = 0;
+        if (reader.ReadLong(length) != 0)
+            return -1;
+        return AnimationAddSymbol(archive, reader, length) >= 0 ? 0 : -1;
+    }
+    case ';':
+    {
+        int symbol = 0;
+        return reader.ReadLong(symbol) == 0 && symbol >= 0 && symbol < archive->symbolCount ? 0 : -1;
+    }
+    case '"':
+        ++state.objectCount;
+        return AnimationScanSizedBytes(reader);
+    case 'f':
+        if (AnimationScanSizedBytes(reader) != 0)
+            return -1;
+        ++state.objectCount;
+        return 0;
+    case '[':
+        return AnimationScanArray(archive, reader, state);
+    case '{':
+    case '}':
+    {
+        int count = 0;
+        if (reader.ReadLong(count) != 0 || count < 0 || count > 1000000)
+            return -1;
+        ++state.objectCount;
+        for (int index = 0; index < count; ++index)
+        {
+            if (AnimationScanObject(archive, reader, state) != 0 ||
+                AnimationScanObject(archive, reader, state) != 0)
+                return -1;
+        }
+        return marker == '}' ? AnimationScanObject(archive, reader, state) : 0;
+    }
+    case 'I':
+        if (AnimationScanObject(archive, reader, state) != 0)
+            return -1;
+        return AnimationScanIvars(archive, reader, state);
+    case 'C':
+    case 'e':
+    {
+        int symbol = 0;
+        if (AnimationReadSymbol(archive, reader, symbol) != 0)
+            return -1;
+        return AnimationScanObject(archive, reader, state);
+    }
+    case 'o':
+    {
+        ++state.objectCount;
+        int symbol = 0;
+        if (AnimationReadSymbol(archive, reader, symbol) != 0)
+            return -1;
+        return AnimationScanIvars(archive, reader, state);
+    }
+    case 'u':
+    {
+        int symbol = 0;
+        if (AnimationReadSymbol(archive, reader, symbol) != 0 ||
+            AnimationScanSizedBytes(reader) != 0)
+            return -1;
+        ++state.objectCount;
+        return 0;
+    }
+    case '@':
+    {
+        int link = 0;
+        return reader.ReadLong(link) == 0 && link >= 0 && link < state.objectCount ? 0 : -1;
+    }
+    case 'l':
+    {
+        unsigned char sign = 0;
+        int words = 0;
+        if (reader.ReadByte(sign) != 0 || (sign != '+' && sign != '-') ||
+            reader.ReadLong(words) != 0 || words < 0 || words > 0x3fffffff ||
+            reader.Skip(words * 2) != 0)
+            return -1;
+        ++state.objectCount;
+        return 0;
+    }
+    case '/':
+    {
+        if (AnimationScanSizedBytes(reader) != 0)
+            return -1;
+        unsigned char options = 0;
+        if (reader.ReadByte(options) != 0)
+            return -1;
+        ++state.objectCount;
+        return 0;
+    }
+    default:
+        return -1;
+    }
+}
+
+int AnimationIndexArchive(TAnimationArchive* archive)
+{
+    if (!archive || archive->size < 8)
+        return -1;
+    TAnimationReader reader(archive, 0);
+    unsigned char major = 0;
+    unsigned char minor = 0;
+    unsigned char marker = 0;
+    if (reader.ReadByte(major) != 0 || reader.ReadByte(minor) != 0 ||
+        major != 4 || minor > 8 || reader.ReadByte(marker) != 0 || marker != 'I' ||
+        reader.ReadByte(marker) != 0 || marker != 'C')
+        return -1;
+
+    int classSymbol = 0;
+    if (AnimationReadSymbol(archive, reader, classSymbol) != 0 ||
+        strcmp(archive->symbols[classSymbol].name, "PBAnimations") != 0 ||
+        reader.ReadByte(marker) != 0 || marker != '[')
+        return -1;
+
+    TAnimationScanState state;
+    state.objectCount = 1;
+    int baseCount = 0;
+    if (reader.ReadLong(baseCount) != 0 || baseCount < 0 || baseCount > 1000)
+        return -1;
+    for (int index = 0; index < baseCount; ++index)
+    {
+        if (AnimationScanObject(archive, reader, state) != 0)
+            return -1;
+    }
+
+    int ivarCount = 0;
+    if (reader.ReadLong(ivarCount) != 0 || ivarCount < 0 || ivarCount > 64)
+        return -1;
+    int foundArray = 0;
+    for (int ivar = 0; ivar < ivarCount; ++ivar)
+    {
+        int keySymbol = 0;
+        if (AnimationReadSymbol(archive, reader, keySymbol) != 0)
+            return -1;
+        const char* key = archive->symbols[keySymbol].name;
+        if (strcmp(key, "@array") != 0)
+        {
+            if (AnimationScanObject(archive, reader, state) != 0)
+                return -1;
+            continue;
+        }
+
+        if (reader.ReadByte(marker) != 0 || marker != '[')
+            return -1;
+        ++state.objectCount;
+        int count = 0;
+        if (reader.ReadLong(count) != 0 || count <= 0 || count > 100000)
+            return -1;
+        archive->entries = ALLOC_N(TAnimationEntry, count);
+        archive->entryCount = count;
+        for (int index = 0; index < count; ++index)
+        {
+            TAnimationEntry& entry = archive->entries[index];
+            entry.offset = reader.Position();
+            entry.objectBase = state.objectCount;
+            entry.symbolBase = archive->symbolCount;
+            if (AnimationScanObject(archive, reader, state) != 0)
+                return -1;
+            entry.objectCount = state.objectCount - entry.objectBase;
+            if (entry.objectCount <= 0)
+                return -1;
+        }
+        foundArray = 1;
+    }
+    return foundArray ? 0 : -1;
+}
+
+void AnimationArchiveFree(void* memory)
+{
+    TAnimationArchive* archive = static_cast<TAnimationArchive*>(memory);
+    if (!archive)
+        return;
+    if (archive->symbols)
+    {
+        for (int index = 0; index < archive->symbolCount; ++index)
+            ruby_xfree(archive->symbols[index].name);
+        ruby_xfree(archive->symbols);
+    }
+    ruby_xfree(archive->entries);
+    ruby_xfree(archive->path);
+    ruby_xfree(archive);
+}
+
+TAnimationArchive* AnimationArchive(VALUE self)
+{
+    TAnimationArchive* archive = 0;
+    Data_Get_Struct(self, TAnimationArchive, archive);
+    if (!archive)
+        rb_raise(rb_eRuntimeError, "invalid animation archive");
+    return archive;
+}
+
+struct TAnimationDecodeState
+{
+    TAnimationArchive* archive;
+    TAnimationReader* reader;
+    int objectBase;
+    int nextSymbol;
+    VALUE objects;
+};
+
+int AnimationDecodeSymbol(TAnimationDecodeState& state)
+{
+    unsigned char marker = 0;
+    if (state.reader->ReadByte(marker) != 0)
+        rb_raise(rb_eArgError, "invalid animation symbol");
+    if (marker == ':')
+    {
+        int length = 0;
+        if (state.reader->ReadLong(length) != 0 || length < 0 ||
+            state.nextSymbol < 0 || state.nextSymbol >= state.archive->symbolCount ||
+            length != state.archive->symbols[state.nextSymbol].length ||
+            state.reader->Skip(length) != 0)
+            rb_raise(rb_eArgError, "invalid animation symbol definition");
+        return state.nextSymbol++;
+    }
+    if (marker == ';')
+    {
+        int symbol = 0;
+        if (state.reader->ReadLong(symbol) != 0 || symbol < 0 || symbol >= state.archive->symbolCount)
+            rb_raise(rb_eArgError, "invalid animation symbol link");
+        return symbol;
+    }
+    rb_raise(rb_eArgError, "invalid animation symbol marker");
+    return -1;
+}
+
+VALUE AnimationDecodeObject(TAnimationDecodeState& state);
+
+VALUE AnimationDecodeRawString(TAnimationDecodeState& state)
+{
+    int length = 0;
+    if (state.reader->ReadLong(length) != 0 || length < 0 || length > state.archive->size)
+        rb_raise(rb_eArgError, "invalid animation string");
+    VALUE string = rb_str_new(0, length);
+    if (length > 0 && state.reader->ReadRaw(RSTRING_PTR(string), length) != 0)
+        rb_raise(rb_eArgError, "truncated animation string");
+    return string;
+}
+
+double AnimationLoadMantissa(double value, const char* buffer, long length)
+{
+    if (length <= 0)
+        return value;
+    --length;
+    if (length <= 0 || *buffer++ != 0)
+        return value;
+
+    int exponent = 0;
+    const int negative = value < 0.0;
+    int digit = 0;
+    double integerPart = 0.0;
+    modf(ldexp(frexp(fabs(value), &exponent), 37), &integerPart);
+    value = integerPart;
+    do
+    {
+        unsigned long mantissa = 0;
+        switch (length)
+        {
+        default: mantissa = static_cast<unsigned char>(*buffer++);
+        case 3: mantissa = (mantissa << 8) | static_cast<unsigned char>(*buffer++);
+        case 2: mantissa = (mantissa << 8) | static_cast<unsigned char>(*buffer++);
+        case 1: mantissa = (mantissa << 8) | static_cast<unsigned char>(*buffer++);
+        }
+        digit -= length < 4 ? static_cast<int>(8 * length) : 32;
+        value += ldexp(static_cast<double>(mantissa), digit);
+    } while ((length -= 4) > 0);
+    value = ldexp(value, exponent - 37);
+    return negative ? -value : value;
+}
+
+void AnimationRegisterObject(TAnimationDecodeState& state, VALUE object)
+{
+    rb_ary_push(state.objects, object);
+}
+
+void AnimationDecodeIvars(TAnimationDecodeState& state, VALUE object)
+{
+    int count = 0;
+    if (state.reader->ReadLong(count) != 0 || count < 0 || count > 100000)
+        rb_raise(rb_eArgError, "invalid animation ivars");
+    for (int index = 0; index < count; ++index)
+    {
+        const int keySymbol = AnimationDecodeSymbol(state);
+        VALUE value = AnimationDecodeObject(state);
+        const TAnimationSymbol& key = state.archive->symbols[keySymbol];
+        if (key.length > 1 && key.name[0] == '@')
+        {
+            rb_ivar_set(object, rb_intern(key.name), value);
+            continue;
+        }
+#ifdef EASYRPG_RUBY300
+        if (RB_TYPE_P(object, T_STRING) && key.length == 1 && key.name[0] == 'E')
+        {
+            if (value == Qtrue)
+                rb_enc_associate(object, rb_utf8_encoding());
+            else if (value == Qfalse)
+                rb_enc_associate(object, rb_usascii_encoding());
+        }
+#endif
+    }
+}
+
+VALUE AnimationDecodeArray(TAnimationDecodeState& state, VALUE klass)
+{
+    int count = 0;
+    if (state.reader->ReadLong(count) != 0 || count < 0 || count > 10000000)
+        rb_raise(rb_eArgError, "invalid animation array");
+    VALUE array = NIL_P(klass) ? rb_ary_new2(count) : rb_obj_alloc(klass);
+    AnimationRegisterObject(state, array);
+    for (int index = 0; index < count; ++index)
+        rb_ary_push(array, AnimationDecodeObject(state));
+    return array;
+}
+
+VALUE AnimationDecodeObject(TAnimationDecodeState& state)
+{
+    unsigned char marker = 0;
+    if (state.reader->ReadByte(marker) != 0)
+        rb_raise(rb_eArgError, "truncated animation object");
+    switch (marker)
+    {
+    case '0': return Qnil;
+    case 'T': return Qtrue;
+    case 'F': return Qfalse;
+    case 'i':
+    {
+        int value = 0;
+        if (state.reader->ReadLong(value) != 0)
+            rb_raise(rb_eArgError, "invalid animation integer");
+        return INT2NUM(value);
+    }
+    case ':':
+    {
+        int length = 0;
+        if (state.reader->ReadLong(length) != 0 || length < 0 ||
+            state.nextSymbol < 0 || state.nextSymbol >= state.archive->symbolCount ||
+            length != state.archive->symbols[state.nextSymbol].length ||
+            state.reader->Skip(length) != 0)
+            rb_raise(rb_eArgError, "invalid animation symbol definition");
+        const TAnimationSymbol& name = state.archive->symbols[state.nextSymbol++];
+        return ID2SYM(rb_intern(name.name));
+    }
+    case ';':
+    {
+        int symbol = 0;
+        if (state.reader->ReadLong(symbol) != 0 || symbol < 0 || symbol >= state.archive->symbolCount)
+            rb_raise(rb_eArgError, "invalid animation symbol link");
+        return ID2SYM(rb_intern(state.archive->symbols[symbol].name));
+    }
+    case '"':
+    {
+        VALUE string = AnimationDecodeRawString(state);
+        AnimationRegisterObject(state, string);
+        return string;
+    }
+    case 'f':
+    {
+        VALUE text = AnimationDecodeRawString(state);
+        char* end = 0;
+        double value = strtod(RSTRING_PTR(text), &end);
+        value = AnimationLoadMantissa(value,
+                                      end,
+                                      RSTRING_LEN(text) - static_cast<long>(end - RSTRING_PTR(text)));
+        VALUE number = rb_float_new(value);
+        AnimationRegisterObject(state, number);
+        return number;
+    }
+    case '[':
+        return AnimationDecodeArray(state, Qnil);
+    case 'I':
+    {
+        VALUE object = AnimationDecodeObject(state);
+        AnimationDecodeIvars(state, object);
+        return object;
+    }
+    case 'C':
+    {
+        const int classSymbol = AnimationDecodeSymbol(state);
+        const TAnimationSymbol& className = state.archive->symbols[classSymbol];
+        VALUE klass = rb_path2class(className.name);
+        if (state.reader->ReadByte(marker) != 0 || marker != '[')
+            rb_raise(rb_eArgError, "unsupported animation user class");
+        return AnimationDecodeArray(state, klass);
+    }
+    case 'o':
+    {
+        const int classSymbol = AnimationDecodeSymbol(state);
+        VALUE klass = rb_path2class(state.archive->symbols[classSymbol].name);
+        VALUE object = rb_obj_alloc(klass);
+        AnimationRegisterObject(state, object);
+        AnimationDecodeIvars(state, object);
+        return object;
+    }
+    case 'u':
+    {
+        const int classSymbol = AnimationDecodeSymbol(state);
+        VALUE klass = rb_path2class(state.archive->symbols[classSymbol].name);
+        VALUE data = AnimationDecodeRawString(state);
+        VALUE object = rb_funcall(klass, rb_intern("_load"), 1, data);
+        AnimationRegisterObject(state, object);
+        return object;
+    }
+    case '@':
+    {
+        int link = 0;
+        if (state.reader->ReadLong(link) != 0)
+            rb_raise(rb_eArgError, "invalid animation object link");
+        const int local = link - state.objectBase;
+        if (local < 0 || local >= RARRAY_LEN(state.objects))
+            rb_raise(rb_eArgError, "external animation object link");
+        return rb_ary_entry(state.objects, local);
+    }
+    default:
+        rb_raise(rb_eArgError, "unsupported animation marshal type 0x%02x", marker);
+        return Qnil;
+    }
+}
+
+VALUE AnimationDecodeEntry(TAnimationArchive* archive, int index)
+{
+    if (!archive || index < 0 || index >= archive->entryCount)
+        return Qnil;
+    const TAnimationEntry& entry = archive->entries[index];
+    TAnimationReader reader(archive, entry.offset);
+    TAnimationDecodeState state;
+    state.archive = archive;
+    state.reader = &reader;
+    state.objectBase = entry.objectBase;
+    state.nextSymbol = entry.symbolBase;
+    state.objects = rb_ary_new2(entry.objectCount);
+    VALUE object = AnimationDecodeObject(state);
+    if (RARRAY_LEN(state.objects) != entry.objectCount)
+        rb_raise(rb_eArgError, "animation object index mismatch");
+    return object;
+}
+
+VALUE NAnimationArchiveCreate(VALUE, VALUE path)
+{
+    StringValue(path);
+    const char* relative = RSTRING_PTR(path);
+    const int size = gHost.file_size(gHost.context, relative);
+    if (size < 0)
+        return RaiseResult("animation archive", size);
+    TAnimationArchive* archive = ALLOC(TAnimationArchive);
+    memset(archive, 0, sizeof(TAnimationArchive));
+    const int pathLength = RSTRING_LEN(path);
+    archive->path = ALLOC_N(char, pathLength + 1);
+    memcpy(archive->path, relative, pathLength);
+    archive->path[pathLength] = 0;
+    archive->size = size;
+    if (AnimationIndexArchive(archive) != 0)
+    {
+        AnimationArchiveFree(archive);
+        rb_raise(rb_eArgError, "unsupported PkmnAnimations archive");
+    }
+    return Data_Wrap_Struct(gAnimationArchiveClass, 0, AnimationArchiveFree, archive);
+}
+
+VALUE NAnimationArchiveLength(VALUE self)
+{
+    return INT2NUM(AnimationArchive(self)->entryCount);
+}
+
+VALUE NAnimationArchiveGet(VALUE self, VALUE indexValue)
+{
+    TAnimationArchive* archive = AnimationArchive(self);
+    int index = NUM2INT(indexValue);
+    if (index < 0)
+        index += archive->entryCount;
+    return AnimationDecodeEntry(archive, index);
+}
+
+VALUE NAnimationArchiveEach(VALUE self)
+{
+    TAnimationArchive* archive = AnimationArchive(self);
+    for (int index = 0; index < archive->entryCount; ++index)
+        rb_yield(AnimationDecodeEntry(archive, index));
+    return self;
+}
+
+VALUE NAnimationArchiveSelected(VALUE self)
+{
+    return INT2NUM(AnimationArchive(self)->selected);
+}
+
+VALUE NAnimationArchiveSetSelected(VALUE self, VALUE value)
+{
+    AnimationArchive(self)->selected = NUM2INT(value);
+    return value;
 }
 
 int DecodeText(VALUE text, unsigned int*& codepoints)
@@ -937,14 +1918,45 @@ VALUE NAudioCommand(VALUE, VALUE command, VALUE path, VALUE volume, VALUE pitch,
 
 void DefineNativeMethod(const char* name, VALUE (*method)(ANYARGS), int arity)
 {
+#ifdef EASYRPG_RUBY300
+    switch (arity)
+    {
+    case -1: rb_define_module_function(gNativeModule, name, method, -1); break;
+    case 0: rb_define_module_function(gNativeModule, name, method, 0); break;
+    case 1: rb_define_module_function(gNativeModule, name, method, 1); break;
+    case 2: rb_define_module_function(gNativeModule, name, method, 2); break;
+    case 3: rb_define_module_function(gNativeModule, name, method, 3); break;
+    case 4: rb_define_module_function(gNativeModule, name, method, 4); break;
+    case 5: rb_define_module_function(gNativeModule, name, method, 5); break;
+    default: rb_raise(rb_eArgError, "unsupported native arity");
+    }
+#else
     rb_define_module_function(gNativeModule, name, method, arity);
+#endif
 }
 
 void BindNative()
 {
     gNativeModule = rb_define_module("EasyRPGNative");
     gHandleClass = rb_define_class_under(gNativeModule, "Handle", rb_cObject);
+    gVfsInputClass = rb_define_class_under(gNativeModule, "VfsInput", rb_cObject);
+    gAnimationArchiveClass = rb_define_class_under(gNativeModule, "AnimationArchive", rb_cObject);
+    rb_define_method(gVfsInputClass, "binmode", RUBY_METHOD_FUNC(NVfsInputBinmode), 0);
+    rb_define_method(gVfsInputClass, "getbyte", RUBY_METHOD_FUNC(NVfsInputGetbyte), 0);
+    rb_define_method(gVfsInputClass, "read", RUBY_METHOD_FUNC(NVfsInputRead), -1);
+    rb_define_method(gAnimationArchiveClass, "length", RUBY_METHOD_FUNC(NAnimationArchiveLength), 0);
+    rb_define_method(gAnimationArchiveClass, "size", RUBY_METHOD_FUNC(NAnimationArchiveLength), 0);
+    rb_define_method(gAnimationArchiveClass, "[]", RUBY_METHOD_FUNC(NAnimationArchiveGet), 1);
+    rb_define_method(gAnimationArchiveClass, "each", RUBY_METHOD_FUNC(NAnimationArchiveEach), 0);
+    rb_define_method(gAnimationArchiveClass, "selected", RUBY_METHOD_FUNC(NAnimationArchiveSelected), 0);
+    rb_define_method(gAnimationArchiveClass, "selected=", RUBY_METHOD_FUNC(NAnimationArchiveSetSelected), 1);
 
+    DefineNativeMethod("vfs_input", RUBY_METHOD_FUNC(NVfsInputCreate), 1);
+    DefineNativeMethod("animation_archive", RUBY_METHOD_FUNC(NAnimationArchiveCreate), 1);
+#ifdef EASYRPG_RUBY300
+    DefineNativeMethod("load_deferred_battle", RUBY_METHOD_FUNC(NLoadDeferredBattle), 0);
+    DefineNativeMethod("load_deferred_optional", RUBY_METHOD_FUNC(NLoadDeferredOptional), 0);
+#endif
     DefineNativeMethod("handle_dispose", RUBY_METHOD_FUNC(NHandleDispose), 1);
     DefineNativeMethod("handle_disposed", RUBY_METHOD_FUNC(NHandleDisposed), 1);
     DefineNativeMethod("graphics_update", RUBY_METHOD_FUNC(NGraphicsUpdate), 0);
@@ -959,6 +1971,9 @@ void BindNative()
     DefineNativeMethod("input_press", RUBY_METHOD_FUNC(NInputPress), 1);
     DefineNativeMethod("input_trigger", RUBY_METHOD_FUNC(NInputTrigger), 1);
     DefineNativeMethod("input_repeat", RUBY_METHOD_FUNC(NInputRepeat), 1);
+    DefineNativeMethod("system_delta", RUBY_METHOD_FUNC(NSystemDelta), 0);
+    DefineNativeMethod("zlib_inflate", RUBY_METHOD_FUNC(NZlibInflate), 1);
+    DefineNativeMethod("zlib_deflate", RUBY_METHOD_FUNC(NZlibDeflate), 1);
     DefineNativeMethod("file_size", RUBY_METHOD_FUNC(NFileSize), 1);
     DefineNativeMethod("file_read", RUBY_METHOD_FUNC(NFileRead), 1);
     DefineNativeMethod("bitmap_create", RUBY_METHOD_FUNC(NBitmapCreate), 2);
@@ -1025,11 +2040,46 @@ void BindNative()
     DefineNativeMethod("audio_command", RUBY_METHOD_FUNC(NAudioCommand), 5);
 }
 
-int EvalProtected(const char* source)
+int EvalProtected(const char* source, int scriptIndex)
 {
     int state = 0;
     rb_eval_string_protect(source, &state);
-    return state == 0 ? ERgssVmOk : ERgssVmErrorScript;
+    if (state == 0)
+        return ERgssVmOk;
+#ifdef EASYRPG_RUBY300
+    VALUE error = rb_errinfo();
+#else
+    VALUE error = ruby_errinfo;
+#endif
+    gLastErrorScript = scriptIndex;
+    if (!NIL_P(error))
+    {
+        VALUE message = rb_obj_as_string(error);
+        const char* klass = rb_obj_classname(error);
+        const char* text = StringValuePtr(message);
+        snprintf(gLastError, sizeof(gLastError), "%s: %s", klass ? klass : "Exception", text ? text : "");
+        gLastError[sizeof(gLastError) - 1] = 0;
+#ifdef EASYRPG_RUBY300
+        VALUE backtrace = rb_funcall(error, rb_intern("backtrace"), 0);
+        if (RB_TYPE_P(backtrace, T_ARRAY) && RARRAY_LEN(backtrace) > 0)
+        {
+            VALUE line = rb_ary_entry(backtrace, 0);
+            StringValue(line);
+            const size_t used = strlen(gLastError);
+            if (used + 2 < sizeof(gLastError))
+            {
+                snprintf(gLastError + used, sizeof(gLastError) - used, "\n%s", RSTRING_PTR(line));
+                gLastError[sizeof(gLastError) - 1] = 0;
+            }
+        }
+#endif
+    }
+    else
+    {
+        strncpy(gLastError, "Ruby script error", sizeof(gLastError) - 1);
+        gLastError[sizeof(gLastError) - 1] = 0;
+    }
+    return ERgssVmErrorScript;
 }
 }
 
@@ -1054,16 +2104,167 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
     ResetHost();
     gHost = *host;
     gVersion = version;
+    RUBY_INIT_STACK;
     ruby_init();
+#ifdef EASYRPG_RUBY300
+    rb_define_const(rb_cEncoding, "ASCII_8BIT", rb_enc_from_encoding(rb_ascii8bit_encoding()));
+    rb_define_const(rb_cEncoding, "UTF_8", rb_enc_from_encoding(rb_utf8_encoding()));
+    rb_define_const(rb_cEncoding, "US_ASCII", rb_enc_from_encoding(rb_usascii_encoding()));
+    rb_enc_alias("BINARY", "ASCII-8BIT");
+    rb_enc_alias("ASCII", "US-ASCII");
+    rb_call_builtin_inits();
+#endif
     BindNative();
-    const int bootstrapResult = EvalProtected(KEasyRpgRgssBootstrap);
-    if (bootstrapResult != ERgssVmOk)
+    const char* bootstrapChunks[] = {
+        KEasyRpgRgssBootstrapCore,
+        KEasyRpgRgssBootstrapGraphics,
+        KEasyRpgRgssBootstrapWindow,
+        KEasyRpgRgssBootstrapRuntime
+    };
+    for (int index = 0; index < 4; ++index)
     {
-        ResetHost();
-        return bootstrapResult;
+        const int bootstrapResult = EvalProtected(bootstrapChunks[index], -1);
+        if (bootstrapResult != ERgssVmOk)
+        {
+            ResetHost();
+            return bootstrapResult;
+        }
     }
     gInitialized = 1;
     return ERgssVmOk;
+}
+
+namespace
+{
+#ifdef EASYRPG_RUBY300
+int ModernScriptName(int index, char* name, int capacity)
+{
+    int id = 0;
+    int length = 0;
+    if (!name || capacity <= 1 ||
+        gHost.script_info(gHost.context, index, &id, &length) != ERgssVmOk ||
+        length <= 0 || length >= capacity)
+        return 0;
+    const int read = gHost.script_name(gHost.context, index, name, length);
+    if (read != length)
+        return 0;
+    name[length] = 0;
+    return 1;
+}
+
+int SkipModernReleaseScript(int index)
+{
+    char name[64];
+    if (!ModernScriptName(index, name, sizeof(name)))
+        return 0;
+    return strncmp(name, "Editor", 6) == 0 ||
+           strncmp(name, "AnimEditor_", 11) == 0 ||
+           strncmp(name, "Debug_", 6) == 0 ||
+           strcmp(name, "Compiler") == 0 ||
+           strncmp(name, "Compiler_", 9) == 0;
+}
+
+int DeferModernBattleScript(int index)
+{
+    char name[64];
+    if (!ModernScriptName(index, name, sizeof(name)))
+        return 0;
+    return strcmp(name, "PBEffects") == 0 ||
+           strncmp(name, "BattleHandlers", 14) == 0 ||
+           strncmp(name, "BallHandlers_", 13) == 0 ||
+           strncmp(name, "PokeBattle_", 11) == 0 ||
+           strncmp(name, "Battler_", 8) == 0 ||
+           strncmp(name, "Move_Usage", 10) == 0 ||
+           strncmp(name, "Move_Effects_", 13) == 0 ||
+           strncmp(name, "Battle_", 7) == 0 ||
+           strncmp(name, "AI_", 3) == 0 ||
+           strcmp(name, "Scene_Initialize") == 0 ||
+           strcmp(name, "Scene_Commands") == 0 ||
+           strcmp(name, "Scene_Animations") == 0 ||
+           strcmp(name, "ShadowPokemon_Other") == 0;
+}
+
+int DeferModernOptionalScript(int index)
+{
+    char name[64];
+    if (!ModernScriptName(index, name, sizeof(name)))
+        return 0;
+    if (strncmp(name, "UI_", 3) == 0 &&
+        strcmp(name, "UI_Load") != 0 &&
+        strcmp(name, "UI_Options") != 0 &&
+        strcmp(name, "UI_SplashesAndTitleScreen") != 0 &&
+        strcmp(name, "UI_Controls") != 0)
+        return 1;
+    return strncmp(name, "UI_EggHatching", 15) == 0 ||
+           strncmp(name, "UI_Evolution", 12) == 0 ||
+           strncmp(name, "UI_Trading", 10) == 0 ||
+           strncmp(name, "UI_HallOfFame", 13) == 0 ||
+           strncmp(name, "UI_Credits", 10) == 0 ||
+           strncmp(name, "Minigame_", 9) == 0 ||
+           strcmp(name, "SafariZone") == 0 ||
+           strcmp(name, "BugContest") == 0 ||
+           strncmp(name, "Challenge_", 10) == 0 ||
+           strcmp(name, "UI_BattleSwap") == 0 ||
+           strncmp(name, "ChallengeGenerator_", 19) == 0;
+}
+
+int EvalScriptIndex(int index)
+{
+    unsigned char* source = 0;
+    int sourceLength = 0;
+    const int inflateResult = gHost.script_inflate(gHost.context,
+                                                   index,
+                                                   &source,
+                                                   &sourceLength);
+    if (inflateResult != ERgssVmOk || !source || sourceLength < 0)
+        return ERgssVmErrorScript;
+    const int evalResult = EvalProtected(reinterpret_cast<const char*>(source), index);
+    gHost.release(gHost.context, source);
+    return evalResult;
+}
+
+VALUE NLoadDeferredBattle(VALUE)
+{
+    if (gDeferredBattleLoaded)
+        return Qtrue;
+    if (gDeferredBattleLoading)
+        return Qfalse;
+    gDeferredBattleLoading = 1;
+    for (int index = 0; index < gDeferredBattleScriptCount; ++index)
+    {
+        const int result = EvalScriptIndex(gDeferredBattleScripts[index]);
+        if (result != ERgssVmOk)
+        {
+            gDeferredBattleLoading = 0;
+            rb_raise(rb_eRuntimeError, "%s", gLastError[0] ? gLastError : "deferred battle load failed");
+        }
+    }
+    gDeferredBattleLoaded = 1;
+    gDeferredBattleLoading = 0;
+    return Qtrue;
+}
+
+VALUE NLoadDeferredOptional(VALUE)
+{
+    if (gDeferredOptionalLoaded)
+        return Qtrue;
+    if (gDeferredOptionalLoading)
+        return Qfalse;
+    gDeferredOptionalLoading = 1;
+    for (int index = 0; index < gDeferredOptionalScriptCount; ++index)
+    {
+        const int result = EvalScriptIndex(gDeferredOptionalScripts[index]);
+        if (result != ERgssVmOk)
+        {
+            gDeferredOptionalLoading = 0;
+            rb_raise(rb_eRuntimeError, "%s", gLastError[0] ? gLastError : "deferred optional load failed");
+        }
+    }
+    gDeferredOptionalLoaded = 1;
+    gDeferredOptionalLoading = 0;
+    return Qtrue;
+}
+#endif
 }
 
 extern "C" int EasyRpgRgssVmLoadScripts(const char*)
@@ -1076,6 +2277,25 @@ extern "C" int EasyRpgRgssVmLoadScripts(const char*)
 
     for (int index = 0; index < count; ++index)
     {
+#ifdef EASYRPG_RUBY300
+        if (SkipModernReleaseScript(index))
+            continue;
+        if (DeferModernBattleScript(index))
+        {
+            if (gDeferredBattleScriptCount >= static_cast<int>(sizeof(gDeferredBattleScripts) / sizeof(gDeferredBattleScripts[0])))
+                return ERgssVmErrorScript;
+            gDeferredBattleScripts[gDeferredBattleScriptCount++] = index;
+            continue;
+        }
+        if (DeferModernOptionalScript(index))
+        {
+            if (gDeferredOptionalScriptCount >= static_cast<int>(sizeof(gDeferredOptionalScripts) / sizeof(gDeferredOptionalScripts[0])))
+                return ERgssVmErrorScript;
+            gDeferredOptionalScripts[gDeferredOptionalScriptCount++] = index;
+            continue;
+        }
+        const int evalResult = EvalScriptIndex(index);
+#else
         unsigned char* source = 0;
         int sourceLength = 0;
         const int inflateResult = gHost.script_inflate(gHost.context,
@@ -1084,11 +2304,42 @@ extern "C" int EasyRpgRgssVmLoadScripts(const char*)
                                                        &sourceLength);
         if (inflateResult != ERgssVmOk || !source || sourceLength < 0)
             return ERgssVmErrorScript;
-        const int evalResult = EvalProtected(reinterpret_cast<const char*>(source));
+        const int evalResult = EvalProtected(reinterpret_cast<const char*>(source), index);
         gHost.release(gHost.context, source);
+#endif
         if (evalResult != ERgssVmOk)
             return evalResult;
     }
+#ifdef EASYRPG_RUBY300
+    if (gDeferredBattleScriptCount > 0)
+    {
+        const char* hook =
+            "class Object\n"
+            "  if private_method_defined?(:pbWildBattleCore) && !private_method_defined?(:__easyrpg_pbWildBattleCore)\n"
+            "    alias_method :__easyrpg_pbWildBattleCore, :pbWildBattleCore\n"
+            "    def pbWildBattleCore(*args); EasyRPGNative.load_deferred_battle; __easyrpg_pbWildBattleCore(*args); end\n"
+            "    private :pbWildBattleCore, :__easyrpg_pbWildBattleCore\n"
+            "  end\n"
+            "  if private_method_defined?(:pbTrainerBattleCore) && !private_method_defined?(:__easyrpg_pbTrainerBattleCore)\n"
+            "    alias_method :__easyrpg_pbTrainerBattleCore, :pbTrainerBattleCore\n"
+            "    def pbTrainerBattleCore(*args); EasyRPGNative.load_deferred_battle; __easyrpg_pbTrainerBattleCore(*args); end\n"
+            "    private :pbTrainerBattleCore, :__easyrpg_pbTrainerBattleCore\n"
+            "  end\n"
+            "end\n"
+            "if defined?(PluginManager)\n"
+            "  class << PluginManager\n"
+            "    if method_defined?(:runPlugins) && !method_defined?(:__easyrpg_runPlugins)\n"
+            "      alias_method :__easyrpg_runPlugins, :runPlugins\n"
+            "      def runPlugins; result=__easyrpg_runPlugins; GC.start; result; end\n"
+            "    end\n"
+            "  end\n"
+            "end\n"
+            "end\n";
+        const int hookResult = EvalProtected(hook, -2);
+        if (hookResult != ERgssVmOk)
+            return hookResult;
+    }
+#endif
     return ERgssVmOk;
 }
 
@@ -1108,6 +2359,19 @@ extern "C" int EasyRpgRgssVmCollect(void)
 extern "C" int EasyRpgRgssVmHeapBytes(void)
 {
     return gInitialized ? 0 : ERgssVmErrorNotInitialized;
+}
+
+extern "C" int EasyRpgRgssVmLastError(char* buffer, int capacity, int* script_index)
+{
+    if (!buffer || capacity <= 0 || !script_index)
+        return ERgssVmErrorInvalidArgument;
+    *script_index = gLastErrorScript;
+    const int length = static_cast<int>(strlen(gLastError));
+    const int copyLength = length < capacity - 1 ? length : capacity - 1;
+    if (copyLength > 0)
+        memcpy(buffer, gLastError, copyLength);
+    buffer[copyLength] = 0;
+    return copyLength;
 }
 
 extern "C" void EasyRpgRgssVmShutdown(void)

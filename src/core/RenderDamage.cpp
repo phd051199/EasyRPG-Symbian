@@ -11,7 +11,7 @@ enum TPhase {
 
 const int KCommandCapacity = 2048;
 const int KDirtyCapacity = 16;
-const int KMaximumDirtyRegions = 2;
+const int KMaximumDirtyRegions = 1;
 const int KFullRedrawAreaPercent = 88;
 const int KDirtyRegionFixedCostDivisor = 6;
 const int KCommandResyncLookahead = 8;
@@ -33,6 +33,8 @@ bool gOverflow = false;
 bool gFullDependency = false;
 bool gDamageValid = false;
 bool gFullFrameRequested = false;
+int gScrollX = 0;
+int gScrollY = 0;
 Rect gFrameRect;
 Rect gPaintRect;
 Rect gDirty[KDirtyCapacity];
@@ -129,6 +131,10 @@ int DirtyArea() {
     return area;
 }
 
+bool HasScroll() {
+    return gScrollX != 0 || gScrollY != 0;
+}
+
 void OptimizeDirty() {
     if (gDirtyCount <= 0)
         return;
@@ -188,6 +194,8 @@ void Reset() {
     gFullDependency = false;
     gDamageValid = false;
     gFullFrameRequested = false;
+    gScrollX = 0;
+    gScrollY = 0;
     gDirtyCount = 0;
     gPaintRegion = -1;
     gFrameRect = Rect();
@@ -203,6 +211,8 @@ void ForceFullFrame(int aWidth, int aHeight) {
     gOverflow = false;
     gFullDependency = false;
     gFullFrameRequested = false;
+    gScrollX = 0;
+    gScrollY = 0;
     gFrameRect = Rect(0, 0, aWidth, aHeight);
     gPaintRect = gFrameRect;
     gPaintClipRect = nullptr;
@@ -212,10 +222,30 @@ void ForceFullFrame(int aWidth, int aHeight) {
 
 void RequestFullFrame() {
     gFullFrameRequested = true;
+    gScrollX = 0;
+    gScrollY = 0;
 }
 
 bool FullFrameRequested() {
     return gFullFrameRequested;
+}
+
+void RequestScroll(int aShiftX, int aShiftY) {
+    if (gFullFrameRequested)
+        return;
+    gScrollX += aShiftX;
+    gScrollY += aShiftY;
+}
+
+bool PendingScroll(int& aShiftX, int& aShiftY) {
+    aShiftX = gScrollX;
+    aShiftY = gScrollY;
+    return HasScroll();
+}
+
+void DiscardScroll() {
+    gScrollX = 0;
+    gScrollY = 0;
 }
 
 void BeginRecord(int aWidth, int aHeight) {
@@ -239,6 +269,8 @@ void BeginFullPaintRecord(int aWidth, int aHeight) {
     gFullDependency = false;
     gDamageValid = false;
     gFullFrameRequested = false;
+    gScrollX = 0;
+    gScrollY = 0;
     gFrameRect = Rect(0, 0, aWidth, aHeight);
     gPaintRect = gFrameRect;
     gPaintClipRect = nullptr;

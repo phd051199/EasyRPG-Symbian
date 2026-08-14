@@ -779,6 +779,13 @@ protected:
 	int symbian_pitch = 0;
 	int symbian_bpp = 0;
 	void* symbian_pixels = nullptr;
+	mutable uint32_t symbian_span_revision = 0;
+	mutable bool symbian_spans_usable = false;
+	mutable std::vector<int> symbian_span_offsets;
+	mutable std::vector<int> symbian_spans;
+	bool EnsureSymbianOpaqueSpans() const;
+	bool SymbianBlitA1555Spans565(int x, int y, Bitmap const& src,
+		const Rect& src_rect, Rect& written);
 #endif
 };
 

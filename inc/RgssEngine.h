@@ -19,6 +19,7 @@ public:
     static CRgssEngine* NewL();
     ~CRgssEngine();
 
+    void StartL();
     void RunL();
     void HandleWindowEvent(const TWsEvent& aEvent);
     void FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame);
@@ -53,6 +54,7 @@ private:
     TInt iFrameError;
     TBool iForeground;
     TBool iDirectScreenActive;
+    TBool iPresentedFrame;
 };
 
 #endif

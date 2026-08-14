@@ -280,6 +280,7 @@ async function main() {
         appExit: null,
         redrawFps: 0,
         guestLog: null,
+        guestFs: null,
         screenshot: null,
         success: false
     };
@@ -289,6 +290,10 @@ async function main() {
         consoleLines.push(value);
         if (echo) process.stdout.write(`${value}\n`);
     };
+
+    let crashed = false;
+    let monitorGuestFatal = false;
+    let guestFatal = '';
 
     try {
         await waitHttp(`http://127.0.0.1:${port}/json/version`, 15000);
@@ -306,9 +311,6 @@ async function main() {
             cdp.call('Inspector.enable')
         ]);
 
-        let crashed = false;
-        let monitorGuestFatal = false;
-        let guestFatal = '';
         cdp.on('Runtime.consoleAPICalled', params => {
             const text = params.args.map(remoteText).join(' ');
             pushLog(`console.${params.type}: ${text}`, false);
@@ -626,6 +628,8 @@ async function main() {
                 }
                 await sleep(100);
             }
+            if (!handoffExitKey)
+                throw new Error(`Runtime handoff did not complete within ${options.launchTimeout}s`);
         }
         if (options.enterGame && !options.noStartGame) {
             await sleep(2000);
@@ -692,6 +696,21 @@ async function main() {
         const sampleEnd = Date.now();
         const redrawEnd = await evaluate('EKA2L1.redrawCount ? EKA2L1.redrawCount() : 0');
         result.redrawFps = (redrawEnd - redrawStart) * 1000 / Math.max(1, sampleEnd - sampleStart);
+        result.guestFs = await evaluate(`(() => {
+            const fs = EKA2L1.module.FS;
+            const paths = ['/', '/eka2l1', '/eka2l1/drives', '/eka2l1/drives/c', '/eka2l1/drives/c/data', '/eka2l1/drives/c/data/easyrpg', '/eka2l1/drives/c/data/easyrpg/saves'];
+            const out = {};
+            for (const target of paths) {
+                try { out[target] = fs.readdir(target); }
+                catch (error) { out[target] = String(error); }
+            }
+            return out;
+        })()`);
+        pushLog(`guest-fs: ${JSON.stringify(result.guestFs)}`);
+        try {
+            result.guestLog = await evaluate(`EKA2L1.module.FS.readFile('/eka2l1/drives/c/data/easyrpg/rgss.trace', { encoding: 'utf8' })`);
+            pushLog(`rgss-trace: ${JSON.stringify(result.guestLog)}`);
+        } catch (error) {}
         if (handoffExitKey && redrawEnd <= redrawStart) throw new Error('Runtime produced no redraws after launcher handoff');
         pushLog(`app: redraw rate ${result.redrawFps.toFixed(2)} fps over ${((sampleEnd - sampleStart) / 1000).toFixed(1)}s`);
         const midiProbe = await evaluate(`(() => {
@@ -729,6 +748,56 @@ async function main() {
         }
         throw error;
     } finally {
+        const finalGuestFatal = guestFatal;
+        guestFatal = '';
+        if (cdp) {
+            try {
+                const guestFs = await evaluate(`(() => {
+                    const fs = EKA2L1.module.FS;
+                    const paths = ['/', '/eka2l1', '/eka2l1/drives', '/eka2l1/drives/c', '/eka2l1/drives/c/data', '/eka2l1/drives/c/Data'];
+                    const out = {};
+                    for (const target of paths) {
+                        try { out[target] = fs.readdir(target); }
+                        catch (error) { out[target] = String(error); }
+                    }
+                    return out;
+                })()`);
+                result.guestFs = guestFs;
+                const guestTrace = await evaluate(`(() => {
+                    const fs = EKA2L1.module.FS;
+                    const roots = [
+                        '/eka2l1/drives/c',
+                        '/eka2l1/drives/c/data',
+                        '/eka2l1/drives/c/Data'
+                    ];
+                    const candidates = [];
+                    for (const root of roots) {
+                        try {
+                            for (const name of fs.readdir(root)) {
+                                if (name === '.' || name === '..') continue;
+                                const level1 = root + '/' + name;
+                                candidates.push(level1);
+                                try {
+                                    for (const child of fs.readdir(level1))
+                                        if (child !== '.' && child !== '..') candidates.push(level1 + '/' + child);
+                                } catch (error) {}
+                            }
+                        } catch (error) {}
+                    }
+                    for (const target of candidates) {
+                        if (!target.toLowerCase().endsWith('/rgss.trace')) continue;
+                        try { return fs.readFile(target, { encoding: 'utf8' }); }
+                        catch (error) {}
+                    }
+                    return null;
+                })()`);
+                if (guestTrace) {
+                    result.guestLog = guestTrace;
+                    fs.writeFileSync(path.join(options.output, 'rgss.trace'), guestTrace);
+                }
+            } catch {}
+        }
+        guestFatal = finalGuestFatal;
         fs.writeFileSync(path.join(options.output, 'console.log'), consoleLines.join('\n') + '\n');
         fs.writeFileSync(path.join(options.output, 'result.json'), JSON.stringify(result, null, 2) + '\n');
         fs.writeFileSync(path.join(options.output, 'chrome.log'), chromeStderr);

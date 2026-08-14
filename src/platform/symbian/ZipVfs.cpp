@@ -121,37 +121,6 @@ void DecodeArchiveNameL(const TDesC8& aRawName,
 
 }
 
-class CZipVfsEntry : public CBase
-{
-public:
-    static CZipVfsEntry* NewLC(const TDesC& aPath,
-                               TUint32 aFileSize,
-                               TUint32 aLocalHeaderOffset)
-    {
-        CZipVfsEntry* self = new (ELeave) CZipVfsEntry;
-        CleanupStack::PushL(self);
-        self->iPath = aPath.AllocL();
-        self->iFileSize = aFileSize;
-        self->iLocalHeaderOffset = aLocalHeaderOffset;
-        self->iDataOffset = -1;
-        self->iHash = 0;
-        return self;
-    }
-
-    ~CZipVfsEntry()
-    {
-        delete iPath;
-        iPath = NULL;
-    }
-
-public:
-    HBufC* iPath;
-    TUint32 iHash;
-    TUint32 iFileSize;
-    TUint32 iLocalHeaderOffset;
-    mutable TInt iDataOffset;
-};
-
 CZipVfs* CZipVfs::OpenL(RFs& aFs,
                         const TDesC& aArchivePath)
 {
@@ -164,7 +133,8 @@ CZipVfs* CZipVfs::OpenL(RFs& aFs,
 
 CZipVfs::CZipVfs(RFs& aFs)
     : iFs(aFs),
-      iProjectPrefix(NULL)
+      iProjectPrefix(NULL),
+      iCentralDirectory(NULL)
 {
 }
 
@@ -188,9 +158,10 @@ CZipVfs::~CZipVfs()
     for (bucket = 0; bucket < KBucketCount; ++bucket)
         iBuckets[bucket].Close();
 
-    iEntries.ResetAndDestroy();
     iEntries.Close();
 
+    delete iCentralDirectory;
+    iCentralDirectory = NULL;
     delete iProjectPrefix;
     iProjectPrefix = NULL;
     iArchive.Close();
@@ -244,10 +215,15 @@ void CZipVfs::BuildIndexL()
         centralSize32 > static_cast<TUint32>(fileSize) - centralOffset32)
         User::Leave(KErrCorrupt);
 
+    iEntries.ReserveL(totalEntries);
+    const TInt bucketReserve = (totalEntries + KBucketCount - 1) / KBucketCount + 8;
+    for (TInt bucket = 0; bucket < KBucketCount; ++bucket)
+        iBuckets[bucket].ReserveL(bucketReserve);
+
     const TInt centralSize = static_cast<TInt>(centralSize32);
     const TInt centralOffset = static_cast<TInt>(centralOffset32);
-    HBufC8* central = HBufC8::NewLC(centralSize);
-    TPtr8 centralBytes = central->Des();
+    iCentralDirectory = HBufC8::NewL(centralSize);
+    TPtr8 centralBytes = iCentralDirectory->Des();
     User::LeaveIfError(iArchive.Read(centralOffset, centralBytes, centralSize));
     if (centralBytes.Length() != centralSize)
         User::Leave(KErrEof);
@@ -295,8 +271,7 @@ void CZipVfs::BuildIndexL()
             if (unicodeCapacity > KMaxArchivePathChars * 4)
                 User::Leave(KErrTooBig);
 
-            HBufC* decoded = HBufC::NewLC(unicodeCapacity);
-            TPtr decodedPath = decoded->Des();
+            TFileName decodedPath;
             DecodeArchiveNameL(rawName, extra, flags, decodedPath);
             if (decodedPath.Length() > KMaxArchivePathChars)
                 User::Leave(KErrTooBig);
@@ -309,14 +284,13 @@ void CZipVfs::BuildIndexL()
 
             AddEntryL(decodedPath,
                       uncompressedSize,
-                      localHeaderOffset);
-            CleanupStack::PopAndDestroy(decoded);
+                      localHeaderOffset,
+                      cursor);
         }
 
         cursor += recordBytes;
     }
 
-    CleanupStack::PopAndDestroy(central);
     CleanupStack::PopAndDestroy(tail);
 }
 
@@ -335,7 +309,8 @@ void CZipVfs::ResolveProjectRootL()
     TInt index = 0;
     for (index = 0; index < iEntries.Count(); ++index)
     {
-        const TDesC& path = *iEntries[index]->iPath;
+        TFileName path;
+        DecodeEntryPathL(iEntries[index], path);
         if (!PathEndsWith(path, KDatabaseName))
             continue;
 
@@ -364,7 +339,8 @@ void CZipVfs::ResolveProjectRootL()
 
     for (index = 0; index < iEntries.Count(); ++index)
     {
-        const TDesC& path = *iEntries[index]->iPath;
+        TFileName path;
+        DecodeEntryPathL(iEntries[index], path);
         if (!PathEndsWith(path, KGameIniName))
             continue;
 
@@ -428,7 +404,8 @@ void CZipVfs::ResolveProjectRootL()
 
 void CZipVfs::AddEntryL(const TDesC& aPath,
                         TUint32 aFileSize,
-                        TUint32 aLocalHeaderOffset)
+                        TUint32 aLocalHeaderOffset,
+                        TInt aCentralOffset)
 {
     if (aPath.Length() == 0)
         return;
@@ -436,20 +413,52 @@ void CZipVfs::AddEntryL(const TDesC& aPath,
     if (FindFullPath(aPath))
         return;
 
-    CZipVfsEntry* entry = CZipVfsEntry::NewLC(aPath,
-                                               aFileSize,
-                                               aLocalHeaderOffset);
-    entry->iHash = HashPath(aPath);
+    TZipVfsEntry entry;
+    entry.iHash = HashPath(aPath);
+    entry.iFileSize = aFileSize;
+    entry.iLocalHeaderOffset = aLocalHeaderOffset;
+    entry.iCentralOffset = aCentralOffset;
+    entry.iDataOffset = -1;
     User::LeaveIfError(iEntries.Append(entry));
     const TInt entryIndex = iEntries.Count() - 1;
-    const TInt bucket = static_cast<TInt>(entry->iHash & (KBucketCount - 1));
+    const TInt bucket = static_cast<TInt>(entry.iHash & (KBucketCount - 1));
     const TInt bucketError = iBuckets[bucket].Append(entryIndex);
     if (bucketError != KErrNone)
     {
         iEntries.Remove(entryIndex);
         User::Leave(bucketError);
     }
-    CleanupStack::Pop(entry);
+}
+
+void CZipVfs::DecodeEntryPathL(const TZipVfsEntry& aEntry, TDes& aPath) const
+{
+    if (!iCentralDirectory || aEntry.iCentralOffset < 0)
+        User::Leave(KErrNotReady);
+
+    const TDesC8& central = *iCentralDirectory;
+    if (aEntry.iCentralOffset > central.Length() - 46)
+        User::Leave(KErrCorrupt);
+
+    const TUint8* header = central.Ptr() + aEntry.iCentralOffset;
+    if (Read32(header) != KCentralHeaderSignature)
+        User::Leave(KErrCorrupt);
+
+    const TUint16 flags = Read16(header + 8);
+    const TUint16 nameLength = Read16(header + 28);
+    const TUint16 extraLength = Read16(header + 30);
+    const TUint16 commentLength = Read16(header + 32);
+    const TInt recordBytes = 46 + nameLength + extraLength + commentLength;
+    if (nameLength == 0 || nameLength > KMaxArchivePathChars * 4 ||
+        recordBytes < 46 || recordBytes > central.Length() - aEntry.iCentralOffset)
+        User::Leave(KErrCorrupt);
+
+    const TPtrC8 rawName(header + 46, nameLength);
+    const TPtrC8 extra(header + 46 + nameLength, extraLength);
+    aPath.Zero();
+    DecodeArchiveNameL(rawName, extra, flags, aPath);
+    if (aPath.Length() > KMaxArchivePathChars)
+        User::Leave(KErrTooBig);
+    NormalizePathInPlaceL(aPath);
 }
 
 TBool CZipVfs::Exists(const TDesC& aRelativePath) const
@@ -457,7 +466,7 @@ TBool CZipVfs::Exists(const TDesC& aRelativePath) const
     return FindEntry(aRelativePath) != NULL;
 }
 
-const CZipVfsEntry* CZipVfs::FindEntry(const TDesC& aRelativePath) const
+const TZipVfsEntry* CZipVfs::FindEntry(const TDesC& aRelativePath) const
 {
     TFileName fullPath;
     TRAPD(error, BuildFullPathL(aRelativePath, fullPath));
@@ -466,7 +475,7 @@ const CZipVfsEntry* CZipVfs::FindEntry(const TDesC& aRelativePath) const
     return FindFullPath(fullPath);
 }
 
-const CZipVfsEntry* CZipVfs::FindFullPath(const TDesC& aFullPath) const
+const TZipVfsEntry* CZipVfs::FindFullPath(const TDesC& aFullPath) const
 {
     const TUint32 hash = HashPath(aFullPath);
     const TInt bucket = static_cast<TInt>(hash & (KBucketCount - 1));
@@ -476,9 +485,13 @@ const CZipVfsEntry* CZipVfs::FindFullPath(const TDesC& aFullPath) const
         const TInt entryIndex = iBuckets[bucket][position];
         if (entryIndex < 0 || entryIndex >= iEntries.Count())
             continue;
-        const CZipVfsEntry* entry = iEntries[entryIndex];
-        if (entry->iHash == hash && PathEquals(*entry->iPath, aFullPath))
-            return entry;
+        const TZipVfsEntry& entry = iEntries[entryIndex];
+        if (entry.iHash != hash)
+            continue;
+        TFileName path;
+        TRAPD(error, DecodeEntryPathL(entry, path));
+        if (error == KErrNone && PathEquals(path, aFullPath))
+            return &entry;
     }
     return NULL;
 }
@@ -522,11 +535,8 @@ HBufC8* CZipVfs::ReadFileLC(const TDesC& aRelativePath, TInt aMaxBytes) const
     return output;
 }
 
-TInt CZipVfs::EntryDataOffsetL(const CZipVfsEntry& aEntry) const
+TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry& aEntry) const
 {
-    if (aEntry.iDataOffset >= 0)
-        return aEntry.iDataOffset;
-
     TBuf8<30> localHeader;
     User::LeaveIfError(iArchive.Read(static_cast<TInt>(aEntry.iLocalHeaderOffset),
                                     localHeader,
@@ -548,23 +558,19 @@ TInt CZipVfs::EntryDataOffsetL(const CZipVfsEntry& aEntry) const
     if (dataOffset32 > static_cast<TUint32>(archiveSize) ||
         aEntry.iFileSize > static_cast<TUint32>(archiveSize) - dataOffset32)
         User::Leave(KErrCorrupt);
-    aEntry.iDataOffset = static_cast<TInt>(dataOffset32);
-    return aEntry.iDataOffset;
+    return static_cast<TInt>(dataOffset32);
 }
 
 void CZipVfs::OpenStoredFileL(const TDesC& aRelativePath,
                               TInt& aDataOffset,
                               TInt& aFileSize) const
 {
-    const CZipVfsEntry* entry = FindEntry(aRelativePath);
+    const TZipVfsEntry* entry = FindEntry(aRelativePath);
     if (!entry)
         User::Leave(KErrNotFound);
     if (entry->iFileSize > static_cast<TUint32>(KMaxTInt))
         User::Leave(KErrTooBig);
-    if (entry->iDataOffset < 0)
-        entry->iDataOffset = EntryDataOffsetL(*entry);
-
-    aDataOffset = entry->iDataOffset;
+    aDataOffset = EntryDataOffsetL(*entry);
     aFileSize = static_cast<TInt>(entry->iFileSize);
 }
 
@@ -606,7 +612,8 @@ void CZipVfs::EntryRelativePathL(TInt aIndex, TDes& aPath) const
     if (aIndex < 0 || aIndex >= iEntries.Count() || !iProjectPrefix)
         User::Leave(KErrArgument);
 
-    const TDesC& fullPath = *iEntries[aIndex]->iPath;
+    TFileName fullPath;
+    DecodeEntryPathL(iEntries[aIndex], fullPath);
     const TInt prefixLength = iProjectPrefix->Length();
     if (prefixLength > fullPath.Length() ||
         !PathEquals(fullPath.Left(prefixLength), *iProjectPrefix))

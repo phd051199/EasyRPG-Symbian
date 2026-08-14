@@ -10,6 +10,7 @@
 #include "PerfOverlay.h"
 #include "PlayerRuntime.h"
 #include "RuntimeEngine.h"
+#include "UpstreamPlayerBridge.h"
 #include "ZipVfs.h"
 
 namespace
@@ -21,6 +22,9 @@ const TInt KVolumeStep = 10;
 _LIT(KSettingsDirectory, "C:\\Data\\EasyRPG\\");
 _LIT(KSettingsPath, "C:\\Data\\EasyRPG\\settings.ini");
 _LIT8(KMasterVolumeSetting, "master_volume=");
+_LIT8(KSoundSetting, "sound_enabled=");
+_LIT8(KFrameSkipSetting, "frameskip_enabled=");
+_LIT8(KFpsSetting, "fps_enabled=");
 
 enum TGameMenuItem
 {
@@ -42,39 +46,80 @@ TInt ClampVolume(TInt aVolume)
     return aVolume;
 }
 
-TInt LoadMasterVolume(RFs& aFs)
+struct TRuntimeSettings
 {
+    TInt iVolume;
+    TBool iSoundEnabled;
+    TBool iFrameSkipEnabled;
+    TBool iFpsEnabled;
+};
+
+TBool ReadSettingInt(const TDesC8& aData, const TDesC8& aKey, TInt& aValue)
+{
+    const TInt keyPosition = aData.Find(aKey);
+    if (keyPosition < 0)
+        return EFalse;
+
+    TInt position = keyPosition + aKey.Length();
+    TInt value = 0;
+    TBool hasDigit = EFalse;
+    while (position < aData.Length())
+    {
+        const TUint8 character = aData[position++];
+        if (character < '0' || character > '9')
+            break;
+        hasDigit = ETrue;
+        value = value * 10 + character - '0';
+    }
+    if (!hasDigit)
+        return EFalse;
+    aValue = value;
+    return ETrue;
+}
+
+TRuntimeSettings LoadSettings(RFs& aFs)
+{
+    TRuntimeSettings settings;
+    settings.iVolume = KDefaultMasterVolume;
+    settings.iSoundEnabled = ETrue;
+    settings.iFrameSkipEnabled = ETrue;
+    settings.iFpsEnabled = ETrue;
+
     RFile file;
     if (file.Open(aFs, KSettingsPath, EFileRead | EFileShareReadersOnly) != KErrNone)
-        return KDefaultMasterVolume;
+        return settings;
 
-    TBuf8<128> data;
+    TBuf8<256> data;
     const TInt error = file.Read(data);
     file.Close();
     if (error != KErrNone)
-        return KDefaultMasterVolume;
+        return settings;
 
-    const TInt keyPosition = data.Find(KMasterVolumeSetting);
-    if (keyPosition < 0)
-        return KDefaultMasterVolume;
+    TInt value = 0;
+    const TBool hasVolume = ReadSettingInt(data, KMasterVolumeSetting, value);
+    if (hasVolume)
+        settings.iVolume = ClampVolume(value);
 
-    TInt position = keyPosition + KMasterVolumeSetting().Length();
-    TInt volume = 0;
-    TBool hasDigit = EFalse;
-    while (position < data.Length())
-    {
-        const TUint8 value = data[position++];
-        if (value < '0' || value > '9')
-            break;
-        hasDigit = ETrue;
-        volume = volume * 10 + value - '0';
-        if (volume > 100)
-            break;
-    }
-    return hasDigit ? ClampVolume(volume) : KDefaultMasterVolume;
+    if (ReadSettingInt(data, KSoundSetting, value))
+        settings.iSoundEnabled = value != 0;
+    else if (hasVolume)
+        settings.iSoundEnabled = settings.iVolume > 0;
+
+    if (ReadSettingInt(data, KFrameSkipSetting, value))
+        settings.iFrameSkipEnabled = value != 0;
+    if (ReadSettingInt(data, KFpsSetting, value))
+        settings.iFpsEnabled = value != 0;
+
+    if (settings.iVolume <= 0)
+        settings.iVolume = KDefaultMasterVolume;
+    return settings;
 }
 
-void SaveMasterVolume(RFs& aFs, TInt aVolume)
+void SaveSettings(RFs& aFs,
+                  TInt aVolume,
+                  TBool aSoundEnabled,
+                  TBool aFrameSkipEnabled,
+                  TBool aFpsEnabled)
 {
     const TInt directoryError = aFs.MkDirAll(KSettingsDirectory);
     if (directoryError != KErrNone && directoryError != KErrAlreadyExists)
@@ -83,8 +128,12 @@ void SaveMasterVolume(RFs& aFs, TInt aVolume)
     RFile file;
     if (file.Replace(aFs, KSettingsPath, EFileWrite | EFileShareExclusive) != KErrNone)
         return;
-    TBuf8<32> data;
-    data.Format(_L8("master_volume=%d\n"), ClampVolume(aVolume));
+    TBuf8<128> data;
+    data.Format(_L8("master_volume=%d\nsound_enabled=%d\nframeskip_enabled=%d\nfps_enabled=%d\n"),
+                ClampVolume(aVolume),
+                aSoundEnabled ? 1 : 0,
+                aFrameSkipEnabled ? 1 : 0,
+                aFpsEnabled ? 1 : 0);
     file.Write(data);
     file.Close();
 }
@@ -391,9 +440,10 @@ void CRuntimeEngine::ConstructL()
         User::CommandLine(iGamePath);
     if (iGamePath.Length() <= 0)
         User::Leave(KErrArgument);
-    iMasterVolume = LoadMasterVolume(iFs);
-    if (iMasterVolume > 0)
-        iAudibleVolume = iMasterVolume;
+    const TRuntimeSettings settings = LoadSettings(iFs);
+    iAudibleVolume = settings.iVolume;
+    iMasterVolume = settings.iSoundEnabled ? settings.iVolume : 0;
+    EasyRpgAudioSetEnabled(settings.iSoundEnabled ? 1 : 0);
     EasyRpgAudioSetMasterVolume(iMasterVolume);
 
     User::LeaveIfError(iWs.Connect(iFs));
@@ -419,9 +469,11 @@ void CRuntimeEngine::ConstructL()
     iDisplaySurface = CDisplaySurface::NewL(TSize(KGameWidth, KGameHeight));
     iResources = CZipVfs::OpenL(iFs, iGamePath);
     iRuntime = CPlayerRuntime::NewL(iResources, iGamePath, *iDisplaySurface);
-    iPerfOverlay = CPerfOverlay::NewL();
+    if (settings.iFpsEnabled)
+        iPerfOverlay = CPerfOverlay::NewL();
     iEventPump = CWindowEventPump::NewL(iWs, *this);
     iFrameTimer = CFrameTimer::NewL(*this);
+    iFrameTimer->SetFrameSkipEnabled(settings.iFrameSkipEnabled);
     RaisePriority();
 }
 
@@ -546,6 +598,26 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
     }
     else
     {
+        TInt scrollX = 0;
+        TInt scrollY = 0;
+        const TBool presentScroll = iDisplaySurface->HasPresentScroll();
+        if (presentScroll)
+        {
+            iDisplaySurface->PresentScroll(scrollX, scrollY);
+            const TInt absX = Abs(scrollX);
+            const TInt absY = Abs(scrollY);
+            const TInt copyWidth = bitmapSize.iWidth - absX;
+            const TInt copyHeight = bitmapSize.iHeight - absY;
+            if (copyWidth > 0 && copyHeight > 0)
+            {
+                const TInt sourceX = scrollX < 0 ? -scrollX : 0;
+                const TInt sourceY = scrollY < 0 ? -scrollY : 0;
+                const TRect sourceRect(destination + TPoint(sourceX, sourceY),
+                                       TSize(copyWidth, copyHeight));
+                gc->CopyRect(TPoint(scrollX, scrollY), sourceRect);
+            }
+        }
+
         const TInt dirtyCount = iDisplaySurface->DirtyRegionCount();
         for (TInt index = 0; index < dirtyCount; ++index)
         {
@@ -555,6 +627,20 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
                        dirty);
             if (iPerfOverlay && RectsOverlap(dirty, overlayRect))
                 overlayNeedsDraw = ETrue;
+        }
+
+        if (presentScroll && iPerfOverlay)
+        {
+            TRect shiftedOverlay(overlayRect);
+            shiftedOverlay.Move(scrollX, scrollY);
+            shiftedOverlay.Intersection(TRect(TPoint(0, 0), bitmapSize));
+            if (!shiftedOverlay.IsEmpty())
+            {
+                gc->BitBlt(destination + shiftedOverlay.iTl,
+                           &frameBitmap,
+                           shiftedOverlay);
+            }
+            overlayNeedsDraw = ETrue;
         }
         iDisplaySurface->ClearDirtyRegions();
     }
@@ -617,7 +703,9 @@ void CRuntimeEngine::OpenMenu()
 {
     if (iPaused || !iRuntime)
         return;
+    const TBool leftSoftHeld = iLeftSoftHeld;
     ClearPlayerInput();
+    iLeftSoftHeld = leftSoftHeld;
     iPaused = ETrue;
     iKeyMapVisible = EFalse;
     iRuntime->Suspend();
@@ -632,9 +720,11 @@ void CRuntimeEngine::CloseMenu()
 {
     if (!iPaused || !iRuntime)
         return;
+    const TBool rightSoftHeld = iRightSoftHeld;
     iKeyMapVisible = EFalse;
     iPaused = EFalse;
     ClearPlayerInput();
+    iRightSoftHeld = rightSoftHeld;
     iRuntime->Resume();
     iNeedsFullRedraw = ETrue;
     if (!iDirectScreenActive)
@@ -694,29 +784,42 @@ void CRuntimeEngine::ToggleSound()
     {
         iAudibleVolume = iMasterVolume;
         iMasterVolume = 0;
+        EasyRpgAudioSetMasterVolume(0);
+        EasyRpgAudioSetEnabled(0);
     }
     else
     {
         if (iAudibleVolume <= 0)
             iAudibleVolume = KDefaultMasterVolume;
         iMasterVolume = iAudibleVolume;
+        EasyRpgAudioSetEnabled(1);
+        EasyRpgAudioSetMasterVolume(iMasterVolume);
+        EasyRpgUpstreamPlayerRefreshAudio();
     }
-    EasyRpgAudioSetMasterVolume(iMasterVolume);
+    PersistSettings();
 }
 
 void CRuntimeEngine::AdjustVolume(TInt aDelta)
 {
-    iMasterVolume = ClampVolume(iMasterVolume + aDelta);
     if (iMasterVolume > 0)
+    {
+        iMasterVolume = ClampVolume(iMasterVolume + aDelta);
         iAudibleVolume = iMasterVolume;
-    EasyRpgAudioSetMasterVolume(iMasterVolume);
-    SaveMasterVolume(iFs, iMasterVolume);
+        EasyRpgAudioSetMasterVolume(iMasterVolume);
+    }
+    else
+    {
+        iAudibleVolume = ClampVolume(iAudibleVolume + aDelta);
+    }
+    PersistSettings();
 }
 
 void CRuntimeEngine::ToggleFrameSkip()
 {
-    if (iFrameTimer)
-        iFrameTimer->SetFrameSkipEnabled(!iFrameTimer->FrameSkipEnabled());
+    if (!iFrameTimer)
+        return;
+    iFrameTimer->SetFrameSkipEnabled(!iFrameTimer->FrameSkipEnabled());
+    PersistSettings();
 }
 
 void CRuntimeEngine::TogglePerfOverlay()
@@ -731,6 +834,18 @@ void CRuntimeEngine::TogglePerfOverlay()
         TRAP_IGNORE(iPerfOverlay = CPerfOverlay::NewL());
     }
     iNeedsFullRedraw = ETrue;
+    PersistSettings();
+}
+
+void CRuntimeEngine::PersistSettings()
+{
+    const TInt volume = iAudibleVolume > 0 ? iAudibleVolume : KDefaultMasterVolume;
+    const TBool frameSkipEnabled = iFrameTimer ? iFrameTimer->FrameSkipEnabled() : ETrue;
+    SaveSettings(iFs,
+                 volume,
+                 iMasterVolume > 0,
+                 frameSkipEnabled,
+                 iPerfOverlay != NULL);
 }
 
 void CRuntimeEngine::DrawMenuOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen)
@@ -738,7 +853,7 @@ void CRuntimeEngine::DrawMenuOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen)
     const TSize screenSize = aScreen.SizeInPixels();
     const TInt panelWidth = Min(156, Max(1, screenSize.iWidth - 12));
     const TInt panelHeight = Min(116, Max(1, screenSize.iHeight - 12));
-    const TPoint origin(6, (screenSize.iHeight - panelHeight) / 2);
+    const TPoint origin(0, screenSize.iHeight - panelHeight);
     const TRect panel(origin, TSize(panelWidth, panelHeight));
 
     aGc.SetPenStyle(CGraphicsContext::ESolidPen);
@@ -991,12 +1106,6 @@ void CRuntimeEngine::ForgetDynamicScanKey(TInt aScanCode)
     }
 }
 
-void CRuntimeEngine::RequestInputRender()
-{
-    if (iFrameTimer)
-        iFrameTimer->RequestRender();
-}
-
 void CRuntimeEngine::ClearPlayerInput()
 {
     iHeldPlayerKeys = 0;
@@ -1077,25 +1186,21 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
         if (aType == EEventKeyDown)
         {
-            if ((iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) == 0)
-                RequestInputRender();
             iHeldPlayerKeys |= CPlayerRuntime::EKeyCancel;
             iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, ETrue);
             iRightSoftHeld = ETrue;
         }
         else if (aType == EEventKeyUp)
         {
-            if ((iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) != 0)
-                RequestInputRender();
             iHeldPlayerKeys &= ~CPlayerRuntime::EKeyCancel;
             iRuntime->SetKeyState(CPlayerRuntime::EKeyCancel, EFalse);
             iRightSoftHeld = EFalse;
         }
         else if (aType == EEventKey &&
+                 !iRightSoftHeld &&
                  (iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) == 0)
         {
             iPendingPlayerPulses |= CPlayerRuntime::EKeyCancel;
-            RequestInputRender();
         }
         return;
     }
@@ -1179,8 +1284,6 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
     if (aType == EEventKeyDown && playerKey != 0)
     {
-        if ((iHeldPlayerKeys & playerKey) == 0)
-            RequestInputRender();
         iHeldPlayerKeys |= playerKey;
         iRuntime->SetKeyState(playerKey, ETrue);
         return;
@@ -1188,8 +1291,6 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
     if (aType == EEventKeyUp && playerKey != 0)
     {
-        if ((iHeldPlayerKeys & playerKey) != 0)
-            RequestInputRender();
         iHeldPlayerKeys &= ~playerKey;
         iRuntime->SetKeyState(playerKey, EFalse);
         ForgetDynamicScanKey(aKey.iScanCode);
@@ -1205,10 +1306,7 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
         if (aKey.iScanCode != 0 && MapScanKey(aKey) == 0)
             RememberDynamicScanKey(aKey.iScanCode, playerKey);
         if ((iHeldPlayerKeys & playerKey) == 0)
-        {
             iPendingPlayerPulses |= playerKey;
-            RequestInputRender();
-        }
     }
 }
 

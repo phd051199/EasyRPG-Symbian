@@ -34,6 +34,7 @@ private:
 
 private:
     RFs iFs;
+    RAllocator* iAllocator;
     CZipVfs* iResources;
     CRgssDisplaySurface* iSurface;
     CRgssVmWorker* iVmWorker;

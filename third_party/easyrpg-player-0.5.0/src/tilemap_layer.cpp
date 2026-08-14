@@ -180,8 +180,9 @@ void TilemapLayer::SymbianTouch() {
 	SymbianRenderDamage::RequestFullFrame();
 }
 
-void TilemapLayer::SymbianScrollTouch() {
-	SymbianRenderDamage::RequestFullFrame();
+void TilemapLayer::SymbianScrollTouch(int shift_x, int shift_y) {
+	if (layer == 0)
+		SymbianRenderDamage::RequestScroll(shift_x, shift_y);
 }
 
 int TilemapLayer::SymbianScrollCacheIndex(int z_order) const {
@@ -212,6 +213,9 @@ bool TilemapLayer::SymbianScrollCacheValid(int z_order, int display_width, int d
 	const int cache_ox = anchored ? SymbianTileAnchor(ox) : ox;
 	const int cache_oy = anchored ? SymbianTileAnchor(oy) : oy;
 	const SymbianScrollCacheState& cache = symbian_scroll_caches[index];
+	const bool animation_valid =
+		(!symbian_has_animated_ab[index] || cache.animation_step_ab == animation_step_ab) &&
+		(!symbian_has_animated_c[index] || cache.animation_step_c == animation_step_c);
 	return cache.bitmap &&
 		cache.bitmap->pixels() &&
 		cache.bitmap->GetWidth() == cache_width &&
@@ -220,8 +224,7 @@ bool TilemapLayer::SymbianScrollCacheValid(int z_order, int display_width, int d
 		cache.revision == symbian_revision &&
 		cache.ox == cache_ox &&
 		cache.oy == cache_oy &&
-		(anchored || (cache.animation_step_ab == animation_step_ab &&
-			cache.animation_step_c == animation_step_c));
+		animation_valid;
 }
 
 void TilemapLayer::SymbianShiftScrollCache(int z_order, int shift_x, int shift_y) {
@@ -299,8 +302,8 @@ bool TilemapLayer::SymbianPrepareScrollCache(int z_order, int display_width, int
 		return false;
 
 	const bool rebuild = cache.revision != symbian_revision ||
-		(!anchored && (cache.animation_step_ab != animation_step_ab ||
-			cache.animation_step_c != animation_step_c));
+		(symbian_has_animated_ab[index] && cache.animation_step_ab != animation_step_ab) ||
+		(symbian_has_animated_c[index] && cache.animation_step_c != animation_step_c);
 	if (rebuild) {
 		cache.bitmap->Clear();
 		DrawTilesView(*cache.bitmap, z_order, NULL, desired_ox, desired_oy, cache_width, cache_height);
@@ -1138,7 +1141,7 @@ int TilemapLayer::GetOx() const {
 void TilemapLayer::SetOx(int nox) {
 #ifdef EASYRPG_SYMBIAN
 	if (ox != nox)
-		SymbianScrollTouch();
+		SymbianScrollTouch(ox - nox, 0);
 #endif
 	ox = nox;
 }
@@ -1150,7 +1153,7 @@ int TilemapLayer::GetOy() const {
 void TilemapLayer::SetOy(int noy) {
 #ifdef EASYRPG_SYMBIAN
 	if (oy != noy)
-		SymbianScrollTouch();
+		SymbianScrollTouch(0, oy - noy);
 #endif
 	oy = noy;
 }

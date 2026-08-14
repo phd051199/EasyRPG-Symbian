@@ -162,7 +162,8 @@ CRgssEngine::CRgssEngine()
       iPresentAccumulator(0),
       iFrameError(KErrNone),
       iForeground(ETrue),
-      iDirectScreenActive(EFalse)
+      iDirectScreenActive(EFalse),
+      iPresentedFrame(EFalse)
 {
 }
 
@@ -194,7 +195,7 @@ void CRgssEngine::ConstructL()
     iWindow->SetVisible(ETrue);
     iWs.Flush();
 
-    iForeground = iWs.GetFocusWindowGroup() == iWindowGroup->Identifier();
+    iForeground = ETrue;
     iRuntime = CRgssRuntime::NewL(iGamePath);
     iEventPump = CRgssWindowEventPump::NewL(iWs, *this);
     iFrameTimer = CFrameTimer::NewL(*this);
@@ -231,10 +232,14 @@ CRgssEngine::~CRgssEngine()
     iFs.Close();
 }
 
-void CRgssEngine::RunL()
+void CRgssEngine::StartL()
 {
     iRuntime->StartVmL();
     StartDirectScreenL();
+}
+
+void CRgssEngine::RunL()
+{
     iFrameTimer->Start();
     if (iFrameError != KErrNone)
         User::Leave(iFrameError);
@@ -242,6 +247,8 @@ void CRgssEngine::RunL()
 
 void CRgssEngine::StartDirectScreenL()
 {
+    if (iDirectScreenActive && (!iDirectScreen || !iDirectScreen->Active()))
+        iDirectScreenActive = EFalse;
     if (!iForeground || iDirectScreenActive)
         return;
     if (!iDirectScreen)
@@ -250,7 +257,7 @@ void CRgssEngine::StartDirectScreenL()
                                                        *iWindow);
     else
         iDirectScreen->StartL();
-    iDirectScreenActive = ETrue;
+    iDirectScreenActive = iDirectScreen && iDirectScreen->Active();
     if (iRuntime)
         iRuntime->Surface().MarkFullDirty();
 }
@@ -289,12 +296,20 @@ void CRgssEngine::PresentL(TBool aForceFull)
     }
     iWs.Flush();
     surface.ClearDirty();
+    iPresentedFrame = ETrue;
 }
 
 void CRgssEngine::FrameTickL(TUint32, TBool)
 {
-    if (!iForeground || !iRuntime)
+    if (!iRuntime)
         return;
+    const TBool ownsFocus = iWs.GetFocusWindowGroup() == iWindowGroup->Identifier();
+    if (ownsFocus || !iPresentedFrame)
+        iForeground = ETrue;
+    if (!iForeground)
+        return;
+    if (!iDirectScreenActive || !iDirectScreen || !iDirectScreen->Active())
+        StartDirectScreenL();
 
     const TInt logicFps = Max(1, Min(iRuntime->LogicFps(), 60));
     iLogicAccumulator += logicFps;
@@ -429,9 +444,12 @@ void CRgssEngine::HandleWindowEvent(const TWsEvent& aEvent)
     switch (aEvent.Type())
     {
     case EEventFocusLost:
-        iForeground = EFalse;
         ClearInput();
-        StopDirectScreen();
+        if (iPresentedFrame)
+        {
+            iForeground = EFalse;
+            StopDirectScreen();
+        }
         break;
     case EEventFocusGained:
         iForeground = ETrue;

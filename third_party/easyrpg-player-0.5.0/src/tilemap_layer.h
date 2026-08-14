@@ -195,7 +195,7 @@ private:
 	};
 	SymbianScrollCacheState symbian_scroll_caches[2];
 	void SymbianTouch();
-	void SymbianScrollTouch();
+	void SymbianScrollTouch(int shift_x, int shift_y);
 	int SymbianScrollCacheIndex(int z_order) const;
 	bool SymbianUseScrollCache(int z_order) const;
 	bool SymbianUseAnchoredScrollCache(int z_order) const;

@@ -16,14 +16,37 @@ CSL_BIN="$WINE_PREFIX/drive_c/Program Files/CSL Arm Toolchain/bin"
 CC="$CSL_BIN/arm-none-symbianelf-gcc.exe"
 AR="$CSL_BIN/arm-none-symbianelf-ar.exe"
 NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
-RUBY_ROOT="$PROJECT_DIR/build/vendor/ruby-1.8.7-p374"
-BUILD_DIR="$PROJECT_DIR/build/rgss-mri/$SDK_CFG"
+RUBY_VERSION=${EASYRPG_RGSS_RUBY_VERSION:-1.8.7-p374}
+case "$RUBY_VERSION" in
+    1.8.7-p374)
+        LIBRARY_NAME=EasyRpgRuby187.lib
+        C_STANDARD=gnu89
+        CONFIG_INCLUDE=mri
+        RUBY_EXTRA_FLAGS=""
+        ;;
+    3.0.7)
+        LIBRARY_NAME=EasyRpgRuby300.lib
+        C_STANDARD=gnu99
+        CONFIG_INCLUDE=mri300
+        RUBY_EXTRA_FLAGS="-DRUBY_EXPORT -D_REENTRANT -DDISABLE_RUBYGEMS=1 -DEASYRPG_RUBY300=1 -DCROSS_COMPILING=1"
+        ;;
+    *)
+        echo "Unsupported RGSS Ruby version: $RUBY_VERSION" >&2
+        exit 2
+        ;;
+esac
+RUBY_ROOT="$PROJECT_DIR/build/vendor/ruby-$RUBY_VERSION"
+BUILD_DIR="$PROJECT_DIR/build/rgss-mri-$RUBY_VERSION/$SDK_CFG"
 SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
-LIBRARY="$BUILD_DIR/EasyRpgRuby187.lib"
+LIBRARY="$BUILD_DIR/$LIBRARY_NAME"
 WIN_PROJECT="C:\\work\\EasyRPG"
-WIN_RUBY="$WIN_PROJECT\\build\\vendor\\ruby-1.8.7-p374"
-WIN_BUILD="$WIN_PROJECT\\build\\rgss-mri\\$SDK_CFG"
+WIN_RUBY="$WIN_PROJECT\\build\\vendor\\ruby-$RUBY_VERSION"
+WIN_BUILD="$WIN_PROJECT\\build\\rgss-mri-$RUBY_VERSION\\$SDK_CFG"
 WIN_SDK="C:\\S60\\devices\\S60_3rd_FP2_SDK_v1.1\\epoc32\\include"
+RUBY_EXTRA_INCLUDE=""
+if [[ $RUBY_VERSION == 3.0.7 ]]; then
+    RUBY_EXTRA_INCLUDE="-I $WIN_RUBY\\enc\\unicode\\12.1.0"
+fi
 
 find_wine() {
     if [[ -n $WINE_BIN && -x $WINE_BIN ]]; then
@@ -54,81 +77,182 @@ for tool in "$CC" "$AR" "$NM"; do
     fi
 done
 
-bash "$PROJECT_DIR/tools/fetch_rgss_mri.sh" >/dev/null
+EASYRPG_RGSS_RUBY_VERSION="$RUBY_VERSION" bash "$PROJECT_DIR/tools/fetch_rgss_mri.sh" >/dev/null
 mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR"
 rm -f "$LIBRARY"
 
-SOURCES=(
-    array.c
-    bignum.c
-    class.c
-    compar.c
-    dir.c
-    dln.c
-    enum.c
-    enumerator.c
-    error.c
-    eval.c
-    file.c
-    gc.c
-    hash.c
-    inits.c
-    io.c
-    marshal.c
-    math.c
-    numeric.c
-    object.c
-    pack.c
-    parse.c
-    process.c
-    prec.c
-    random.c
-    range.c
-    re.c
-    regex.c
-    ruby.c
-    signal.c
-    sprintf.c
-    st.c
-    string.c
-    struct.c
-    time.c
-    util.c
-    variable.c
-    version.c
-    dmyext.c
-)
+if [[ $RUBY_VERSION == 1.8.7-p374 ]]; then
+    SOURCES=(
+        array.c
+        bignum.c
+        class.c
+        compar.c
+        dir.c
+        dln.c
+        enum.c
+        enumerator.c
+        error.c
+        eval.c
+        file.c
+        gc.c
+        hash.c
+        inits.c
+        io.c
+        marshal.c
+        math.c
+        numeric.c
+        object.c
+        pack.c
+        parse.c
+        process.c
+        prec.c
+        random.c
+        range.c
+        re.c
+        regex.c
+        ruby.c
+        signal.c
+        sprintf.c
+        st.c
+        string.c
+        struct.c
+        time.c
+        util.c
+        variable.c
+        version.c
+        dmyext.c
+    )
+else
+    SOURCES=(
+        array.c
+        ast.c
+        bignum.c
+        builtin.c
+        class.c
+        compar.c
+        compile.c
+        complex.c
+        cont.c
+        debug.c
+        debug_counter.c
+        dir.c
+        dmydln.c
+        dln_find.c
+        encoding.c
+        enum.c
+        enumerator.c
+        error.c
+        eval.c
+        file.c
+        gc.c
+        hash.c
+        inits.c
+        io.c
+        iseq.c
+        load.c
+        localeinit.c
+        loadpath.c
+        marshal.c
+        math.c
+        missing/explicit_bzero.c
+        missing/nan.c
+        missing/setproctitle.c
+        missing/tgamma.c
+        memory_view.c
+        node.c
+        numeric.c
+        object.c
+        pack.c
+        parse.c
+        proc.c
+        process.c
+        ractor.c
+        random.c
+        range.c
+        rational.c
+        re.c
+        regcomp.c
+        regenc.c
+        regerror.c
+        regexec.c
+        regparse.c
+        regsyntax.c
+        ruby.c
+        scheduler.c
+        signal.c
+        sprintf.c
+        st.c
+        strftime.c
+        string.c
+        struct.c
+        symbol.c
+        thread.c
+        time.c
+        transcode.c
+        transient_heap.c
+        util.c
+        variable.c
+        version.c
+        vm.c
+        vm_backtrace.c
+        vm_dump.c
+        vm_sync.c
+        vm_trace.c
+        dmyext.c
+        enc/ascii.c
+        enc/unicode.c
+        enc/us_ascii.c
+        enc/utf_8.c
+        enc/trans/newline.c
+        coroutine/arm32/Context.S
+    )
+fi
 
 objects=()
 for source in "${SOURCES[@]}"; do
-    name=${source%.c}
+    name=${source%.*}
+    name=${name//\//_}
     output="$BUILD_DIR/$name.o"
     win_output="$WIN_BUILD\\$name.o"
-    WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
-        "$WINE_BIN" "$CC" \
-        -march=armv5t \
-        -msoft-float \
-        -std=gnu89 \
-        -fno-unit-at-a-time \
-        -fno-strict-aliasing \
-        "${OPT[@]}" \
-        -D__SYMBIAN32__ \
-        -include "$WIN_SDK\\gcce\\gcce.h" \
-        -include "$WIN_PROJECT\\src\\rgss\\mri\\prelude.h" \
-        -I "$WIN_PROJECT\\src\\rgss\\mri" \
-        -I "$WIN_RUBY" \
-        -I "$WIN_SDK" \
-        -I "$WIN_SDK\\stdapis" \
-        -I "$WIN_SDK\\libc" \
-        -c "$WIN_RUBY\\$source" \
-        -o "$win_output"
+    if [[ $source == *.S ]]; then
+        WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
+            "$WINE_BIN" "$CC" \
+            -march=armv5t \
+            -msoft-float \
+            -DSYMBOL_PREFIX= \
+            -c "$WIN_RUBY\\$source" \
+            -o "$win_output"
+    else
+        WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
+            "$WINE_BIN" "$CC" \
+            -march=armv5t \
+            -msoft-float \
+            -std="$C_STANDARD" \
+            -fno-unit-at-a-time \
+            -fno-strict-aliasing \
+            "${OPT[@]}" \
+            -D__SYMBIAN32__ \
+            -DDTRACE_PROBES_DISABLED=1 \
+            $RUBY_EXTRA_FLAGS \
+            -include "$WIN_SDK\\gcce\\gcce.h" \
+            -include "$WIN_PROJECT\\src\\rgss\\mri\\prelude.h" \
+            -I "$WIN_PROJECT\\src\\rgss\\$CONFIG_INCLUDE" \
+            -I "$WIN_RUBY" \
+            -I "$WIN_RUBY\\include" \
+            $RUBY_EXTRA_INCLUDE \
+            -I "$WIN_SDK" \
+            -I "$WIN_SDK\\stdapis" \
+            -I "$WIN_SDK\\libc" \
+            -c "$WIN_RUBY\\$source" \
+            -o "$win_output"
+    fi
     objects+=("$win_output")
 done
 
 WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
-    "$WINE_BIN" "$AR" crs "$WIN_BUILD\\EasyRpgRuby187.lib" "${objects[@]}"
+    "$WINE_BIN" "$AR" crs "$WIN_BUILD\\$LIBRARY_NAME" "${objects[@]}"
 
-symbols=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all "$WINE_BIN" "$NM" -g "$WIN_BUILD\\EasyRpgRuby187.lib" | tr -d '\r')
+symbols=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all "$WINE_BIN" "$NM" -g "$WIN_BUILD\\$LIBRARY_NAME" | tr -d '\r')
 for symbol in ruby_init ruby_cleanup rb_eval_string_protect rb_define_class rb_define_module rb_define_method rb_define_singleton_method rb_marshal_load; do
     if ! grep -q "[[:space:]]$symbol$" <<<"$symbols"; then
         echo "MRI archive does not export $symbol." >&2
@@ -136,6 +260,6 @@ for symbol in ruby_init ruby_cleanup rb_eval_string_protect rb_define_class rb_d
     fi
 done
 
-cp -f "$LIBRARY" "$SDK_LIBRARY_DIR/EasyRpgRuby187.lib"
-printf 'MRI 1.8.7-p374: %s (%s bytes, %s objects)\n' "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
-printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY_DIR/EasyRpgRuby187.lib"
+cp -f "$LIBRARY" "$SDK_LIBRARY_DIR/$LIBRARY_NAME"
+printf 'MRI %s: %s (%s bytes, %s objects)\n' "$RUBY_VERSION" "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
+printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY_DIR/$LIBRARY_NAME"
