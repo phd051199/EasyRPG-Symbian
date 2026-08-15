@@ -36,6 +36,8 @@ typedef struct EasyRpgRgssTilemapState
     int map_data_handle;
     int flash_data_handle;
     int priorities_handle;
+    int bitmap_handles[9];
+    int flags_handle;
     int ox;
     int oy;
     int visible;
@@ -53,6 +55,8 @@ int EasyRpgRgssTilemapSetAutotile(int handle, int index, int bitmap_handle);
 int EasyRpgRgssTilemapSetMapData(int handle, int table_handle);
 int EasyRpgRgssTilemapSetFlashData(int handle, int table_handle);
 int EasyRpgRgssTilemapSetPriorities(int handle, int table_handle);
+int EasyRpgRgssTilemapSetBitmap(int handle, int index, int bitmap_handle);
+int EasyRpgRgssTilemapSetFlags(int handle, int table_handle);
 int EasyRpgRgssTilemapSetOrigin(int handle, int ox, int oy);
 int EasyRpgRgssTilemapSetVisible(int handle, int visible);
 int EasyRpgRgssTilemapUpdate(int handle);

@@ -436,16 +436,41 @@ void ScriptZFree(voidpf opaque, voidpf address)
         allocator->release(allocator->context, address);
 }
 
+int GrowOutputBuffer(TInflateAllocator& allocator,
+                     unsigned char** buffer,
+                     int oldCapacity,
+                     int minNewCapacity,
+                     int hardLimit)
+{
+    int newCapacity = oldCapacity < 4096 ? 4096 : oldCapacity * 2;
+    if (newCapacity < minNewCapacity)
+        newCapacity = minNewCapacity;
+    if (newCapacity > hardLimit)
+        newCapacity = hardLimit;
+    if (newCapacity <= oldCapacity)
+        return 0;
+    unsigned char* grown = static_cast<unsigned char*>(
+        allocator.allocate(allocator.context, static_cast<unsigned int>(newCapacity)));
+    if (!grown)
+        return 0;
+    if (oldCapacity > 0)
+        for (int index = 0; index < oldCapacity; ++index)
+            grown[index] = (*buffer)[index];
+    if (*buffer)
+        allocator.release(allocator.context, *buffer);
+    *buffer = grown;
+    return newCapacity;
+}
+
 int InflatePass(const EasyRpgRgssScriptArchiveReader& reader,
                 const EasyRpgRgssScriptEntry& entry,
                 TInflateAllocator& allocator,
-                unsigned char* output,
-                int outputCapacity,
+                unsigned char** buffer,
+                int& capacity,
                 int maxOutputBytes,
                 int& outputLength)
 {
     unsigned char inputBuffer[1024];
-    unsigned char scratchBuffer[1024];
     z_stream stream;
     stream.next_in = Z_NULL;
     stream.avail_in = 0;
@@ -493,40 +518,36 @@ int InflatePass(const EasyRpgRgssScriptArchiveReader& reader,
         }
 
         const unsigned long beforeOutput = stream.total_out;
-        if (output)
+        if (stream.total_out > static_cast<unsigned long>(capacity))
         {
-            if (stream.total_out > static_cast<unsigned long>(outputCapacity))
+            result = ERgssScriptArchiveErrorCorrupt;
+            break;
+        }
+        int remaining = capacity - static_cast<int>(stream.total_out);
+        if (remaining <= 0)
+        {
+            const int grown = GrowOutputBuffer(allocator,
+                                               buffer,
+                                               capacity,
+                                               static_cast<int>(stream.total_out) + 1,
+                                               maxOutputBytes + 1);
+            if (!grown)
             {
-                result = ERgssScriptArchiveErrorCorrupt;
+                result = stream.total_out > static_cast<unsigned long>(maxOutputBytes)
+                    ? ERgssScriptArchiveErrorCapacity
+                    : ERgssScriptArchiveErrorNoMemory;
                 break;
             }
-            const int remaining = outputCapacity - static_cast<int>(stream.total_out);
-            if (remaining <= 0)
-            {
-                stream.next_out = scratchBuffer;
-                stream.avail_out = static_cast<uInt>(sizeof(scratchBuffer));
-            }
-            else
-            {
-                stream.next_out = output + stream.total_out;
-                stream.avail_out = static_cast<uInt>(remaining);
-            }
+            capacity = grown;
+            remaining = capacity - static_cast<int>(stream.total_out);
         }
-        else
-        {
-            stream.next_out = scratchBuffer;
-            stream.avail_out = static_cast<uInt>(sizeof(scratchBuffer));
-        }
+        stream.next_out = *buffer + stream.total_out;
+        stream.avail_out = static_cast<uInt>(remaining);
 
         const int inflateResult = inflate(&stream, Z_NO_FLUSH);
         if (stream.total_out > static_cast<unsigned long>(maxOutputBytes))
         {
             result = ERgssScriptArchiveErrorCapacity;
-            break;
-        }
-        if (output && stream.total_out > static_cast<unsigned long>(outputCapacity))
-        {
-            result = ERgssScriptArchiveErrorCorrupt;
             break;
         }
         if (inflateResult == Z_STREAM_END)
@@ -603,33 +624,42 @@ extern "C" int EasyRpgRgssScriptArchiveInflate(
     allocator.release = release;
     allocator.context = allocation_context;
 
-    int required = 0;
-    int result = InflatePass(*reader,
-                             *entry,
-                             allocator,
-                             0,
-                             0,
-                             max_output_bytes,
-                             required);
-    if (result != ERgssScriptArchiveOk)
-        return result;
-    if (required < 0 || required > max_output_bytes || required >= 0x7fffffff)
-        return ERgssScriptArchiveErrorCapacity;
+    // Single inflate pass: start from a compression-ratio estimate of the
+    // final size and grow the buffer geometrically when it was too small.
+    // The previous two-pass design (measure, then re-inflate) decoded every
+    // script twice, which dominated boot time on large script archives.
+    long estimate = static_cast<long>(entry->data_length) * 4 + 4096;
+    if (estimate > max_output_bytes)
+        estimate = max_output_bytes;
+    if (estimate < 4096)
+        estimate = 4096;
+    int capacity = static_cast<int>(estimate) + 1;
 
     unsigned char* data = static_cast<unsigned char*>(
-        allocate(allocation_context, static_cast<unsigned int>(required + 1)));
+        allocate(allocation_context, static_cast<unsigned int>(capacity)));
     if (!data)
         return ERgssScriptArchiveErrorNoMemory;
 
     int actual = 0;
-    result = InflatePass(*reader,
-                         *entry,
-                         allocator,
-                         data,
-                         required,
-                         max_output_bytes,
-                         actual);
-    if (result != ERgssScriptArchiveOk || actual != required)
+    int result = InflatePass(*reader,
+                             *entry,
+                             allocator,
+                             &data,
+                             capacity,
+                             max_output_bytes,
+                             actual);
+    if (result == ERgssScriptArchiveOk && capacity < actual + 1)
+    {
+        const int grown = GrowOutputBuffer(allocator,
+                                           &data,
+                                           capacity,
+                                           actual + 1,
+                                           max_output_bytes + 1);
+        result = grown ? ERgssScriptArchiveOk : ERgssScriptArchiveErrorNoMemory;
+        if (grown)
+            capacity = grown;
+    }
+    if (result != ERgssScriptArchiveOk || actual < 0)
     {
         release(allocation_context, data);
         return result != ERgssScriptArchiveOk

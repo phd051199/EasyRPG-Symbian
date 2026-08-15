@@ -27,6 +27,7 @@ function parseArgs(argv) {
         rpkg: path.join(rootDir, 'games', 'E5 (S60v3)', 'SYM.RPKG'),
         sis: path.join(rootDir, 'sis', 'EasyRPG.sis'),
         game: defaultGame(),
+        save: '',
         profile: path.join(rootDir, 'build', 'eka2l1-headless-profile'),
         output: path.join(rootDir, 'build', 'eka2l1-headless'),
         uid: 0xE31EA5A1,
@@ -54,6 +55,7 @@ function parseArgs(argv) {
         else if (arg === '--rpkg') out.rpkg = path.resolve(take());
         else if (arg === '--sis') out.sis = path.resolve(take());
         else if (arg === '--game') out.game = path.resolve(take());
+        else if (arg === '--save') out.save = path.resolve(take());
         else if (arg === '--profile') out.profile = path.resolve(take());
         else if (arg === '--output') out.output = path.resolve(take());
         else if (arg === '--uid') out.uid = Number(take());
@@ -82,6 +84,7 @@ function usage() {
         '  --rpkg PATH',
         '  --sis PATH',
         '  --game PATH',
+        '  --save PATH       Preload a 2k/2k3 SaveXX.lsd into the per-game save directory',
         '  --chrome PATH',
         '  --site URL',
         '  --profile PATH',
@@ -114,6 +117,16 @@ function sleep(ms) {
 function appExitKey(exit) {
     if (!exit) return '';
     return `${exit.uid}:${exit.type}:${exit.reason}:${exit.category}:${exit.name}`;
+}
+
+function symbianGameHash(text) {
+    let hash = 2166136261 >>> 0;
+    for (let index = 0; index < text.length; ++index) {
+        const value = text.charCodeAt(index);
+        hash = Math.imul((hash ^ (value & 0xff)) >>> 0, 16777619) >>> 0;
+        hash = Math.imul((hash ^ ((value >>> 8) & 0xff)) >>> 0, 16777619) >>> 0;
+    }
+    return hash >>> 0;
 }
 
 async function freePort() {
@@ -235,6 +248,7 @@ async function main() {
     }
 
     if (!options.reuseSis) assertFile(options.sis, 'SIS');
+    if (options.save) assertFile(options.save, 'Save');
     if (path.isAbsolute(options.chrome)) assertFile(options.chrome, 'Chrome');
 
     if (options.resetProfile) fs.rmSync(options.profile, { recursive: true, force: true });
@@ -279,6 +293,7 @@ async function main() {
         deviceInstalled: false,
         sisInstalled: false,
         gameUploaded: false,
+        saveUploaded: false,
         firstFrame: false,
         appExit: null,
         redrawFps: 0,
@@ -556,22 +571,32 @@ async function main() {
                 const dir = '/eka2l1/drives/c/data/easyrpg/games';
                 const target = ${JSON.stringify(guestFsPath)};
                 EKA2L1.module.FS.mkdirTree(dir);
+                const keep = ${JSON.stringify(guestFileName)};
+                const unresolved = [];
                 for (const name of EKA2L1.module.FS.readdir(dir)) {
-                    if (name === '.' || name === '..') continue;
+                    if (name === '.' || name === '..' || name.toLowerCase() === keep) continue;
                     const existing = dir + '/' + name;
                     try {
                         const st = EKA2L1.module.FS.stat(existing);
                         if (EKA2L1.module.FS.isFile(st.mode)) EKA2L1.module.FS.unlink(existing);
-                    } catch (e) {}
+                    } catch (e) { unresolved.push(name); }
                 }
                 await EKA2L1.writeFileToVFS(file, target);
                 await EKA2L1.save();
                 const st = EKA2L1.module.FS.stat(target);
-                return { size: st.size, target };
+                const remaining = EKA2L1.module.FS.readdir(dir)
+                    .filter(name => name !== '.' && name !== '..');
+                return { size: st.size, target, remaining, unresolved };
             })()`, true);
             const localGameSize = fs.statSync(options.game).size;
             if (!uploadResult || uploadResult.size !== localGameSize) {
                 throw new Error(`Game upload size mismatch: local=${localGameSize} remote=${uploadResult?.size}`);
+            }
+            if (uploadResult.remaining.length !== 1 ||
+                uploadResult.remaining[0].toLowerCase() !== guestFileName) {
+                throw new Error(`Guest games dir contaminated (launcher would pick the wrong game): ` +
+                    `remaining=${JSON.stringify(uploadResult.remaining)} ` +
+                    `unresolved-deletes=${JSON.stringify(uploadResult.unresolved)}`);
             }
             result.gameUploaded = true;
             pushLog(`game: uploaded ${uploadResult.target} (${uploadResult.size} bytes)`);
@@ -587,7 +612,9 @@ async function main() {
                         } catch (e) { return false; }
                     });
                     if (!files.length) return null;
-                    const target = dir + '/' + files[0];
+                    const preferred = ${JSON.stringify(path.basename(options.game).toLowerCase())};
+                    const name = files.find(value => value.toLowerCase() === preferred) || files[0];
+                    const target = dir + '/' + name;
                     return { target, size: EKA2L1.module.FS.stat(target).size };
                 } catch (e) { return null; }
             })()`);
@@ -595,6 +622,30 @@ async function main() {
                 throw new Error(`Game zip not found locally and profile has no guest game: ${options.game}`);
             result.gameUploaded = true;
             pushLog(`game: reusing ${existingGame.target} (${existingGame.size} bytes)`);
+        }
+
+        if (options.save) {
+            const guestFileName = path.basename(options.game).toLowerCase();
+            const symbianGamePath = `C:\\Data\\EasyRPG\\Games\\${guestFileName}`;
+            const saveDirectoryName = symbianGameHash(symbianGamePath).toString(16).padStart(8, '0');
+            const saveName = path.basename(options.save);
+            const saveBytes = fs.readFileSync(options.save).toString('base64');
+            const saveResult = await evaluate(`(async () => {
+                const dir = ${JSON.stringify(`/eka2l1/drives/c/data/easyrpg/saves/${saveDirectoryName}`)};
+                const target = dir + '/' + ${JSON.stringify(saveName)};
+                const encoded = ${JSON.stringify(saveBytes)};
+                const binary = atob(encoded);
+                const bytes = new Uint8Array(binary.length);
+                for (let index = 0; index < binary.length; ++index) bytes[index] = binary.charCodeAt(index);
+                EKA2L1.module.FS.mkdirTree(dir);
+                EKA2L1.module.FS.writeFile(target, bytes);
+                await EKA2L1.save();
+                return { target, size: EKA2L1.module.FS.stat(target).size };
+            })()`, true);
+            if (!saveResult || saveResult.size !== fs.statSync(options.save).size)
+                throw new Error(`Save upload size mismatch: ${JSON.stringify(saveResult)}`);
+            result.saveUploaded = true;
+            pushLog(`save: uploaded ${saveResult.target} (${saveResult.size} bytes)`);
         }
 
         const siteUrl = new URL(options.site);
@@ -754,7 +805,7 @@ async function main() {
         result.redrawFps = (redrawEnd - redrawStart) * 1000 / Math.max(1, sampleEnd - sampleStart);
         result.guestFs = await evaluate(`(() => {
             const fs = EKA2L1.module.FS;
-            const paths = ['/', '/eka2l1', '/eka2l1/drives', '/eka2l1/drives/c', '/eka2l1/drives/c/data', '/eka2l1/drives/c/data/easyrpg', '/eka2l1/drives/c/data/easyrpg/saves'];
+            const paths = ['/', '/eka2l1', '/eka2l1/drives', '/eka2l1/drives/c', '/eka2l1/drives/c/data', '/eka2l1/drives/c/data/easyrpg', '/eka2l1/drives/c/data/easyrpg/saves', '/eka2l1/drives/e', '/eka2l1/drives/e/EasyRPG', '/eka2l1/drives/e/EasyRPG/Games', '/eka2l1/drives/d'];
             const out = {};
             for (const target of paths) {
                 try { out[target] = fs.readdir(target); }

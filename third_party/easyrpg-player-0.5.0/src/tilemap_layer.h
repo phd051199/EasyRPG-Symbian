@@ -198,6 +198,7 @@ private:
 	void SymbianScrollTouch(int shift_x, int shift_y);
 	int SymbianScrollCacheIndex(int z_order) const;
 	bool SymbianUseScrollCache(int z_order) const;
+	bool SymbianCacheTransparent(int z_order) const;
 	bool SymbianUseAnchoredScrollCache(int z_order) const;
 	bool SymbianScrollCacheValid(int z_order, int display_width, int display_height) const;
 	bool SymbianPrepareScrollCache(int z_order, int display_width, int display_height);

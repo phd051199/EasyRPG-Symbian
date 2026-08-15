@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifdef environ
@@ -78,6 +79,35 @@ int EasyRpgRubyStrcmp(const char* left, const char* right)
 TRgssSignalHandler signal(int, TRgssSignalHandler handler)
 {
     return handler;
+}
+
+// Symbian's libc localtime/tzset path talks to the timezone server and reads
+// TZDB.DBZ. EKA2L1's S60 image does not provide that database; repeated
+// Time.now/localtime calls eventually fault in tzclient/libc. Ruby only needs
+// calendar fields here, so derive local civil time from the kernel UTC offset
+// and the timezone-independent libc gmtime implementation.
+void tzset(void)
+{
+}
+
+struct tm* localtime(const time_t* value)
+{
+    if (!value)
+    {
+        errno = EINVAL;
+        return NULL;
+    }
+    const long offset = static_cast<long>(User::UTCOffset().Int());
+    const time_t adjusted = *value + static_cast<time_t>(offset);
+    struct tm* utc = gmtime(&adjusted);
+    if (!utc)
+        return NULL;
+    static struct tm result;
+    result = *utc;
+    result.tm_isdst = 0;
+    result.tm_gmtoff = offset;
+    result.tm_zone = const_cast<char*>("LOCAL");
+    return &result;
 }
 
 void* easyrpg_symbian_gc_page_alloc(size_t alignment, size_t size)

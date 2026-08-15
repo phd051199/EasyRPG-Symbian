@@ -243,6 +243,98 @@ void SymbianCopyTileRow565(uint8_t* aDestination, const uint8_t* aSource) {
 		destination[index] = source[index];
 }
 
+// Tiled sources that are not native r5g6b5 (for example the tone-processed
+// panorama plane bitmap, which is a1r5g5b5) would otherwise run the general
+// pixman repeat-transform composite over the whole destination on every
+// painted frame. Cache a fully opaque r5g6b5 copy of the tiled source rect
+// so the per-frame cost drops to the row-copy fast path used by native 565
+// sources. Slots are keyed by bitmap pointer plus the globally unique
+// revision seed, so content changes and bitmap reuse invalidate correctly.
+const int KSymbianTiledBlitCacheSlots = 2;
+const int KSymbianTiledBlitCacheMaxPixels = 262144;
+
+struct SymbianTiledBlitCacheSlot {
+	const Bitmap* source;
+	unsigned int revision;
+	int x;
+	int y;
+	int width;
+	int height;
+	uint16_t* pixels;
+	bool rejected;
+	unsigned int stamp;
+};
+
+SymbianTiledBlitCacheSlot gSymbianTiledBlitCache[KSymbianTiledBlitCacheSlots];
+unsigned int gSymbianTiledBlitCacheStamp = 0;
+
+const uint16_t* SymbianTiledBlitSource565(const Bitmap& aSource, const Rect& aSourceRect) {
+	if (aSourceRect.width <= 0 || aSourceRect.height <= 0 ||
+		aSourceRect.x < 0 || aSourceRect.y < 0 ||
+		aSourceRect.x + aSourceRect.width > aSource.width() ||
+		aSourceRect.y + aSourceRect.height > aSource.height())
+		return NULL;
+	if (static_cast<long long>(aSourceRect.width) * aSourceRect.height >
+		static_cast<long long>(KSymbianTiledBlitCacheMaxPixels))
+		return NULL;
+
+	SymbianTiledBlitCacheSlot* available = NULL;
+	for (int index = 0; index < KSymbianTiledBlitCacheSlots; ++index) {
+		SymbianTiledBlitCacheSlot& slot = gSymbianTiledBlitCache[index];
+		if (slot.source == &aSource && slot.revision == aSource.Revision() &&
+			slot.x == aSourceRect.x && slot.y == aSourceRect.y &&
+			slot.width == aSourceRect.width && slot.height == aSourceRect.height) {
+			slot.stamp = ++gSymbianTiledBlitCacheStamp;
+			return slot.rejected ? NULL : slot.pixels;
+		}
+		if (!available && !slot.source)
+			available = &slot;
+	}
+	if (!available) {
+		available = &gSymbianTiledBlitCache[0];
+		for (int index = 1; index < KSymbianTiledBlitCacheSlots; ++index) {
+			if (gSymbianTiledBlitCache[index].stamp < available->stamp)
+				available = &gSymbianTiledBlitCache[index];
+		}
+	}
+
+	const uint8_t* source_pixels = static_cast<const uint8_t*>(aSource.pixels());
+	if (!source_pixels)
+		return NULL;
+	const int source_pitch = aSource.pitch();
+	uint16_t* pixels = static_cast<uint16_t*>(
+		std::realloc(available->pixels,
+			static_cast<size_t>(aSourceRect.width) * aSourceRect.height * sizeof(uint16_t)));
+	if (!pixels)
+		return NULL;
+
+	bool opaque = true;
+	for (int row = 0; row < aSourceRect.height && opaque; ++row) {
+		const uint16_t* source_row = reinterpret_cast<const uint16_t*>(
+			source_pixels + (aSourceRect.y + row) * source_pitch) + aSourceRect.x;
+		uint16_t* destination_row = pixels + static_cast<size_t>(row) * aSourceRect.width;
+		for (int column = 0; column < aSourceRect.width; ++column) {
+			const uint16_t pixel = source_row[column];
+			if ((pixel & 0x8000u) == 0) {
+				opaque = false;
+				break;
+			}
+			destination_row[column] = SymbianA1555To565(pixel);
+		}
+	}
+
+	available->source = &aSource;
+	available->revision = aSource.Revision();
+	available->x = aSourceRect.x;
+	available->y = aSourceRect.y;
+	available->width = aSourceRect.width;
+	available->height = aSourceRect.height;
+	available->pixels = pixels;
+	available->rejected = !opaque;
+	available->stamp = ++gSymbianTiledBlitCacheStamp;
+	return available->rejected ? NULL : pixels;
+}
+
 void SymbianExpand565(uint16_t aPixel, unsigned int& aRed, unsigned int& aGreen, unsigned int& aBlue) {
 	aRed = (aPixel >> 11) & 31u;
 	aGreen = (aPixel >> 5) & 63u;
@@ -1648,20 +1740,44 @@ void Bitmap::BlitTileFast565(int x, int y, Bitmap const& src, int src_x, int src
 						row_bytes);
 			}
 		} else {
+			// A1R5G5B5 is used for binary-alpha sprites/tiles. The old fast path
+			// stripped bit 15 and copied every pixel, so transparent texels became
+			// opaque coloured squares whenever a tile layer was repainted. Preserve
+			// destination pixels for alpha=0 while still copying opaque pairs fast.
 			for (int row = 0; row < copy_height; ++row) {
 				uint16_t* destination = reinterpret_cast<uint16_t*>(destination_base + (dy + row) * destination_pitch) + dx;
 				const uint16_t* source = reinterpret_cast<const uint16_t*>(source_base + (sy + row) * source_pitch) + sx;
 				int column = 0;
-				if (((reinterpret_cast<size_t>(destination) | reinterpret_cast<size_t>(source)) & 3u) == 0) {
+				if ((reinterpret_cast<size_t>(destination) & 3u) == 0) {
 					uint32_t* destination32 = reinterpret_cast<uint32_t*>(destination);
-					const uint32_t* source32 = reinterpret_cast<const uint32_t*>(source);
+					const bool source_aligned = (reinterpret_cast<size_t>(source) & 3u) == 0;
+					const uint32_t* source32 = source_aligned ? reinterpret_cast<const uint32_t*>(source) : NULL;
 					const int pairs = copy_width >> 1;
-					for (int pair = 0; pair < pairs; ++pair)
-						destination32[pair] = SymbianA1555PairTo565(source32[pair]);
+					for (int pair = 0; pair < pairs; ++pair) {
+						const int pixel = pair << 1;
+						const uint32_t pixels = source_aligned
+							? source32[pair]
+							: static_cast<uint32_t>(source[pixel]) |
+								(static_cast<uint32_t>(source[pixel + 1]) << 16);
+						const uint32_t alpha = pixels & 0x80008000u;
+						if (alpha == 0)
+							continue;
+						if (alpha == 0x80008000u) {
+							destination32[pair] = SymbianA1555PairTo565(pixels);
+							continue;
+						}
+						if ((pixels & 0x00008000u) != 0)
+							destination[pixel] = SymbianA1555To565(static_cast<uint16_t>(pixels));
+						if ((pixels & 0x80000000u) != 0)
+							destination[pixel + 1] = SymbianA1555To565(static_cast<uint16_t>(pixels >> 16));
+					}
 					column = pairs << 1;
 				}
-				for (; column < copy_width; ++column)
-					destination[column] = SymbianA1555To565(source[column]);
+				for (; column < copy_width; ++column) {
+					const uint16_t pixel = source[column];
+					if ((pixel & 0x8000u) != 0)
+						destination[column] = SymbianA1555To565(pixel);
+				}
 			}
 		}
 		return;
@@ -1737,7 +1853,8 @@ void Bitmap::TiledBlit(int ox, int oy, Rect const& src_rect, Bitmap const& src, 
 	if (SymbianRecordDraw(this, signature, dst_rect))
 		return;
 	if (this != &src && !opacity.IsSplit() && opacity.Value() == 255 &&
-		pixman_format == PIXMAN_r5g6b5 && src.pixman_format == PIXMAN_r5g6b5 &&
+		pixman_format == PIXMAN_r5g6b5 &&
+		(src.pixman_format == PIXMAN_r5g6b5 || src.pixman_format == PIXMAN_a1r5g5b5) &&
 		src_rect.width > 0 && src_rect.height > 0 &&
 		src_rect.x >= 0 && src_rect.y >= 0 &&
 		src_rect.x + src_rect.width <= src.width() &&
@@ -1748,16 +1865,28 @@ void Bitmap::TiledBlit(int ox, int oy, Rect const& src_rect, Bitmap const& src, 
 		if (paint_clip)
 			destination.Adjust(*paint_clip);
 		if (!destination.IsEmpty()) {
+			const uint8_t* source_base = static_cast<const uint8_t*>(src.pixels());
+			int source_pitch = src.pitch();
+			int source_row_base = src_rect.y;
+			int source_column_base = src_rect.x;
+			if (src.pixman_format != PIXMAN_r5g6b5) {
+				const uint16_t* cached = SymbianTiledBlitSource565(src, src_rect);
+				if (!cached)
+					goto symbian_tiled_blit_general;
+				source_base = reinterpret_cast<const uint8_t*>(cached);
+				source_pitch = src_rect.width * 2;
+				source_row_base = 0;
+				source_column_base = 0;
+			}
 			int source_y_offset = (destination.y - dst_rect.y + oy) % src_rect.height;
 			if (source_y_offset < 0)
 				source_y_offset += src_rect.height;
 			uint8_t* destination_base = static_cast<uint8_t*>(pixels());
-			const uint8_t* source_base = static_cast<const uint8_t*>(src.pixels());
 			for (int row = 0; row < destination.height; ++row) {
-				const int source_y = src_rect.y + source_y_offset;
+				const int source_y = source_row_base + source_y_offset;
 				uint8_t* destination_row = destination_base +
 					(destination.y + row) * pitch() + destination.x * 2;
-				const uint8_t* source_row = source_base + source_y * src.pitch();
+				const uint8_t* source_row = source_base + source_y * source_pitch;
 				int source_x_offset = (destination.x - dst_rect.x + ox) % src_rect.width;
 				if (source_x_offset < 0)
 					source_x_offset += src_rect.width;
@@ -1765,7 +1894,7 @@ void Bitmap::TiledBlit(int ox, int oy, Rect const& src_rect, Bitmap const& src, 
 				while (remaining > 0) {
 					const int pixels_to_copy = std::min(remaining, src_rect.width - source_x_offset);
 					std::memcpy(destination_row,
-						source_row + (src_rect.x + source_x_offset) * 2,
+						source_row + (source_column_base + source_x_offset) * 2,
 						static_cast<size_t>(pixels_to_copy) * 2u);
 					destination_row += pixels_to_copy * 2;
 					remaining -= pixels_to_copy;
@@ -1778,6 +1907,7 @@ void Bitmap::TiledBlit(int ox, int oy, Rect const& src_rect, Bitmap const& src, 
 		}
 		return;
 	}
+	symbian_tiled_blit_general:;
 #endif
 
 	if (ox >= src_rect.width)	ox %= src_rect.width;

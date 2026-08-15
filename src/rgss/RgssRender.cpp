@@ -1,5 +1,9 @@
 #include "RgssRenderBridge.h"
 
+// Provided by RgssBitmap.cpp: refreshes the per-pass config/framebuffer
+// snapshot once so the per-command blits skip repeated struct copies.
+extern "C" int EasyRpgRgssBitmapBeginFrame(void);
+
 namespace
 {
 struct TRenderSlot
@@ -256,6 +260,9 @@ extern "C" int EasyRpgRgssRenderRange(int minimum_z,
     const int rebuildResult = RebuildOrder();
     if (rebuildResult != ERgssRenderOk)
         return rebuildResult;
+    // One snapshot per render pass; individual draw callbacks then hit the
+    // cached config/framebuffer instead of re-querying the core per command.
+    EasyRpgRgssBitmapBeginFrame();
 
     EasyRpgRgssRect total;
     total.x = 0;

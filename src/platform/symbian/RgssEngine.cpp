@@ -5,6 +5,7 @@
 #include "RgssEngine.h"
 #include "RgssRuntime.h"
 #include "RgssVmBridge.h"
+#include "RgssVmBridge.h"
 
 class CRgssWindowEventPump : public CActive
 {
@@ -165,7 +166,11 @@ CRgssEngine::CRgssEngine()
       iFrameError(KErrNone),
       iForeground(ETrue),
       iDirectScreenActive(EFalse),
-      iPresentedFrame(EFalse)
+      iPresentedFrame(EFalse),
+      iBootGaugePhase(0),
+      iBootGaugePercent(0),
+      iBootGaugeFrame(0),
+      iBootGaugeActive(ETrue)
 {
 }
 
@@ -216,7 +221,11 @@ void CRgssEngine::ConstructL()
         'W', 'S', 'A', 'D', 'Z', 'X', 'C', 'V', 'B', 'N', 'Q', 'E'
     };
     for (TUint index = 0; index < sizeof(scanCaptures) / sizeof(scanCaptures[0]); ++index)
-        iWindowGroup->CaptureKeyUpAndDowns(scanCaptures[index], 0, 0, 0);
+    {
+        const TInt error = iWindowGroup->CaptureKeyUpAndDowns(scanCaptures[index], 0, 0, 0);
+        if (error < KErrNone)
+            RDebug::Print(_L("RGSS capture scan %u failed %d"), scanCaptures[index], error);
+    }
     const TUint codeCaptures[] = {
         EKeyEnter, EKeyEscape, EKeyBackspace, EKeySpace,
         EKeyLeftArrow, EKeyRightArrow, EKeyUpArrow, EKeyDownArrow,
@@ -225,7 +234,11 @@ void CRgssEngine::ConstructL()
         'w', 's', 'a', 'd', 'z', 'x', 'c', 'v', 'b', 'n', 'q', 'e'
     };
     for (TUint index = 0; index < sizeof(codeCaptures) / sizeof(codeCaptures[0]); ++index)
-        iWindowGroup->CaptureKey(codeCaptures[index], 0, 0, 0);
+    {
+        const TInt error = iWindowGroup->CaptureKey(codeCaptures[index], 0, 0, 0);
+        if (error < KErrNone)
+            RDebug::Print(_L("RGSS capture code %u failed %d"), codeCaptures[index], error);
+    }
     iWs.Flush();
 
     iForeground = ETrue;
@@ -267,8 +280,10 @@ CRgssEngine::~CRgssEngine()
 
 void CRgssEngine::StartL()
 {
-    iRuntime->StartVmL();
+    // Start presenting before the VM exists: the boot loading gauge must be
+    // on screen while ruby_init and script eval are still running.
     StartDirectScreenL();
+    iRuntime->StartVmL();
 }
 
 void CRgssEngine::RunL()
@@ -332,15 +347,97 @@ void CRgssEngine::PresentL(TBool aForceFull)
     iPresentedFrame = ETrue;
 }
 
-void CRgssEngine::FrameTickL(TUint32, TBool)
+void CRgssEngine::DrawBootGaugeL()
+{
+    if (!iRuntime)
+        return;
+
+    CRgssDisplaySurface& surface = iRuntime->Surface();
+    const TSize size = surface.Size();
+    if (size.iWidth < 40 || size.iHeight < 20)
+        return;
+
+    const TInt barWidth = size.iWidth / 2;
+    const TInt barHeight = 10;
+    const TInt barX = (size.iWidth - barWidth) / 2;
+    const TInt barY = (size.iHeight - barHeight) / 2;
+    const TInt trackX = barX + 2;
+    const TInt trackY = barY + 2;
+    const TInt trackW = barWidth - 4;
+    const TInt trackH = barHeight - 4;
+
+    TUint16* pixels = surface.BeginRenderL();
+    const TInt stride = surface.StrideBytes() / 2;
+
+    // Black frame, white border, dark track.
+    for (TInt y = barY; y < barY + barHeight; ++y)
+    {
+        TUint16* row = pixels + y * stride;
+        for (TInt x = barX; x < barX + barWidth; ++x)
+        {
+            const TBool border = y == barY || y == barY + barHeight - 1 ||
+                x == barX || x == barX + barWidth - 1;
+            row[x] = border ? 0xFFFF : 0x0000;
+        }
+    }
+
+    const TInt phase = iRuntime->BootPhase();
+    const TInt percent = iRuntime->BootPercent();
+    if (phase == ERgssVmBootScripts || phase == ERgssVmBootBootstrap ||
+        phase == ERgssVmBootMounting)
+    {
+        // Determinate phases report script/step progress directly.
+        const TInt fillW = trackW * percent / 100;
+        for (TInt y = trackY; y < trackY + trackH; ++y)
+        {
+            TUint16* row = pixels + y * stride;
+            for (TInt x = trackX; x < trackX + fillW; ++x)
+                row[x] = 0x07E0;
+        }
+    }
+    else
+    {
+        // ruby_init has no predictable duration: sweep a block so the user
+        // sees activity while the interpreter boots.
+        const TInt blockW = trackW / 5 > 8 ? trackW / 5 : 8;
+        const TInt span = trackW + blockW;
+        const TInt blockX = trackX + static_cast<TInt>((iBootGaugeFrame * 6) % span) - blockW;
+        for (TInt y = trackY; y < trackY + trackH; ++y)
+        {
+            TUint16* row = pixels + y * stride;
+            for (TInt x = blockX; x < blockX + blockW; ++x)
+            {
+                if (x >= trackX && x < trackX + trackW)
+                    row[x] = 0x07E0;
+            }
+        }
+    }
+    surface.EndRender();
+
+    surface.MarkDirty(TRect(barX, barY, barX + barWidth, barY + barHeight));
+    PresentL(EFalse);
+}
+
+void CRgssEngine::FrameTickL(TUint32 aLogicFrame, TBool)
 {
     if (!iRuntime)
         return;
     const TInt focusGroup = iWs.GetFocusWindowGroup();
     const TBool ownsFocus = focusGroup == iWindowGroup->Identifier();
+    if (!ownsFocus && (aLogicFrame % 30u) == 0u)
+    {
+        // The launcher is still the foreground app when this runtime process
+        // creates its window group. AutoForeground is not implemented by some
+        // S60 window-server variants/emulators, so the launcher can exit while
+        // keyboard focus remains on another group. Reassert our top position
+        // until Window Server reports this group as focused. This needs no
+        // SwEvent capability and also recovers after task switching.
+        iWindowGroup->SetOrdinalPosition(0, 10);
+        iWs.Flush();
+    }
     if (ownsFocus || !iPresentedFrame)
         iForeground = ETrue;
-    if (!iForeground)
+    if (!iForeground && !ownsFocus)
         return;
     if (!iDirectScreenActive || !iDirectScreen || !iDirectScreen->Active())
         StartDirectScreenL();
@@ -358,9 +455,26 @@ void CRgssEngine::FrameTickL(TUint32, TBool)
     if (!iRuntime->AdvanceVmFrameL(compose, frameInput))
     {
         iLogicAccumulator = Min(iLogicAccumulator, 60);
+        if (iBootGaugeActive && iDirectScreenActive)
+        {
+            const TInt phase = iRuntime->BootPhase();
+            const TInt percent = iRuntime->BootPercent();
+            // Repaint when the reported progress advanced, or at ~15 Hz for
+            // the indeterminate ruby_init sweep.
+            const TBool indeterminate = phase <= ERgssVmBootRubyInit;
+            if (phase != iBootGaugePhase || percent != iBootGaugePercent ||
+                (indeterminate && (aLogicFrame & 3) == 0))
+            {
+                iBootGaugePhase = phase;
+                iBootGaugePercent = percent;
+                iBootGaugeFrame = aLogicFrame;
+                TRAP_IGNORE(DrawBootGaugeL());
+            }
+        }
         return;
     }
 
+    iBootGaugeActive = EFalse;
     iPendingInputPulses = 0;
     iLogicAccumulator -= 60;
     iPresentAccumulator = nextPresentAccumulator;
@@ -518,6 +632,9 @@ void CRgssEngine::ClearInput()
 
 void CRgssEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 {
+    RDebug::Print(_L("RGSS key type=%d scan=%d code=%d foreground=%d focus=%d self=%d"),
+                  aType, aKey.iScanCode, aKey.iCode, iForeground,
+                  iWs.GetFocusWindowGroup(), iWindowGroup ? iWindowGroup->Identifier() : -1);
     const TBool rightSoft = aKey.iScanCode == EStdKeyDevice1 || aKey.iCode == EKeyDevice1;
     TUint32 key = rightSoft ? ERgssInputCancel : MapScanKey(aKey);
     if (key == 0)

@@ -32,6 +32,8 @@ public:
     TBool Running() const;
     TInt ExitResult() const;
     TInt FrameRate() const;
+    TInt BootPhase() const;
+    TInt BootPercent() const;
 
 private:
     CRgssVmWorker(TInt aVersion);
@@ -53,6 +55,12 @@ private:
                           int aOffset,
                           void* aBuffer,
                           int aBytes);
+    static int VmFileWrite(void* aContext,
+                           const char* aRelativePath,
+                           int aOffset,
+                           const void* aBuffer,
+                           int aBytes,
+                           int aTruncate);
     static unsigned int VmTicks(void* aContext);
     static unsigned int VmInput(void* aContext, int aWord);
     static int VmBitmapLoad(void* aContext,
@@ -95,17 +103,25 @@ private:
                        int aVolume,
                        int aPitch,
                        int aDuration);
+    static void VmBootProgress(void* aContext, int aPhase, int aPercent);
+    void SetBootProgress(TInt aPhase, TInt aPercent);
     TInt QueueAudioCommand(TInt aCommand,
                            const char* aRelativePath,
                            TInt aVolume,
                            TInt aPitch,
                            TInt aDuration);
     TInt ResolveAudioPath(const char* aRelativePath, TDes8& aResolved) const;
-    TInt FileSize(const char* aRelativePath) const;
+    TInt FileSize(const char* aRelativePath);
     TInt ReadFile(const char* aRelativePath,
                   TInt aOffset,
                   TAny* aBuffer,
-                  TInt aBytes) const;
+                  TInt aBytes);
+    TInt WriteFile(const char* aRelativePath,
+                   TInt aOffset,
+                   const TAny* aBuffer,
+                   TInt aBytes,
+                   TBool aTruncate);
+    TInt BuildSaveFilePath(const char* aRelativePath, TDes& aPath) const;
 
 private:
     TFileName iGamePath;
@@ -132,6 +148,10 @@ private:
     volatile TBool iStopRequested;
     volatile TBool iStartSignaled;
     volatile TBool iVmInitialized;
+    // Written by the VM thread only, read by the engine thread to drive the
+    // boot loading gauge. Aligned 32-bit stores are atomic on this target.
+    volatile TInt iBootPhase;
+    volatile TInt iBootPercent;
     TBool iThreadCreated;
 };
 

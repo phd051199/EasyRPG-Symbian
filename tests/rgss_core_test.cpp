@@ -765,6 +765,7 @@ int main()
     host.script_inflate = VmScriptInflate;
     host.release = VmRelease;
     host.dirty = VmDirty;
+    host.boot_progress = 0;
     assert(EasyRpgRgssVmAvailable() == 0);
     assert(EasyRpgRgssVmInitialize(ERgssVersion1, &host) == ERgssVmErrorUnavailable);
     assert(EasyRpgRgssVmLoadScripts("Data/Scripts.rxdata") == ERgssVmErrorNotInitialized);

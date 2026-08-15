@@ -127,7 +127,7 @@ void CRgssRuntime::ConstructL(const TDesC& aGamePath)
     tableHost.context = this;
     tableHost.allocate = &CRgssRuntime::BitmapAllocate;
     tableHost.release = &CRgssRuntime::BitmapRelease;
-    tableHost.max_tables = 2048;
+    tableHost.max_tables = 4096;
     const TInt tableResult = EasyRpgRgssTableInitialize(&tableHost);
     if (tableResult != ERgssTableOk)
     {
@@ -221,6 +221,16 @@ TInt CRgssRuntime::TargetFps() const
     return iTargetFps;
 }
 
+TInt CRgssRuntime::BootPhase() const
+{
+    return iVmWorker ? iVmWorker->BootPhase() : 0;
+}
+
+TInt CRgssRuntime::BootPercent() const
+{
+    return iVmWorker ? iVmWorker->BootPercent() : 0;
+}
+
 void CRgssRuntime::StartVmL()
 {
     if (iVmStarted || iVmWorker)
@@ -282,7 +292,49 @@ void CRgssRuntime::ComposeL()
         User::Leave(KErrNotReady);
 
     TUint16* pixels = iSurface->BeginRenderL();
-    Mem::FillZ(pixels, iSurface->StrideBytes() * iSurface->Size().iHeight);
+    const TInt strideBytes = iSurface->StrideBytes();
+    const TInt surfaceWidth = iSurface->Size().iWidth;
+    const TInt surfaceHeight = iSurface->Size().iHeight;
+    TBool clearedFull = EFalse;
+    if (iPreviousDirtyValid)
+    {
+        // Clear only the previous frame's dirty rect. Every other pixel either
+        // keeps its already-presented value (untouched by the present union)
+        // or already holds the clear color: a pixel that stopped being covered
+        // was pre-cleared and presented as clear color on the following frame,
+        // so only last frame's dirty rect can hold stale non-background
+        // pixels that translucency must not blend against.
+        TRect clearRect(iPreviousDirtyX,
+                        iPreviousDirtyY,
+                        iPreviousDirtyX + iPreviousDirtyWidth,
+                        iPreviousDirtyY + iPreviousDirtyHeight);
+        clearRect.Intersection(TRect(TSize(surfaceWidth, surfaceHeight)));
+        if (clearRect.Width() > 0 && clearRect.Height() > 0)
+        {
+            const TInt stridePixels = strideBytes / 2;
+            const TInt rowPixels = clearRect.Width();
+            for (TInt row = clearRect.iTl.iY; row < clearRect.iBr.iY; ++row)
+            {
+                Mem::FillZ(pixels + row * stridePixels + clearRect.iTl.iX,
+                           rowPixels * 2);
+            }
+        }
+        else
+        {
+            Mem::FillZ(pixels, strideBytes * surfaceHeight);
+            clearedFull = ETrue;
+        }
+    }
+    else
+    {
+        // First composed frame (or first after an empty frame): the surface
+        // may hold boot-gauge or scene-transition residue anywhere, and the
+        // screen must be refreshed from the cleared surface.
+        Mem::FillZ(pixels, strideBytes * surfaceHeight);
+        clearedFull = ETrue;
+    }
+    if (clearedFull)
+        iSurface->MarkFullDirty();
     const TInt bindResult = EasyRpgRgssCoreBindFramebuffer(pixels,
                                                            iSurface->Size().iWidth,
                                                            iSurface->Size().iHeight,
@@ -299,7 +351,43 @@ void CRgssRuntime::ComposeL()
     iSurface->EndRender();
     if (renderResult != ERgssRenderOk)
         User::Leave(KErrGeneral);
-    iSurface->MarkFullDirty();
+
+    // Present-side dirty tracking. The surface outside the reported dirty
+    // rect still holds the pixels presented last frame, so skipping their
+    // BitBlt is invisible. A renderable that moved away this frame is still
+    // covered because its old rect is unioned in from the previous frame;
+    // that area was cleared above and must be repainted once. When nothing
+    // was drawn at all the whole previous dirty area became the clear color
+    // and needs one final repaint.
+    if (dirty.width > 0 && dirty.height > 0)
+    {
+        TInt left = dirty.x;
+        TInt top = dirty.y;
+        TInt right = dirty.x + dirty.width;
+        TInt bottom = dirty.y + dirty.height;
+        if (iPreviousDirtyValid)
+        {
+            left = Min(left, iPreviousDirtyX);
+            top = Min(top, iPreviousDirtyY);
+            right = Max(right, iPreviousDirtyX + iPreviousDirtyWidth);
+            bottom = Max(bottom, iPreviousDirtyY + iPreviousDirtyHeight);
+        }
+        if (!clearedFull)
+            iSurface->MarkDirty(TRect(left, top, right, bottom));
+        iPreviousDirtyX = dirty.x;
+        iPreviousDirtyY = dirty.y;
+        iPreviousDirtyWidth = dirty.width;
+        iPreviousDirtyHeight = dirty.height;
+        iPreviousDirtyValid = ETrue;
+    }
+    else if (iPreviousDirtyValid)
+    {
+        iSurface->MarkDirty(TRect(iPreviousDirtyX,
+                                  iPreviousDirtyY,
+                                  iPreviousDirtyX + iPreviousDirtyWidth,
+                                  iPreviousDirtyY + iPreviousDirtyHeight));
+        iPreviousDirtyValid = EFalse;
+    }
 }
 
 void CRgssRuntime::ProcessAudioCommands()
@@ -370,8 +458,10 @@ void CRgssRuntime::SetInputWord(TInt aWord, TUint32 aValue)
     iInputWords[aWord] = aValue;
     if (iVmWorker)
         iVmWorker->SetInputWord(aWord, aValue);
-    if (aWord == 0)
-        EasyRpgRgssInputSetMask(aValue);
+    // Do not mutate the RGSS input core from the UI/engine thread. Ruby's
+    // Input.update snapshots the worker word on the VM pthread; updating the
+    // core here races gCurrentMask/gPreviousMask and can consume one-frame
+    // triggers before the game sees them.
 }
 
 const CRgssDisplaySurface& CRgssRuntime::Surface() const

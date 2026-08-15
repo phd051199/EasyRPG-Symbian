@@ -72,6 +72,7 @@ namespace Graphics {
 	std::shared_ptr<State> global_state;
 
 	bool SortDrawableList(const Drawable* first, const Drawable* second);
+	bool IsDrawableListSorted(std::list<Drawable*> const& drawable_list);
 }
 
 unsigned SecondToFrame(float const second) {
@@ -244,12 +245,17 @@ void Graphics::DrawFrame() {
 
 void Graphics::DrawFrameContents() {
 	if (state->zlist_dirty) {
-		state->drawable_list.sort(SortDrawableList);
+		// Walking sprites flip zlist_dirty every 8px of vertical movement even
+		// when the z change did not reorder anything. A linear scan is much
+		// cheaper than the stable merge sort, so verify the order first.
+		if (!IsDrawableListSorted(state->drawable_list))
+			state->drawable_list.sort(SortDrawableList);
 		state->zlist_dirty = false;
 	}
 
 	if (global_state->zlist_dirty) {
-		global_state->drawable_list.sort(SortDrawableList);
+		if (!IsDrawableListSorted(global_state->drawable_list))
+			global_state->drawable_list.sort(SortDrawableList);
 		global_state->zlist_dirty = false;
 	}
 
@@ -587,6 +593,16 @@ void Graphics::UpdateZCallback(Drawable* drawable) {
 inline bool Graphics::SortDrawableList(const Drawable* first, const Drawable* second) {
 	if (first->GetZ() < second->GetZ()) return true;
 	return false;
+}
+
+bool Graphics::IsDrawableListSorted(std::list<Drawable*> const& drawable_list) {
+	const Drawable* previous = NULL;
+	for (Drawable* drawable : drawable_list) {
+		if (previous && previous->GetZ() > drawable->GetZ())
+			return false;
+		previous = drawable;
+	}
+	return true;
 }
 
 void Graphics::Push(bool draw_background) {

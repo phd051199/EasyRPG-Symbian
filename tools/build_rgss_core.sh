@@ -37,6 +37,7 @@ SOURCES=(
     "$PROJECT_DIR/src/rgss/RgssTilemap.cpp"
     "$PROJECT_DIR/src/core/MidiLite.cpp"
     "$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src/midisequencer.cpp"
+    "$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src/shinonome_gothic.cpp"
     "$PROJECT_DIR/src/core/GohuFontData.cpp"
     "$PROJECT_DIR/src/core/Aeabi.cpp"
 )
@@ -121,6 +122,7 @@ for source in "${SOURCES[@]}"; do
         -fdata-sections \
         -ffunction-sections \
         -I "$PROJECT_DIR/inc" \
+        -I "$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src" \
         -I "$SDK_ROOT/epoc32/include/stdapis" \
         -S "$source" \
         -o "$assembly_raw"

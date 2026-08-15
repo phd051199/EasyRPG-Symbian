@@ -44,6 +44,7 @@ private:
 private:
     CFbsTypefaceStore* iStore;
     CFont* iFont;
+    TInt iGlyphBitmapType;
     TEntry iEntries[128];
 };
 

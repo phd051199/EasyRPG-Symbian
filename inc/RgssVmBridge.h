@@ -55,6 +55,12 @@ typedef int (*EasyRpgRgssVmFileReadFn)(void* context,
                                        int offset,
                                        void* buffer,
                                        int bytes);
+typedef int (*EasyRpgRgssVmFileWriteFn)(void* context,
+                                        const char* relative_path,
+                                        int offset,
+                                        const void* buffer,
+                                        int bytes,
+                                        int truncate);
 typedef unsigned int (*EasyRpgRgssVmTicksFn)(void* context);
 typedef unsigned int (*EasyRpgRgssVmInputFn)(void* context,
                                              int word);
@@ -94,12 +100,27 @@ typedef int (*EasyRpgRgssVmAudioFn)(void* context,
                                     int volume,
                                     int pitch,
                                     int duration);
+typedef void (*EasyRpgRgssVmBootProgressFn)(void* context,
+                                            int phase,
+                                            int percent);
+
+/* Boot phases reported through EasyRpgRgssVmHost.boot_progress so the engine
+   thread can drive a loading gauge while the VM thread is still booting. */
+enum EasyRpgRgssVmBootPhase
+{
+    ERgssVmBootMounting = 1,
+    ERgssVmBootRubyInit = 2,
+    ERgssVmBootBootstrap = 3,
+    ERgssVmBootScripts = 4,
+    ERgssVmBootRunning = 5
+};
 
 typedef struct EasyRpgRgssVmHost
 {
     void* context;
     EasyRpgRgssVmFileSizeFn file_size;
     EasyRpgRgssVmFileReadFn file_read;
+    EasyRpgRgssVmFileWriteFn file_write;
     EasyRpgRgssVmTicksFn ticks;
     EasyRpgRgssVmInputFn input;
     EasyRpgRgssVmBitmapLoadFn bitmap_load;
@@ -112,6 +133,7 @@ typedef struct EasyRpgRgssVmHost
     EasyRpgRgssVmReleaseFn release;
     EasyRpgRgssVmDirtyFn dirty;
     EasyRpgRgssVmAudioFn audio;
+    EasyRpgRgssVmBootProgressFn boot_progress;
 } EasyRpgRgssVmHost;
 
 int EasyRpgRgssVmAvailable(void);

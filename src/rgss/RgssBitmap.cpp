@@ -1,5 +1,6 @@
 #include "GohuFont.h"
 #include "RgssBitmapBridge.h"
+#include "shinonome.h"
 
 namespace
 {
@@ -81,6 +82,170 @@ int Divide255Round(int value)
 int Divide255SignedRound(int value)
 {
     return value >= 0 ? Divide255Round(value) : -Divide255Round(-value);
+}
+
+// ARM11 (Nokia E72) has no integer divide instruction: every '/' compiles to
+// a __aeabi_idiv call. The blit/text hot paths below use these division-free
+// helpers instead. Both produce bit-identical results to the plain '/' forms
+// they replace (Euclidean quotient stepping / exact 24-bit reciprocals).
+
+// Steps q = floor(n * rate / modulus) as n advances by one (Advance) or by
+// delta (AdvanceBy). remainder always stays in [0, modulus) so the amortized
+// cost per step is a compare plus one subtract per quotient increment.
+struct TRatioStepper
+{
+    int quotient;
+    int remainder;
+    int rate;
+    int modulus;
+};
+
+void StepperInit(TRatioStepper& stepper, int rate, int modulus)
+{
+    stepper.quotient = 0;
+    stepper.remainder = 0;
+    stepper.rate = rate;
+    stepper.modulus = modulus;
+}
+
+void StepperSeed(TRatioStepper& stepper, int numerator)
+{
+    // Seeds the stepper so quotient = floor(numerator / modulus). Used when
+    // the mapping starts at a non-zero base offset; one division per call.
+    stepper.quotient = DivideInt(numerator, stepper.modulus);
+    stepper.remainder = numerator - stepper.quotient * stepper.modulus;
+}
+
+void StepperAdvance(TRatioStepper& stepper)
+{
+    stepper.remainder += stepper.rate;
+    while (stepper.remainder >= stepper.modulus)
+    {
+        stepper.remainder -= stepper.modulus;
+        ++stepper.quotient;
+    }
+}
+
+void StepperAdvanceBy(TRatioStepper& stepper, int delta)
+{
+    stepper.remainder += delta * stepper.rate;
+    while (stepper.remainder >= stepper.modulus)
+    {
+        stepper.remainder -= stepper.modulus;
+        ++stepper.quotient;
+    }
+}
+
+// Steps m = value % period (value non-negative, growing monotonically) without
+// division: the accumulator stays in [0, period) and each advance subtracts
+// period at most (delta / period + 1) times.
+struct TWrapAccumulator
+{
+    int value;
+    int period;
+};
+
+void WrapInit(TWrapAccumulator& accumulator, int base, int period)
+{
+    accumulator.period = period;
+    accumulator.value = base - DivideInt(base, period) * period;
+    if (accumulator.value < 0)
+        accumulator.value += period;
+}
+
+void WrapAdvance(TWrapAccumulator& accumulator, int delta)
+{
+    accumulator.value += delta;
+    while (accumulator.value >= accumulator.period)
+        accumulator.value -= accumulator.period;
+}
+
+// ceil(2^24 / a) for a in 1..255 (0 for a == 0). Dividing any numerator
+// n < 65536 by a via DivSmall below is exactly floor(n / a): with
+// m = ceil(2^24 / a) and e = m*a - 2^24 (0 <= e < a), the fast quotient
+// floor(n*m / 2^24) = floor(n/a + n*e/(a*2^24)) equals floor(n/a) for all
+// n < 2^16 because n*e < 65536*255 < 2^24.
+int gAlphaReciprocal[256];
+unsigned char gAlphaReciprocalReady = 0;
+
+void EnsureAlphaReciprocal()
+{
+    if (gAlphaReciprocalReady)
+        return;
+    for (int alpha = 1; alpha < 256; ++alpha)
+    {
+        const int quotient = DivideInt(1 << 24, alpha);
+        gAlphaReciprocal[alpha] =
+            quotient + ((1 << 24) - quotient * alpha != 0 ? 1 : 0);
+    }
+    gAlphaReciprocal[0] = 0;
+    gAlphaReciprocalReady = 1;
+}
+
+inline int DivSmall(unsigned int numerator, int reciprocal)
+{
+    // (numerator * ceil(2^24/a)) >> 24 split into two 32-bit multiplies:
+    // numerator * reciprocal = (numerator * high) * 2^16 + numerator * low,
+    // so the quotient is (((numerator * high) + (numerator * low >> 16)) >> 8).
+    // numerator < 2^16 keeps every product inside 32 bits.
+    const unsigned int low = numerator * static_cast<unsigned int>(reciprocal & 0xffffu);
+    const unsigned int high = numerator * static_cast<unsigned int>(static_cast<unsigned int>(reciprocal) >> 16);
+    return static_cast<int>((high + (low >> 16)) >> 8);
+}
+
+// Per-render-pass snapshot of the core config and framebuffer. The blit
+// entry points below run once per tile/sprite command (hundreds of times per
+// frame); fetching config + framebuffer through the core bridge each time
+// costs two struct copies per call. EasyRpgRgssBitmapBeginFrame (invoked once
+// per render pass from RgssRender) refreshes this snapshot so blits read it
+// for free. Blits issued outside a render pass refresh it on demand.
+struct TFrameSnapshot
+{
+    int valid;
+    EasyRpgRgssConfig config;
+    void* pixels;
+    int width;
+    int height;
+    int pitch;
+    int format;
+};
+
+TFrameSnapshot gFrameSnapshot;
+
+int RefreshFrameSnapshot()
+{
+    EasyRpgRgssConfig config;
+    if (EasyRpgRgssCoreGetConfig(&config) != ERgssOk)
+    {
+        gFrameSnapshot.valid = 0;
+        return 0;
+    }
+    void* pixels = 0;
+    int width = 0;
+    int height = 0;
+    int pitch = 0;
+    int format = 0;
+    if (EasyRpgRgssCoreGetFramebuffer(&pixels, &width, &height, &pitch, &format) != ERgssOk ||
+        format != ERgssPixelRgb565)
+    {
+        gFrameSnapshot.valid = 0;
+        return 0;
+    }
+    gFrameSnapshot.config = config;
+    gFrameSnapshot.pixels = pixels;
+    gFrameSnapshot.width = width;
+    gFrameSnapshot.height = height;
+    gFrameSnapshot.pitch = pitch;
+    gFrameSnapshot.format = format;
+    gFrameSnapshot.valid = 1;
+    return 1;
+}
+
+const TFrameSnapshot* AcquireFrameSnapshot()
+{
+    if (!gFrameSnapshot.valid && !RefreshFrameSnapshot())
+        return 0;
+    return &gFrameSnapshot;
 }
 
 unsigned short Blend565(unsigned short destination,
@@ -205,6 +370,25 @@ struct TResolvedGlyph
     int advance;
 };
 
+const ShinonomeGlyph* FindShinonomeGlyph(unsigned int codepoint)
+{
+    if (codepoint > 0xffffu)
+        return 0;
+    int first = 0;
+    int last = 11217;
+    while (first < last)
+    {
+        const int middle = first + (last - first) / 2;
+        if (SHINONOME_GOTHIC[middle].code < codepoint)
+            first = middle + 1;
+        else
+            last = middle;
+    }
+    return first < 11217 && SHINONOME_GOTHIC[first].code == codepoint
+        ? &SHINONOME_GOTHIC[first]
+        : 0;
+}
+
 int ResolveGlyph(unsigned int codepoint, TResolvedGlyph& glyph)
 {
     glyph.rows8 = 0;
@@ -212,22 +396,50 @@ int ResolveGlyph(unsigned int codepoint, TResolvedGlyph& glyph)
     glyph.width = 0;
     glyph.height = 0;
     glyph.advance = 0;
+
+    // Keep RGSS text deterministic on S60. CFont::GetCharacterData uses a
+    // platform-specific packed glyph format on 3rd FP2; treating that buffer
+    // as scanline bits produced the large square/gibberish glyphs seen in XP.
+    // Reuse the proven 2k font path first: Gohu for Latin/Vietnamese and
+    // Shinonome Gothic for Japanese.
+    const unsigned char* rows = EasyRpgGohuGlyphRows(codepoint);
+    if (rows)
+    {
+        glyph.rows8 = rows;
+        glyph.width = 6;
+        glyph.height = 11;
+        glyph.advance = 6;
+        return 1;
+    }
+
+    const ShinonomeGlyph* shinonome = FindShinonomeGlyph(codepoint);
+    if (shinonome)
+    {
+        glyph.rows16 = shinonome->data;
+        glyph.width = shinonome->is_full ? 12 : 6;
+        glyph.height = 12;
+        glyph.advance = glyph.width;
+        return 1;
+    }
+
+    // Retain the platform provider only as a last-resort fallback for glyphs
+    // outside the embedded 2k/Japanese sets.
     if (gBitmaps.host.glyph)
     {
-        const unsigned short* rows = 0;
+        const unsigned short* platformRows = 0;
         int width = 0;
         int height = 0;
         int advance = 0;
         if (gBitmaps.host.glyph(gBitmaps.glyph_context,
                                 codepoint,
-                                &rows,
+                                &platformRows,
                                 &width,
                                 &height,
                                 &advance) > 0 &&
-            rows && width > 0 && width <= 16 &&
+            platformRows && width > 0 && width <= 16 &&
             height > 0 && height <= 32 && advance > 0 && advance <= 32)
         {
-            glyph.rows16 = rows;
+            glyph.rows16 = platformRows;
             glyph.width = width;
             glyph.height = height;
             glyph.advance = advance;
@@ -235,9 +447,7 @@ int ResolveGlyph(unsigned int codepoint, TResolvedGlyph& glyph)
         }
     }
 
-    const unsigned char* rows = EasyRpgGohuGlyphRows(codepoint);
-    if (!rows)
-        rows = EasyRpgGohuGlyphRows('?');
+    rows = EasyRpgGohuGlyphRows('?');
     if (!rows)
         return 0;
     glyph.rows8 = rows;
@@ -306,9 +516,14 @@ void CompositeBitmapPixel(TBitmapSlot& slot,
     const int destinationR = (slot.color[index] >> 11) & 31;
     const int destinationG = (slot.color[index] >> 5) & 63;
     const int destinationB = slot.color[index] & 31;
-    const int outputR = (sourceR * sourceAlpha + destinationR * destinationContribution + outputAlpha / 2) / outputAlpha;
-    const int outputG = (sourceG * sourceAlpha + destinationG * destinationContribution + outputAlpha / 2) / outputAlpha;
-    const int outputB = (sourceB * sourceAlpha + destinationB * destinationContribution + outputAlpha / 2) / outputAlpha;
+    // Three divisions by outputAlpha replaced with one exact reciprocal
+    // multiply per channel (numerators stay below 2^16: 63*255 + 63*255 + 127).
+    EnsureAlphaReciprocal();
+    const int reciprocal = gAlphaReciprocal[outputAlpha];
+    const int half = outputAlpha >> 1;
+    const int outputR = DivSmall(static_cast<unsigned int>(sourceR * sourceAlpha + destinationR * destinationContribution + half), reciprocal);
+    const int outputG = DivSmall(static_cast<unsigned int>(sourceG * sourceAlpha + destinationG * destinationContribution + half), reciprocal);
+    const int outputB = DivSmall(static_cast<unsigned int>(sourceB * sourceAlpha + destinationB * destinationContribution + half), reciprocal);
     slot.color[index] = static_cast<unsigned short>((outputR << 11) | (outputG << 5) | outputB);
     slot.alpha[index] = static_cast<unsigned char>(outputAlpha);
 }
@@ -324,25 +539,36 @@ void DrawResolvedGlyph(TBitmapSlot& slot,
     const int targetHeight = style.font_size;
     const int targetWidth = ScaleMetric(glyph.width, glyph.height, targetHeight);
     const int boldOffset = style.bold ? MaxInt(1, targetHeight / 11) : 0;
+    const int italicUnit = MaxInt(1, targetHeight / 11);
+    TRatioStepper rowStepper;
+    TRatioStepper columnStepper;
+    StepperInit(rowStepper, glyph.height, targetHeight > 0 ? targetHeight : 1);
+    StepperInit(columnStepper, glyph.width, targetWidth > 0 ? targetWidth : 1);
     for (int dy = 0; dy < targetHeight; ++dy)
     {
-        int sourceY = (dy * glyph.height) / targetHeight;
+        StepperInit(columnStepper, glyph.width, targetWidth > 0 ? targetWidth : 1);
+        int sourceY = rowStepper.quotient;
         if (sourceY >= glyph.height)
             sourceY = glyph.height - 1;
         const int italicOffset = style.italic
-            ? ((targetHeight - 1 - dy) * MaxInt(1, targetHeight / 11)) / 4
+            ? ((targetHeight - 1 - dy) * italicUnit) / 4
             : 0;
         for (int dx = 0; dx < targetWidth; ++dx)
         {
-            int sourceX = (dx * glyph.width) / targetWidth;
+            int sourceX = columnStepper.quotient;
             if (sourceX >= glyph.width)
                 sourceX = glyph.width - 1;
             if (!GlyphBit(glyph, sourceX, sourceY))
+            {
+                StepperAdvance(columnStepper);
                 continue;
+            }
             CompositeBitmapPixel(slot, x + dx + italicOffset, y + dy, color, alpha);
             for (int bold = 1; bold <= boldOffset; ++bold)
                 CompositeBitmapPixel(slot, x + dx + italicOffset + bold, y + dy, color, alpha);
+            StepperAdvance(columnStepper);
         }
+        StepperAdvance(rowStepper);
     }
 }
 
@@ -439,18 +665,27 @@ int BitmapToBitmap(TBitmapSlot& destination,
 
     if (right > left && bottom > top)
     {
+        // Exact steppers replace the per-pixel/per-row mapping divisions:
+        // sourceOffset = (relative * sourceRect.extent) / destinationRect.extent.
+        TRatioStepper rowStepper;
+        StepperInit(rowStepper, sourceRect.height, destinationRect.height);
+        StepperSeed(rowStepper, (top - destinationRect.y) * sourceRect.height);
+        TRatioStepper columnStepper;
+        StepperInit(columnStepper, sourceRect.width, destinationRect.width);
         for (int y = top; y < bottom; ++y)
         {
-            const int relativeY = y - destinationRect.y;
-            int sourceOffsetY = (relativeY * sourceRect.height) / destinationRect.height;
+            int sourceOffsetY = rowStepper.quotient;
             if (sourceOffsetY >= sourceRect.height)
                 sourceOffsetY = sourceRect.height - 1;
+            StepperAdvance(rowStepper);
+            StepperInit(columnStepper, sourceRect.width, destinationRect.width);
+            StepperSeed(columnStepper, (left - destinationRect.x) * sourceRect.width);
             for (int x = left; x < right; ++x)
             {
-                const int relativeX = x - destinationRect.x;
-                int sourceOffsetX = (relativeX * sourceRect.width) / destinationRect.width;
+                int sourceOffsetX = columnStepper.quotient;
                 if (sourceOffsetX >= sourceRect.width)
                     sourceOffsetX = sourceRect.width - 1;
+                StepperAdvance(columnStepper);
                 unsigned short sourceColor = 0;
                 int sourceAlpha = 0;
                 if (copiedColor)
@@ -798,6 +1033,96 @@ extern "C" int EasyRpgRgssBitmapFillRect(int handle,
     return ERgssBitmapOk;
 }
 
+extern "C" int EasyRpgRgssBitmapClearRect(int handle,
+                                           int x,
+                                           int y,
+                                           int width,
+                                           int height)
+{
+    TBitmapSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssBitmapErrorInvalidHandle;
+    if (width < 0 || height < 0)
+        return ERgssBitmapErrorInvalidArgument;
+    if (width == 0 || height == 0)
+        return ERgssBitmapOk;
+
+    const int left = x < 0 ? 0 : x;
+    const int top = y < 0 ? 0 : y;
+    int right = x + width;
+    int bottom = y + height;
+    if (right > slot->width)
+        right = slot->width;
+    if (bottom > slot->height)
+        bottom = slot->height;
+    if (right <= left || bottom <= top)
+        return ERgssBitmapOk;
+
+    for (int row = top; row < bottom; ++row)
+    {
+        const int base = row * slot->width;
+        for (int column = left; column < right; ++column)
+        {
+            slot->color[base + column] = 0;
+            slot->alpha[base + column] = 0;
+        }
+    }
+    return ERgssBitmapOk;
+}
+
+extern "C" int EasyRpgRgssBitmapGradientFillRect(int handle,
+                                                  int x,
+                                                  int y,
+                                                  int width,
+                                                  int height,
+                                                  int red1,
+                                                  int green1,
+                                                  int blue1,
+                                                  int alpha1,
+                                                  int red2,
+                                                  int green2,
+                                                  int blue2,
+                                                  int alpha2,
+                                                  int vertical)
+{
+    TBitmapSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssBitmapErrorInvalidHandle;
+    if (width < 0 || height < 0)
+        return ERgssBitmapErrorInvalidArgument;
+    if (width == 0 || height == 0)
+        return ERgssBitmapOk;
+
+    const int left = x < 0 ? 0 : x;
+    const int top = y < 0 ? 0 : y;
+    int right = x + width;
+    int bottom = y + height;
+    if (right > slot->width)
+        right = slot->width;
+    if (bottom > slot->height)
+        bottom = slot->height;
+    if (right <= left || bottom <= top)
+        return ERgssBitmapOk;
+
+    const int span = vertical ? height : width;
+    const int denominator = span > 1 ? span - 1 : 1;
+    for (int row = top; row < bottom; ++row)
+    {
+        const int base = row * slot->width;
+        for (int column = left; column < right; ++column)
+        {
+            const int position = vertical ? row - y : column - x;
+            const int red = red1 + (red2 - red1) * position / denominator;
+            const int green = green1 + (green2 - green1) * position / denominator;
+            const int blue = blue1 + (blue2 - blue1) * position / denominator;
+            const int alpha = alpha1 + (alpha2 - alpha1) * position / denominator;
+            slot->color[base + column] = Pack565(red, green, blue);
+            slot->alpha[base + column] = static_cast<unsigned char>(ClampByte(alpha));
+        }
+    }
+    return ERgssBitmapOk;
+}
+
 extern "C" int EasyRpgRgssBitmapSetPixel(int handle,
                                           int x,
                                           int y,
@@ -924,6 +1249,13 @@ extern "C" int EasyRpgRgssBitmapLock(int handle,
     return ERgssBitmapOk;
 }
 
+extern "C" int EasyRpgRgssBitmapBeginFrame(void)
+{
+    // Called once per render pass (EasyRpgRgssRenderRange) so the per-command
+    // blits below can use the cached config/framebuffer snapshot.
+    return RefreshFrameSnapshot() ? ERgssBitmapOk : ERgssBitmapErrorFramebuffer;
+}
+
 extern "C" int EasyRpgRgssBitmapBlit(int handle,
                                       const EasyRpgRgssRect* source_rect,
                                       int destination_x,
@@ -965,9 +1297,10 @@ extern "C" int EasyRpgRgssBitmapBlit(int handle,
     if (sourceWidth <= 0 || sourceHeight <= 0)
         return ERgssBitmapOk;
 
-    EasyRpgRgssConfig config;
-    if (EasyRpgRgssCoreGetConfig(&config) != ERgssOk)
+    const TFrameSnapshot* frameSnapshot = AcquireFrameSnapshot();
+    if (!frameSnapshot)
         return ERgssBitmapErrorFramebuffer;
+    const EasyRpgRgssConfig& config = frameSnapshot->config;
 
     int logicalX = destination_x;
     int logicalY = destination_y;
@@ -1004,40 +1337,80 @@ extern "C" int EasyRpgRgssBitmapBlit(int handle,
         physicalRect.width <= 0 || physicalRect.height <= 0)
         return ERgssBitmapErrorFramebuffer;
 
-    void* framebuffer = 0;
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    int framebufferPitch = 0;
-    int framebufferFormat = 0;
-    if (EasyRpgRgssCoreGetFramebuffer(&framebuffer,
-                                       &framebufferWidth,
-                                       &framebufferHeight,
-                                       &framebufferPitch,
-                                       &framebufferFormat) != ERgssOk ||
-        framebufferFormat != ERgssPixelRgb565)
-        return ERgssBitmapErrorFramebuffer;
+    void* framebuffer = frameSnapshot->pixels;
+    const int framebufferWidth = frameSnapshot->width;
+    const int framebufferHeight = frameSnapshot->height;
+    const int framebufferPitch = frameSnapshot->pitch;
 
     const int globalOpacity = ClampByte(opacity);
+    unsigned char* targetBytes = static_cast<unsigned char*>(framebuffer);
+
+    if (logicalWidth == physicalRect.width && logicalHeight == physicalRect.height)
+    {
+        // Fast path: no scaling, so every physical pixel maps 1:1 onto the
+        // source rect. Straight index loop, no per-pixel mapping at all.
+        for (int py = 0; py < physicalRect.height; ++py)
+        {
+            const int sy = sourceY + py;
+            unsigned short* target = reinterpret_cast<unsigned short*>(
+                targetBytes + (physicalRect.y + py) * framebufferPitch);
+            for (int px = 0; px < physicalRect.width; ++px)
+            {
+                const int sourceIndex = sy * slot->width + sourceX + px;
+                const int sourceAlpha = slot->alpha[sourceIndex];
+                const int effectiveAlpha = globalOpacity == 255
+                    ? sourceAlpha
+                    : Divide255Round(sourceAlpha * globalOpacity);
+                const int targetX = physicalRect.x + px;
+                if (targetX < 0 || targetX >= framebufferWidth ||
+                    physicalRect.y + py < 0 || physicalRect.y + py >= framebufferHeight)
+                    continue;
+                target[targetX] = Blend565(target[targetX],
+                                           slot->color[sourceIndex],
+                                           effectiveAlpha);
+            }
+        }
+        if (output_dirty)
+            *output_dirty = physicalRect;
+        return ERgssBitmapOk;
+    }
+
     int sourceXLookup[KFastBlitWidth];
     const int useSourceXLookup = physicalRect.width <= KFastBlitWidth;
     if (useSourceXLookup)
     {
+        TRatioStepper columnStepper;
+        StepperInit(columnStepper, logicalWidth, physicalRect.width);
         for (int px = 0; px < physicalRect.width; ++px)
-            sourceXLookup[px] = sourceX + (px * logicalWidth) / physicalRect.width;
+        {
+            sourceXLookup[px] = sourceX + columnStepper.quotient;
+            StepperAdvance(columnStepper);
+        }
     }
 
-    unsigned char* targetBytes = static_cast<unsigned char*>(framebuffer);
+    TRatioStepper rowStepper;
+    StepperInit(rowStepper, logicalHeight, physicalRect.height);
+    TRatioStepper liveColumnStepper;
     for (int py = 0; py < physicalRect.height; ++py)
     {
-        const int sourceOffsetY = (py * logicalHeight) / physicalRect.height;
-        const int sy = sourceY + sourceOffsetY;
+        const int sy = sourceY + rowStepper.quotient;
+        StepperAdvance(rowStepper);
+        if (!useSourceXLookup)
+            StepperInit(liveColumnStepper, logicalWidth, physicalRect.width);
         unsigned short* target = reinterpret_cast<unsigned short*>(
             targetBytes + (physicalRect.y + py) * framebufferPitch);
         for (int px = 0; px < physicalRect.width; ++px)
         {
-            const int sx = useSourceXLookup
-                ? sourceXLookup[px]
-                : sourceX + (px * logicalWidth) / physicalRect.width;
+            int sx = 0;
+            if (useSourceXLookup)
+            {
+                sx = sourceXLookup[px];
+            }
+            else
+            {
+                sx = sourceX + liveColumnStepper.quotient;
+                StepperAdvance(liveColumnStepper);
+            }
             const int sourceIndex = sy * slot->width + sx;
             const int sourceAlpha = slot->alpha[sourceIndex];
             const int effectiveAlpha = globalOpacity == 255
@@ -1087,9 +1460,10 @@ static int BitmapBlitEffectsInternal(int handle,
         opacity <= 0)
         return ERgssBitmapOk;
 
-    EasyRpgRgssConfig config;
-    if (EasyRpgRgssCoreGetConfig(&config) != ERgssOk)
+    const TFrameSnapshot* frameSnapshot = AcquireFrameSnapshot();
+    if (!frameSnapshot)
         return ERgssBitmapErrorFramebuffer;
+    const EasyRpgRgssConfig& config = frameSnapshot->config;
 
     EasyRpgRgssRect clippedDestination = *destination_rect;
     if (clippedDestination.x < 0)
@@ -1131,52 +1505,72 @@ static int BitmapBlitEffectsInternal(int handle,
         physicalRect.width <= 0 || physicalRect.height <= 0)
         return ERgssBitmapErrorFramebuffer;
 
-    void* framebuffer = 0;
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    int framebufferPitch = 0;
-    int framebufferFormat = 0;
-    if (EasyRpgRgssCoreGetFramebuffer(&framebuffer,
-                                       &framebufferWidth,
-                                       &framebufferHeight,
-                                       &framebufferPitch,
-                                       &framebufferFormat) != ERgssOk ||
-        framebufferFormat != ERgssPixelRgb565)
-        return ERgssBitmapErrorFramebuffer;
+    void* framebuffer = frameSnapshot->pixels;
+    const int framebufferWidth = frameSnapshot->width;
+    const int framebufferHeight = frameSnapshot->height;
+    const int framebufferPitch = frameSnapshot->pitch;
 
     const int globalOpacity = ClampByte(opacity);
     int sourceXLookup[KFastBlitWidth];
     const int useSourceXLookup = physicalRect.width <= KFastBlitWidth;
+
+    // Two chained exact mappings per pixel:
+    //   logicalX  = clippedDestination.x + (px * clippedDestination.width) / physicalRect.width
+    //   sourceOff = (logicalX - destination_rect->x) * source_rect->width / destination_rect->width
+    // Both run as division-free TRatioSteppers: stepping the logical mapping
+    // yields a 0/1/2 delta that advances the source mapping.
+    const int relativeBaseX = clippedDestination.x - destination_rect->x;
+    const int relativeBaseY = clippedDestination.y - destination_rect->y;
+    TRatioStepper stepLogicalX;
+    StepperInit(stepLogicalX, clippedDestination.width, physicalRect.width);
+    TRatioStepper stepSourceX;
+    StepperInit(stepSourceX, source_rect->width, destination_rect->width);
+    StepperSeed(stepSourceX, relativeBaseX * source_rect->width);
     if (useSourceXLookup)
     {
         for (int px = 0; px < physicalRect.width; ++px)
         {
-            const int logicalX = clippedDestination.x +
-                (px * clippedDestination.width) / physicalRect.width;
-            const int relativeX = logicalX - destination_rect->x;
-            int sourceOffsetX =
-                (relativeX * source_rect->width) / destination_rect->width;
+            int sourceOffsetX = stepSourceX.quotient;
             if (mirror)
                 sourceOffsetX = source_rect->width - 1 - sourceOffsetX;
             sourceXLookup[px] = source_rect->x + sourceOffsetX;
+            const int previousLogicalX = stepLogicalX.quotient;
+            StepperAdvance(stepLogicalX);
+            StepperAdvanceBy(stepSourceX, stepLogicalX.quotient - previousLogicalX);
         }
     }
+
+    TRatioStepper stepLogicalY;
+    StepperInit(stepLogicalY, clippedDestination.height, physicalRect.height);
+    TRatioStepper stepSourceY;
+    StepperInit(stepSourceY, source_rect->height, destination_rect->height);
+    StepperSeed(stepSourceY, relativeBaseY * source_rect->height);
 
     unsigned char* targetBytes = static_cast<unsigned char*>(framebuffer);
     for (int py = 0; py < physicalRect.height; ++py)
     {
-        const int logicalY = clippedDestination.y +
-            (py * clippedDestination.height) / physicalRect.height;
-        const int relativeY = logicalY - destination_rect->y;
-        const int sourceOffsetY =
-            (relativeY * source_rect->height) / destination_rect->height;
-        const int sourceY = source_rect->y + sourceOffsetY;
+        // Steppers hold this row's mapping; advance them for the next row at
+        // the bottom of the loop.
+        const int sourceY = source_rect->y + stepSourceY.quotient;
+        const int relativeY = relativeBaseY + stepLogicalY.quotient;
         const int targetY = physicalRect.y + py;
         if (sourceY < 0 || sourceY >= slot->height ||
             targetY < 0 || targetY >= framebufferHeight)
+        {
+            const int previousLogicalY = stepLogicalY.quotient;
+            StepperAdvance(stepLogicalY);
+            StepperAdvanceBy(stepSourceY, stepLogicalY.quotient - previousLogicalY);
             continue;
+        }
         unsigned short* target = reinterpret_cast<unsigned short*>(
             targetBytes + targetY * framebufferPitch);
+        if (!useSourceXLookup)
+        {
+            // Live mapping: restart the X chain from px = 0 for this row.
+            StepperInit(stepLogicalX, clippedDestination.width, physicalRect.width);
+            StepperInit(stepSourceX, source_rect->width, destination_rect->width);
+            StepperSeed(stepSourceX, relativeBaseX * source_rect->width);
+        }
         for (int px = 0; px < physicalRect.width; ++px)
         {
             int sourceX = 0;
@@ -1186,14 +1580,13 @@ static int BitmapBlitEffectsInternal(int handle,
             }
             else
             {
-                const int logicalX = clippedDestination.x +
-                    (px * clippedDestination.width) / physicalRect.width;
-                const int relativeX = logicalX - destination_rect->x;
-                int sourceOffsetX =
-                    (relativeX * source_rect->width) / destination_rect->width;
+                int sourceOffsetX = stepSourceX.quotient;
                 if (mirror)
                     sourceOffsetX = source_rect->width - 1 - sourceOffsetX;
                 sourceX = source_rect->x + sourceOffsetX;
+                const int previousLogicalX = stepLogicalX.quotient;
+                StepperAdvance(stepLogicalX);
+                StepperAdvanceBy(stepSourceX, stepLogicalX.quotient - previousLogicalX);
             }
             const int targetX = physicalRect.x + px;
             if (sourceX < 0 || sourceX >= slot->width ||
@@ -1217,6 +1610,9 @@ static int BitmapBlitEffectsInternal(int handle,
                                            effectiveAlpha,
                                            blend_type);
         }
+        const int previousLogicalY = stepLogicalY.quotient;
+        StepperAdvance(stepLogicalY);
+        StepperAdvanceBy(stepSourceY, stepLogicalY.quotient - previousLogicalY);
     }
 
     if (output_dirty)
@@ -1326,9 +1722,10 @@ extern "C" int EasyRpgRgssBitmapTile(int handle,
     if (normalizedOffsetY < 0)
         normalizedOffsetY += periodY;
 
-    EasyRpgRgssConfig config;
-    if (EasyRpgRgssCoreGetConfig(&config) != ERgssOk)
+    const TFrameSnapshot* frameSnapshot = AcquireFrameSnapshot();
+    if (!frameSnapshot)
         return ERgssBitmapErrorFramebuffer;
+    const EasyRpgRgssConfig& config = frameSnapshot->config;
 
     EasyRpgRgssRect clippedDestination = *destination_rect;
     if (clippedDestination.x < 0)
@@ -1353,55 +1750,77 @@ extern "C" int EasyRpgRgssBitmapTile(int handle,
         physicalRect.width <= 0 || physicalRect.height <= 0)
         return ERgssBitmapErrorFramebuffer;
 
-    void* framebuffer = 0;
-    int framebufferWidth = 0;
-    int framebufferHeight = 0;
-    int framebufferPitch = 0;
-    int framebufferFormat = 0;
-    if (EasyRpgRgssCoreGetFramebuffer(&framebuffer,
-                                       &framebufferWidth,
-                                       &framebufferHeight,
-                                       &framebufferPitch,
-                                       &framebufferFormat) != ERgssOk ||
-        framebufferFormat != ERgssPixelRgb565)
-        return ERgssBitmapErrorFramebuffer;
+    void* framebuffer = frameSnapshot->pixels;
+    const int framebufferWidth = frameSnapshot->width;
+    const int framebufferHeight = frameSnapshot->height;
+    const int framebufferPitch = frameSnapshot->pitch;
 
     const int globalOpacity = ClampByte(opacity);
     int sourceXLookup[KFastBlitWidth];
     const int useSourceXLookup = physicalRect.width <= KFastBlitWidth;
+
+    // Exact division-free tile mapping per pixel:
+    //   logicalX = clippedDestination.x + (px * cd.width) / physical.width   (TRatioStepper)
+    //   tileX    = (logicalX - dest.x + normalizedOffset) % periodX          (TWrapAccumulator)
+    //   sourceX  = (tileX * 1000) / zoom  -> multiply when zoom divides 1000.
+    const int zoomFactorX = 1000 % zoom_x_milli == 0 ? 1000 / zoom_x_milli : 0;
+    const int zoomFactorY = 1000 % zoom_y_milli == 0 ? 1000 / zoom_y_milli : 0;
+    TRatioStepper stepLogicalX;
+    StepperInit(stepLogicalX, clippedDestination.width, physicalRect.width);
+    TWrapAccumulator wrapX;
+    WrapInit(wrapX,
+             clippedDestination.x - destination_rect->x + normalizedOffsetX,
+             periodX);
     if (useSourceXLookup)
     {
         for (int px = 0; px < physicalRect.width; ++px)
         {
-            const int logicalX = clippedDestination.x +
-                (px * clippedDestination.width) / physicalRect.width;
-            int tileX = (logicalX - destination_rect->x + normalizedOffsetX) % periodX;
-            if (tileX < 0)
-                tileX += periodX;
-            int sourceOffsetX = (tileX * 1000) / zoom_x_milli;
+            const int tileX = wrapX.value;
+            int sourceOffsetX = zoomFactorX
+                ? tileX * zoomFactorX
+                : DivideInt(tileX * 1000, zoom_x_milli);
             if (sourceOffsetX >= source_rect->width)
                 sourceOffsetX = source_rect->width - 1;
             sourceXLookup[px] = source_rect->x + sourceOffsetX;
+            const int previousLogicalX = stepLogicalX.quotient;
+            StepperAdvance(stepLogicalX);
+            WrapAdvance(wrapX, stepLogicalX.quotient - previousLogicalX);
         }
     }
+
+    TRatioStepper stepLogicalY;
+    StepperInit(stepLogicalY, clippedDestination.height, physicalRect.height);
+    TWrapAccumulator wrapY;
+    WrapInit(wrapY,
+             clippedDestination.y - destination_rect->y + normalizedOffsetY,
+             periodY);
 
     unsigned char* targetBytes = static_cast<unsigned char*>(framebuffer);
     for (int py = 0; py < physicalRect.height; ++py)
     {
-        const int logicalY = clippedDestination.y +
-            (py * clippedDestination.height) / physicalRect.height;
-        int tileY = (logicalY - destination_rect->y + normalizedOffsetY) % periodY;
-        if (tileY < 0)
-            tileY += periodY;
-        int sourceOffsetY = (tileY * 1000) / zoom_y_milli;
+        const int tileY = wrapY.value;
+        int sourceOffsetY = zoomFactorY
+            ? tileY * zoomFactorY
+            : DivideInt(tileY * 1000, zoom_y_milli);
         if (sourceOffsetY >= source_rect->height)
             sourceOffsetY = source_rect->height - 1;
         const int sourceY = source_rect->y + sourceOffsetY;
         const int targetY = physicalRect.y + py;
+        const int previousLogicalY = stepLogicalY.quotient;
+        StepperAdvance(stepLogicalY);
+        WrapAdvance(wrapY, stepLogicalY.quotient - previousLogicalY);
         if (targetY < 0 || targetY >= framebufferHeight)
             continue;
         unsigned short* target = reinterpret_cast<unsigned short*>(
             targetBytes + targetY * framebufferPitch);
+        if (!useSourceXLookup)
+        {
+            // Live mapping: restart the X chain from px = 0 for this row.
+            StepperInit(stepLogicalX, clippedDestination.width, physicalRect.width);
+            WrapInit(wrapX,
+                     clippedDestination.x - destination_rect->x + normalizedOffsetX,
+                     periodX);
+        }
         for (int px = 0; px < physicalRect.width; ++px)
         {
             int sourceX = 0;
@@ -1411,15 +1830,16 @@ extern "C" int EasyRpgRgssBitmapTile(int handle,
             }
             else
             {
-                const int logicalX = clippedDestination.x +
-                    (px * clippedDestination.width) / physicalRect.width;
-                int tileX = (logicalX - destination_rect->x + normalizedOffsetX) % periodX;
-                if (tileX < 0)
-                    tileX += periodX;
-                int sourceOffsetX = (tileX * 1000) / zoom_x_milli;
+                const int tileX = wrapX.value;
+                int sourceOffsetX = zoomFactorX
+                    ? tileX * zoomFactorX
+                    : DivideInt(tileX * 1000, zoom_x_milli);
                 if (sourceOffsetX >= source_rect->width)
                     sourceOffsetX = source_rect->width - 1;
                 sourceX = source_rect->x + sourceOffsetX;
+                const int previousLogicalX = stepLogicalX.quotient;
+                StepperAdvance(stepLogicalX);
+                WrapAdvance(wrapX, stepLogicalX.quotient - previousLogicalX);
             }
             const int targetX = physicalRect.x + px;
             if (targetX < 0 || targetX >= framebufferWidth)

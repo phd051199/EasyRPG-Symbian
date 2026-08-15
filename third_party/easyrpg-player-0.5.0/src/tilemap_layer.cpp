@@ -194,7 +194,26 @@ int TilemapLayer::SymbianScrollCacheIndex(int z_order) const {
 }
 
 bool TilemapLayer::SymbianUseScrollCache(int z_order) const {
-	return z_order == -2 + layer;
+	if (z_order == -2 + layer)
+		return true;
+	// Cache the wall/above sublayer too: object-heavy maps otherwise replay
+	// hundreds of per-tile blits on every full paint while scrolling. The
+	// anchored shift/strip update cannot represent animated tiles, so an
+	// animated upper sublayer keeps the direct per-tile path.
+	if (z_order == 98 + layer) {
+		const int index = SymbianScrollCacheIndex(z_order);
+		return !symbian_has_animated_ab[index] && !symbian_has_animated_c[index];
+	}
+	return false;
+}
+
+bool TilemapLayer::SymbianCacheTransparent(int z_order) const {
+	// The upper sublayer has transparent gaps between wall/above tiles; an
+	// opaque cache would blit those gaps as black. Always keep it A1555 so
+	// the span blit to the screen skips empty pixels.
+	if (z_order == 98 + layer)
+		return true;
+	return !fast_blit;
 }
 
 bool TilemapLayer::SymbianUseAnchoredScrollCache(int z_order) const {
@@ -220,7 +239,7 @@ bool TilemapLayer::SymbianScrollCacheValid(int z_order, int display_width, int d
 		cache.bitmap->pixels() &&
 		cache.bitmap->GetWidth() == cache_width &&
 		cache.bitmap->GetHeight() == cache_height &&
-		cache.bitmap->GetTransparent() == !fast_blit &&
+		cache.bitmap->GetTransparent() == SymbianCacheTransparent(z_order) &&
 		cache.revision == symbian_revision &&
 		cache.ox == cache_ox &&
 		cache.oy == cache_oy &&
@@ -263,6 +282,9 @@ void TilemapLayer::SymbianShiftScrollCache(int z_order, int shift_x, int shift_y
 				row_bytes);
 		}
 	}
+	// The raw move bypasses the drawing ops, so the A1555 opaque-span cache
+	// must be invalidated or the next blit copies stale spans.
+	bitmap->Touch();
 }
 
 void TilemapLayer::SymbianRefreshScrollCacheRect(int z_order, const Rect& input) {
@@ -290,7 +312,7 @@ bool TilemapLayer::SymbianPrepareScrollCache(int z_order, int display_width, int
 	const int desired_ox = anchored ? SymbianTileAnchor(ox) : ox;
 	const int desired_oy = anchored ? SymbianTileAnchor(oy) : oy;
 
-	const bool transparent_cache = !fast_blit;
+	const bool transparent_cache = SymbianCacheTransparent(z_order);
 	if (!cache.bitmap ||
 		cache.bitmap->GetWidth() != cache_width ||
 		cache.bitmap->GetHeight() != cache_height ||
@@ -492,7 +514,7 @@ void TilemapLayer::Draw(int z_order) {
 				symbian_cache->bitmap && symbian_cache->bitmap->pixels() &&
 				symbian_cache->bitmap->GetWidth() == display_width &&
 				symbian_cache->bitmap->GetHeight() == display_height &&
-				symbian_cache->bitmap->GetTransparent() == !fast_blit &&
+				symbian_cache->bitmap->GetTransparent() == SymbianCacheTransparent(z_order) &&
 				symbian_cache->revision == symbian_revision &&
 				symbian_cache->ox == ox && symbian_cache->oy == oy) {
 				SymbianRefreshScrollCacheRect(z_order, animated_dirty);

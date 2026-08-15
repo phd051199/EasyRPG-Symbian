@@ -157,6 +157,13 @@ for source in "${SOURCES[@]}"; do
     name=${name//\//_}
     output="$BUILD_DIR/$name.o"
     win_output="$WIN_BUILD\\$name.o"
+    source_path="$RUBY_ROOT/$source"
+    if [[ -f $output && $output -nt $source_path && \
+          $output -nt "$PROJECT_DIR/src/rgss/mri/prelude.h" && \
+          $output -nt "$PROJECT_DIR/src/rgss/mri/ruby/config.h" ]]; then
+        objects+=("$win_output")
+        continue
+    fi
     if [[ $source == *.S ]]; then
         WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
             "$WINE_BIN" "$CC" \

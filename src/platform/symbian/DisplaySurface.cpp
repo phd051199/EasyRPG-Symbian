@@ -6,7 +6,7 @@
 namespace
 {
 const TInt KDirtyRegionCapacity = 16;
-const TInt KMaximumPresentRegions = 2;
+const TInt KMaximumPresentRegions = 4;
 const TInt KDirtyRegionFixedCostDivisor = 6;
 const TInt KFullRedrawAreaPercent = 88;
 

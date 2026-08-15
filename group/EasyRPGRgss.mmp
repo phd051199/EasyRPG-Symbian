@@ -62,7 +62,7 @@ LANG              SC
 
 VENDORID          0
 SECUREID          0xE31EA5A3
-CAPABILITY        SwEvent
+CAPABILITY        None
 
 #ifdef ENABLE_ABIV2_MODE
 DEBUGGABLE_UDEBONLY

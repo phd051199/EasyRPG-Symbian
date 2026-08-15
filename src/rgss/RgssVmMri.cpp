@@ -46,7 +46,9 @@ struct TVfsInput
     int position;
     int bufferStart;
     int bufferLength;
-    unsigned char buffer[4096];
+    // Large enough that Marshal-loading a multi-hundred-KB rxdata does not
+    // re-open the ZIP entry for every few kilobytes of sequential reads.
+    unsigned char buffer[32768];
 };
 
 struct TAnimationEntry
@@ -86,6 +88,10 @@ int gDeferredBattleScripts[128];
 int gDeferredBattleScriptCount = 0;
 int gDeferredBattleLoaded = 0;
 int gDeferredBattleLoading = 0;
+int gDeferredGameplayScripts[64];
+int gDeferredGameplayScriptCount = 0;
+int gDeferredGameplayLoaded = 0;
+int gDeferredGameplayLoading = 0;
 int gDeferredOptionalScripts[64];
 int gDeferredOptionalScriptCount = 0;
 int gDeferredOptionalLoaded = 0;
@@ -97,14 +103,30 @@ unsigned int gSystemDeltaUs = 25000;
 int gHaveGraphicsTick = 0;
 
 VALUE NLoadDeferredBattle(VALUE);
+VALUE NLoadDeferredGameplay(VALUE);
 VALUE NLoadDeferredOptional(VALUE);
 int EvalProtected(const char* source, int scriptIndex);
+
+void ReportBootProgress(int phase, int percent)
+{
+    if (gHost.boot_progress)
+        gHost.boot_progress(gHost.context, phase, percent);
+}
+
+void TraceBootPhase(const char* aLabel, unsigned int aStartUs)
+{
+    char line[96];
+    const unsigned int elapsedUs = gHost.ticks(gHost.context) - aStartUs;
+    snprintf(line, sizeof(line), "boot %s ms=%u", aLabel, elapsedUs / 1000u);
+    EasyRpgRgssVmTrace(line);
+}
 
 void ResetHost()
 {
     gHost.context = 0;
     gHost.file_size = 0;
     gHost.file_read = 0;
+    gHost.file_write = 0;
     gHost.ticks = 0;
     gHost.input = 0;
     gHost.bitmap_load = 0;
@@ -117,6 +139,7 @@ void ResetHost()
     gHost.release = 0;
     gHost.dirty = 0;
     gHost.audio = 0;
+    gHost.boot_progress = 0;
     gVersion = 0;
     gInitialized = 0;
     gNativeModule = Qnil;
@@ -126,6 +149,9 @@ void ResetHost()
     gDeferredBattleScriptCount = 0;
     gDeferredBattleLoaded = 0;
     gDeferredBattleLoading = 0;
+    gDeferredGameplayScriptCount = 0;
+    gDeferredGameplayLoaded = 0;
+    gDeferredGameplayLoading = 0;
     gDeferredOptionalScriptCount = 0;
     gDeferredOptionalLoaded = 0;
     gDeferredOptionalLoading = 0;
@@ -311,6 +337,12 @@ VALUE NInputUpdate(VALUE)
     const unsigned int mask = gHost.input(gHost.context, 0);
     EasyRpgRgssInputSetMask(mask);
     const int result = EasyRpgRgssInputUpdate();
+    if (mask != 0)
+    {
+        char line[64];
+        snprintf(line, sizeof(line), "input update mask=%08x", mask);
+        EasyRpgRgssVmTrace(line);
+    }
     return result == ERgssInputOk ? Qnil : RaiseResult("Input.update", result);
 }
 
@@ -321,7 +353,15 @@ VALUE NInputPress(VALUE, VALUE mask)
 
 VALUE NInputTrigger(VALUE, VALUE mask)
 {
-    return BoolValue(EasyRpgRgssInputTrigger(static_cast<unsigned int>(NUM2ULONG(mask))));
+    const unsigned int value = static_cast<unsigned int>(NUM2ULONG(mask));
+    const int triggered = EasyRpgRgssInputTrigger(value);
+    if (triggered)
+    {
+        char line[64];
+        snprintf(line, sizeof(line), "input trigger mask=%08x", value);
+        EasyRpgRgssVmTrace(line);
+    }
+    return BoolValue(triggered);
 }
 
 VALUE NInputRepeat(VALUE, VALUE mask)
@@ -422,6 +462,20 @@ VALUE NFileRead(VALUE, VALUE path)
             return RaiseResult("file read", read);
     }
     return data;
+}
+
+VALUE NFileWrite(VALUE, VALUE path, VALUE offsetValue, VALUE data, VALUE truncateValue)
+{
+    const char* relative = StringValuePtr(path);
+    const int offset = NUM2INT(offsetValue);
+    StringValue(data);
+    const int result = gHost.file_write(gHost.context,
+                                        relative,
+                                        offset,
+                                        RSTRING_PTR(data),
+                                        RSTRING_LEN(data),
+                                        RTEST(truncateValue) ? 1 : 0);
+    return result >= 0 ? INT2NUM(result) : RaiseResult("file write", result);
 }
 
 void VfsInputFree(void* memory)
@@ -1280,11 +1334,35 @@ VALUE NAnimationArchiveSetSelected(VALUE self, VALUE value)
     return value;
 }
 
+// Reusable decode buffer for draw_text/text_size. The VM interpreter is a
+// single pthread, so a process-wide grow-only buffer avoids one Ruby heap
+// allocation and free per text call without changing observable behavior.
+unsigned int* gTextCodepointBuffer = 0;
+unsigned int gTextCodepointCapacity = 0;
+
+unsigned int* AcquireTextCodepointBuffer(int aLength)
+{
+    if (aLength <= 0)
+        aLength = 1;
+    if (gTextCodepointBuffer && static_cast<unsigned int>(aLength) <= gTextCodepointCapacity)
+        return gTextCodepointBuffer;
+    unsigned int capacity = gTextCodepointCapacity ? gTextCodepointCapacity : 128;
+    while (capacity < static_cast<unsigned int>(aLength))
+        capacity <<= 1;
+    unsigned int* buffer = static_cast<unsigned int*>(
+        ruby_xmalloc(capacity * sizeof(unsigned int)));
+    if (gTextCodepointBuffer)
+        ruby_xfree(gTextCodepointBuffer);
+    gTextCodepointBuffer = buffer;
+    gTextCodepointCapacity = capacity;
+    return buffer;
+}
+
 int DecodeText(VALUE text, unsigned int*& codepoints)
 {
     StringValue(text);
     const int length = RSTRING_LEN(text);
-    codepoints = ALLOC_N(unsigned int, length > 0 ? length : 1);
+    codepoints = AcquireTextCodepointBuffer(length);
     const unsigned char* bytes = reinterpret_cast<const unsigned char*>(RSTRING_PTR(text));
     int ascii = 1;
     for (int index = 0; index < length; ++index)
@@ -1308,7 +1386,6 @@ int DecodeText(VALUE text, unsigned int*& codepoints)
                                         length);
     if (count < 0)
     {
-        ruby_xfree(codepoints);
         codepoints = 0;
         RaiseResult("text decode", count);
     }
@@ -1465,7 +1542,6 @@ VALUE NBitmapTextSize(int argc, VALUE* argv, VALUE)
                                                  &style,
                                                  &width,
                                                  &height);
-    ruby_xfree(codepoints);
     if (result != ERgssBitmapOk)
         return RaiseResult("Bitmap.text_size", result);
     return rb_ary_new3(2, INT2NUM(width), INT2NUM(height));
@@ -1497,7 +1573,6 @@ VALUE NBitmapDrawText(int argc, VALUE* argv, VALUE)
                                                  codepoints,
                                                  count,
                                                  &style);
-    ruby_xfree(codepoints);
     return result == ERgssBitmapOk ? Qnil : RaiseResult("Bitmap.draw_text", result);
 }
 
@@ -1691,11 +1766,19 @@ VALUE NSpriteSetColor(int argc, VALUE* argv, VALUE)
 {
     if (argc != 5)
         rb_raise(rb_eArgError, "wrong number of arguments");
+    const int red = NUM2INT(argv[1]);
+    const int green = NUM2INT(argv[2]);
+    const int blue = NUM2INT(argv[3]);
+    const int alpha = NUM2INT(argv[4]);
     const int result = EasyRpgRgssSpriteSetColor(Handle(argv[0], EHandleSprite),
-                                                 NUM2INT(argv[1]),
-                                                 NUM2INT(argv[2]),
-                                                 NUM2INT(argv[3]),
-                                                 NUM2INT(argv[4]));
+                                                 red, green, blue, alpha);
+    if (result == ERgssSpriteErrorInvalidArgument)
+    {
+        char line[96];
+        snprintf(line, sizeof(line), "sprite color invalid r=%d g=%d b=%d a=%d",
+                 red, green, blue, alpha);
+        EasyRpgRgssVmTrace(line);
+    }
     return result == ERgssSpriteOk ? Qnil : RaiseResult("Sprite.color=", result);
 }
 
@@ -1825,7 +1908,7 @@ VALUE NTableDump(VALUE, VALUE token)
     short* data = 0;
     int count = 0;
     const int lockResult = EasyRpgRgssTableLock(handle, &data, &count);
-    if (dimensions < 1 || x < 1 || y < 1 || z < 1 || lockResult != ERgssTableOk)
+    if (dimensions < 1 || x < 0 || y < 0 || z < 0 || lockResult != ERgssTableOk)
         return RaiseResult("Table._dump", lockResult);
     if (count > (0x7fffffff - 20) / 2)
         rb_raise(rb_eRuntimeError, "table too large");
@@ -1857,7 +1940,7 @@ VALUE NTableLoad(VALUE, VALUE packed)
     const int y = Read32(bytes + 8);
     const int z = Read32(bytes + 12);
     const int count = Read32(bytes + 16);
-    if (dimensions < 1 || dimensions > 3 || x <= 0 || y <= 0 || z <= 0 ||
+    if (dimensions < 1 || dimensions > 3 || x < 0 || y < 0 || z < 0 ||
         count < 0 || count > (0x7fffffff - 20) / 2 || length != 20 + count * 2)
         rb_raise(rb_eArgError, "invalid table data");
     int handle = 0;
@@ -1922,6 +2005,21 @@ VALUE NTilemapSetPriorities(VALUE, VALUE token, VALUE table)
 {
     const int result = EasyRpgRgssTilemapSetPriorities(Handle(token, EHandleTilemap), OptionalHandle(table, EHandleTable));
     return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.priorities=", result);
+}
+
+VALUE NTilemapSetBitmap(VALUE, VALUE token, VALUE index, VALUE bitmap)
+{
+    const int result = EasyRpgRgssTilemapSetBitmap(Handle(token, EHandleTilemap),
+                                                   NUM2INT(index),
+                                                   OptionalHandle(bitmap, EHandleBitmap));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.bitmaps[]=", result);
+}
+
+VALUE NTilemapSetFlags(VALUE, VALUE token, VALUE table)
+{
+    const int result = EasyRpgRgssTilemapSetFlags(Handle(token, EHandleTilemap),
+                                                  OptionalHandle(table, EHandleTable));
+    return result == ERgssTilemapOk ? Qnil : RaiseResult("Tilemap.flags=", result);
 }
 
 VALUE NTilemapSetOrigin(VALUE, VALUE token, VALUE x, VALUE y)
@@ -1993,6 +2091,7 @@ void BindNative()
     DefineNativeMethod("vfs_input", RUBY_METHOD_FUNC(NVfsInputCreate), 1);
     DefineNativeMethod("animation_archive", RUBY_METHOD_FUNC(NAnimationArchiveCreate), 1);
     DefineNativeMethod("load_deferred_battle", RUBY_METHOD_FUNC(NLoadDeferredBattle), 0);
+    DefineNativeMethod("load_deferred_gameplay", RUBY_METHOD_FUNC(NLoadDeferredGameplay), 0);
     DefineNativeMethod("load_deferred_optional", RUBY_METHOD_FUNC(NLoadDeferredOptional), 0);
     DefineNativeMethod("handle_dispose", RUBY_METHOD_FUNC(NHandleDispose), 1);
     DefineNativeMethod("handle_disposed", RUBY_METHOD_FUNC(NHandleDisposed), 1);
@@ -2014,6 +2113,7 @@ void BindNative()
     DefineNativeMethod("zlib_deflate", RUBY_METHOD_FUNC(NZlibDeflate), 1);
     DefineNativeMethod("file_size", RUBY_METHOD_FUNC(NFileSize), 1);
     DefineNativeMethod("file_read", RUBY_METHOD_FUNC(NFileRead), 1);
+    DefineNativeMethod("file_write", RUBY_METHOD_FUNC(NFileWrite), 4);
     DefineNativeMethod("bitmap_create", RUBY_METHOD_FUNC(NBitmapCreate), 2);
     DefineNativeMethod("bitmap_load", RUBY_METHOD_FUNC(NBitmapLoad), 1);
     DefineNativeMethod("bitmap_width", RUBY_METHOD_FUNC(NBitmapWidth), 1);
@@ -2072,6 +2172,8 @@ void BindNative()
     DefineNativeMethod("tilemap_set_map_data", RUBY_METHOD_FUNC(NTilemapSetMapData), 2);
     DefineNativeMethod("tilemap_set_flash_data", RUBY_METHOD_FUNC(NTilemapSetFlashData), 2);
     DefineNativeMethod("tilemap_set_priorities", RUBY_METHOD_FUNC(NTilemapSetPriorities), 2);
+    DefineNativeMethod("tilemap_set_bitmap", RUBY_METHOD_FUNC(NTilemapSetBitmap), 3);
+    DefineNativeMethod("tilemap_set_flags", RUBY_METHOD_FUNC(NTilemapSetFlags), 2);
     DefineNativeMethod("tilemap_set_origin", RUBY_METHOD_FUNC(NTilemapSetOrigin), 3);
     DefineNativeMethod("tilemap_set_visible", RUBY_METHOD_FUNC(NTilemapSetVisible), 2);
     DefineNativeMethod("tilemap_update", RUBY_METHOD_FUNC(NTilemapUpdate), 1);
@@ -2130,7 +2232,7 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
                                         const EasyRpgRgssVmHost* host)
 {
     if (version < 1 || version > 3 || !host ||
-        !host->file_size || !host->file_read || !host->ticks ||
+        !host->file_size || !host->file_read || !host->file_write || !host->ticks ||
         !host->input || !host->bitmap_load || !host->text_decode ||
         !host->frame_sync || !host->script_count || !host->script_info ||
         !host->script_name || !host->script_inflate || !host->release ||
@@ -2142,15 +2244,20 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
     ResetHost();
     gHost = *host;
     gVersion = version;
+    const unsigned int rubyInitStartUs = gHost.ticks(gHost.context);
+    ReportBootProgress(ERgssVmBootRubyInit, 0);
     RUBY_INIT_STACK;
     ruby_init();
     EasyRpgRgssVmTraceHeap("ruby init done");
+    TraceBootPhase("ruby_init", rubyInitStartUs);
+    const unsigned int builtinStartUs = gHost.ticks(gHost.context);
     rb_define_const(rb_cEncoding, "ASCII_8BIT", rb_enc_from_encoding(rb_ascii8bit_encoding()));
     rb_define_const(rb_cEncoding, "UTF_8", rb_enc_from_encoding(rb_utf8_encoding()));
     rb_define_const(rb_cEncoding, "US_ASCII", rb_enc_from_encoding(rb_usascii_encoding()));
     rb_enc_alias("BINARY", "ASCII-8BIT");
     rb_enc_alias("ASCII", "US-ASCII");
     rb_call_builtin_inits();
+    TraceBootPhase("builtins", builtinStartUs);
     BindNative();
     const char* bootstrapChunks[] = {
         KEasyRpgRgssBootstrapCore,
@@ -2158,8 +2265,10 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
         KEasyRpgRgssBootstrapWindow,
         KEasyRpgRgssBootstrapRuntime
     };
+    const unsigned int bootstrapStartUs = gHost.ticks(gHost.context);
     for (int index = 0; index < 4; ++index)
     {
+        ReportBootProgress(ERgssVmBootBootstrap, index * 25);
         const int bootstrapResult = EvalProtected(bootstrapChunks[index], -1);
         if (bootstrapResult != ERgssVmOk)
         {
@@ -2168,6 +2277,7 @@ extern "C" int EasyRpgRgssVmInitialize(int version,
         }
     }
     EasyRpgRgssVmTraceHeap("bootstrap done");
+    TraceBootPhase("bootstrap", bootstrapStartUs);
     gInitialized = 1;
     return ERgssVmOk;
 }
@@ -2219,6 +2329,39 @@ int DeferModernBattleScript(int index)
            strcmp(name, "Scene_Commands") == 0 ||
            strcmp(name, "Scene_Animations") == 0 ||
            strcmp(name, "ShadowPokemon_Other") == 0;
+}
+
+int DeferModernGameplayScript(int index)
+{
+    char name[64];
+    if (!ModernScriptName(index, name, sizeof(name)))
+        return 0;
+
+    // These Essentials subsystems are not needed to construct the title/load
+    // screen. Loading them only when Game.start_new/Game.load is invoked keeps
+    // save-compatible model classes (Pokemon, Player, Mail, storage, etc.)
+    // available for Marshal while moving the expensive map/item handler setup
+    // out of cold boot. The original script order is preserved in the deferred
+    // queue, and the hook runs before the first map is created/updated.
+    return strcmp(name, "Overworld") == 0 ||
+           strcmp(name, "Overworld_Time") == 0 ||
+           strcmp(name, "Overworld_FieldMoves") == 0 ||
+           strcmp(name, "Overworld_Fishing") == 0 ||
+           strcmp(name, "Overworld_BerryPlants") == 0 ||
+           strcmp(name, "Overworld_DayCare") == 0 ||
+           strcmp(name, "Overworld_RandomDungeons") == 0 ||
+           strcmp(name, "Overworld_Weather") == 0 ||
+           strcmp(name, "Overworld_Overlays") == 0 ||
+           strcmp(name, "Overworld_MapTransitionAnims") == 0 ||
+           strcmp(name, "Overworld_BattleIntroAnim") == 0 ||
+           strcmp(name, "Overworld_WildEncounters") == 0 ||
+           strcmp(name, "Overworld_RoamingPokemon") == 0 ||
+           strcmp(name, "Item_Utilities") == 0 ||
+           strcmp(name, "Item_Effects") == 0 ||
+           strcmp(name, "Item_BattleEffects") == 0 ||
+           strcmp(name, "Item_Phone") == 0 ||
+           strcmp(name, "Item_PokeRadar") == 0 ||
+           strcmp(name, "Item_Sprites") == 0;
 }
 
 int DeferModernOptionalScript(int index)
@@ -2281,6 +2424,27 @@ VALUE NLoadDeferredBattle(VALUE)
     return Qtrue;
 }
 
+VALUE NLoadDeferredGameplay(VALUE)
+{
+    if (gDeferredGameplayLoaded)
+        return Qtrue;
+    if (gDeferredGameplayLoading)
+        return Qfalse;
+    gDeferredGameplayLoading = 1;
+    for (int index = 0; index < gDeferredGameplayScriptCount; ++index)
+    {
+        const int result = EvalScriptIndex(gDeferredGameplayScripts[index]);
+        if (result != ERgssVmOk)
+        {
+            gDeferredGameplayLoading = 0;
+            rb_raise(rb_eRuntimeError, "%s", gLastError[0] ? gLastError : "deferred gameplay load failed");
+        }
+    }
+    gDeferredGameplayLoaded = 1;
+    gDeferredGameplayLoading = 0;
+    return Qtrue;
+}
+
 VALUE NLoadDeferredOptional(VALUE)
 {
     if (gDeferredOptionalLoaded)
@@ -2301,38 +2465,12 @@ VALUE NLoadDeferredOptional(VALUE)
     gDeferredOptionalLoading = 0;
     return Qtrue;
 }
-}
 
-extern "C" int EasyRpgRgssVmLoadScripts(const char*)
+int InstallDeferredHooks()
 {
-    if (!gInitialized)
-        return ERgssVmErrorNotInitialized;
-    const int count = gHost.script_count(gHost.context);
-    if (count <= 0)
-        return ERgssVmErrorScript;
-
-    for (int index = 0; index < count; ++index)
-    {
-        if (SkipModernReleaseScript(index))
-            continue;
-        if (DeferModernBattleScript(index))
-        {
-            if (gDeferredBattleScriptCount >= static_cast<int>(sizeof(gDeferredBattleScripts) / sizeof(gDeferredBattleScripts[0])))
-                return ERgssVmErrorScript;
-            gDeferredBattleScripts[gDeferredBattleScriptCount++] = index;
-            continue;
-        }
-        if (DeferModernOptionalScript(index))
-        {
-            if (gDeferredOptionalScriptCount >= static_cast<int>(sizeof(gDeferredOptionalScripts) / sizeof(gDeferredOptionalScripts[0])))
-                return ERgssVmErrorScript;
-            gDeferredOptionalScripts[gDeferredOptionalScriptCount++] = index;
-            continue;
-        }
-        const int evalResult = EvalScriptIndex(index);
-        if (evalResult != ERgssVmOk)
-            return evalResult;
-    }
+    // The game's Main script enters its scene loop while it is being eval'd,
+    // so hooks installed after the script loop are too late. Install them
+    // immediately before Main instead.
     if (gDeferredBattleScriptCount > 0)
     {
         const char* hook =
@@ -2355,13 +2493,146 @@ extern "C" int EasyRpgRgssVmLoadScripts(const char*)
             "      def runPlugins; result=__easyrpg_runPlugins; GC.start; result; end\n"
             "    end\n"
             "  end\n"
-            "end\n"
             "end\n";
-        const int hookResult = EvalProtected(hook, -2);
-        if (hookResult != ERgssVmOk)
-            return hookResult;
+        const int result = EvalProtected(hook, -2);
+        if (result != ERgssVmOk)
+            return result;
+    }
+    if (gDeferredGameplayScriptCount > 0)
+    {
+        const char* hook =
+            "if defined?(Game)\n"
+            "  class << Game\n"
+            "    if method_defined?(:start_new) && !method_defined?(:__easyrpg_start_new)\n"
+            "      alias_method :__easyrpg_start_new, :start_new\n"
+            "      def start_new(*args); EasyRPGNative.load_deferred_gameplay; __easyrpg_start_new(*args); end\n"
+            "    end\n"
+            "    if method_defined?(:load) && !method_defined?(:__easyrpg_load)\n"
+            "      alias_method :__easyrpg_load, :load\n"
+            "      def load(*args); EasyRPGNative.load_deferred_gameplay; __easyrpg_load(*args); end\n"
+            "    end\n"
+            "  end\n"
+            "end\n";
+        const int result = EvalProtected(hook, -3);
+        if (result != ERgssVmOk)
+            return result;
     }
     return ERgssVmOk;
+}
+}
+
+extern "C" int EasyRpgRgssVmLoadScripts(const char*)
+{
+    if (!gInitialized)
+        return ERgssVmErrorNotInitialized;
+    const int count = gHost.script_count(gHost.context);
+    if (count <= 0)
+        return ERgssVmErrorScript;
+
+    const unsigned int scriptsStartUs = gHost.ticks(gHost.context);
+
+    // MRI's automatic GC can run many times while hundreds of small RGSS
+    // source files are parsed one after another. On ARM11 that dominates boot
+    // time. Batch collections instead: parser/ISEQ temporaries from roughly
+    // one script group stay bounded, then one explicit collection reclaims
+    // them. Preserve a caller-disabled GC state if one ever exists.
+    const VALUE gcWasDisabled = rb_gc_disable();
+    int evaluatedSinceGc = 0;
+    for (int index = 0; index < count; ++index)
+    {
+        ReportBootProgress(ERgssVmBootScripts, 100 * index / count);
+        if ((index & 15) == 0 && index > 0)
+        {
+            char line[96];
+            const unsigned int elapsedUs = gHost.ticks(gHost.context) - scriptsStartUs;
+            snprintf(line, sizeof(line), "boot scripts %d/%d ms=%u",
+                     index, count, elapsedUs / 1000u);
+            EasyRpgRgssVmTrace(line);
+        }
+        if (SkipModernReleaseScript(index))
+            continue;
+        if (DeferModernBattleScript(index))
+        {
+            if (gDeferredBattleScriptCount >= static_cast<int>(sizeof(gDeferredBattleScripts) / sizeof(gDeferredBattleScripts[0])))
+            {
+                if (!RTEST(gcWasDisabled))
+                    rb_gc_enable();
+                return ERgssVmErrorScript;
+            }
+            gDeferredBattleScripts[gDeferredBattleScriptCount++] = index;
+            continue;
+        }
+        if (DeferModernGameplayScript(index))
+        {
+            if (gDeferredGameplayScriptCount >= static_cast<int>(sizeof(gDeferredGameplayScripts) / sizeof(gDeferredGameplayScripts[0])))
+            {
+                if (!RTEST(gcWasDisabled))
+                    rb_gc_enable();
+                return ERgssVmErrorScript;
+            }
+            gDeferredGameplayScripts[gDeferredGameplayScriptCount++] = index;
+            continue;
+        }
+        if (DeferModernOptionalScript(index))
+        {
+            if (gDeferredOptionalScriptCount >= static_cast<int>(sizeof(gDeferredOptionalScripts) / sizeof(gDeferredOptionalScripts[0])))
+            {
+                if (!RTEST(gcWasDisabled))
+                    rb_gc_enable();
+                return ERgssVmErrorScript;
+            }
+            gDeferredOptionalScripts[gDeferredOptionalScriptCount++] = index;
+            continue;
+        }
+        char entryName[64];
+        if (ModernScriptName(index, entryName, sizeof(entryName)) && strcmp(entryName, "Main") == 0)
+        {
+            const int hookResult = InstallDeferredHooks();
+            if (hookResult != ERgssVmOk)
+            {
+                if (!RTEST(gcWasDisabled))
+                    rb_gc_enable();
+                return hookResult;
+            }
+        }
+        const unsigned int scriptStartUs = gHost.ticks(gHost.context);
+        const int evalResult = EvalScriptIndex(index);
+        const unsigned int scriptElapsedUs = gHost.ticks(gHost.context) - scriptStartUs;
+        if (scriptElapsedUs >= 150000u)
+        {
+            char name[64];
+            if (!ModernScriptName(index, name, sizeof(name)))
+            {
+                name[0] = '?';
+                name[1] = 0;
+            }
+            char line[128];
+            snprintf(line, sizeof(line), "boot slow script %d '%s' ms=%u",
+                     index, name, scriptElapsedUs / 1000u);
+            EasyRpgRgssVmTrace(line);
+        }
+        if (evalResult != ERgssVmOk)
+        {
+            if (!RTEST(gcWasDisabled))
+                rb_gc_enable();
+            return evalResult;
+        }
+        if (!RTEST(gcWasDisabled) && ++evaluatedSinceGc >= 32)
+        {
+            rb_gc_enable();
+            rb_gc_start();
+            rb_gc_disable();
+            evaluatedSinceGc = 0;
+        }
+    }
+    if (!RTEST(gcWasDisabled))
+    {
+        rb_gc_enable();
+        rb_gc_start();
+    }
+    ReportBootProgress(ERgssVmBootScripts, 100);
+    TraceBootPhase("scripts_total", scriptsStartUs);
+    return InstallDeferredHooks();
 }
 
 extern "C" int EasyRpgRgssVmTick(void)

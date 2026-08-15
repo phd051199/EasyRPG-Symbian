@@ -17,6 +17,8 @@ public:
     TInt Version() const;
     TInt LogicFps() const;
     TInt TargetFps() const;
+    TInt BootPhase() const;
+    TInt BootPercent() const;
     void StartVmL();
     TBool AdvanceVmFrameL(TBool aCompose, TUint32 aInputWord0);
     void ComposeL();
@@ -44,6 +46,14 @@ private:
     TInt iTargetFps;
     TUint32 iInputWords[4];
     TBool iVmStarted;
+    // Previous frame's rendered dirty rect (physical coords). The present
+    // path marks the union of previous and current dirty so a renderable
+    // that moved away is still repainted (its old area is now clear color).
+    TInt iPreviousDirtyX;
+    TInt iPreviousDirtyY;
+    TInt iPreviousDirtyWidth;
+    TInt iPreviousDirtyHeight;
+    TBool iPreviousDirtyValid;
 };
 
 #endif

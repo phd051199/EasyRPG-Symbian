@@ -22,6 +22,7 @@ _LIT(KRgssTracePath, "C:\\Data\\EasyRPG\\rgss.trace");
 RFs gTraceFs;
 RFile gTraceFile;
 TBool gTraceOpen = EFalse;
+volatile TBool gVmPthreadFinished = EFalse;
 
 void TraceClose()
 {
@@ -194,6 +195,8 @@ CRgssVmWorker::CRgssVmWorker(TInt aVersion)
       iStopRequested(EFalse),
       iStartSignaled(EFalse),
       iVmInitialized(EFalse),
+      iBootPhase(0),
+      iBootPercent(0),
       iThreadCreated(EFalse)
 {
     for (TInt index = 0; index < 4; ++index)
@@ -239,14 +242,19 @@ void CRgssVmWorker::StartL()
     iStopRequested = EFalse;
     iStartSignaled = EFalse;
     iVmInitialized = EFalse;
+    iBootPhase = 0;
+    iBootPercent = 0;
 
     const TInt stackSize = 0x40000;
-    const TInt heapMax = 0x02800000;
+    // Keep a private RThread heap for the VM: sharing the process heap made
+    // scene transitions fault inside the VM thread (reads of freed heap cells
+    // during title->map handoff), while this private-heap setup is the only
+    // configuration verified to run Littleroot XP end to end.
     User::LeaveIfError(iThread.Create(KRgssVmThreadName,
                                       &CRgssVmWorker::ThreadEntry,
                                       stackSize,
                                       0x00080000,
-                                      heapMax,
+                                      0x02800000,
                                       this,
                                       EOwnerProcess));
     iThreadCreated = ETrue;
@@ -349,7 +357,10 @@ TBool CRgssVmWorker::TakeAudioCommand(TRgssAudioCommand& aCommand)
 
 TBool CRgssVmWorker::Running() const
 {
-    return iThreadCreated && iThread.ExitType() == EExitPending;
+    // The native owner thread intentionally stays alive after PIPS join wakes
+    // because its EUSER/TLS state is no longer trustworthy. The pthread's own
+    // completion flag is the authoritative VM-liveness signal.
+    return iThreadCreated && !gVmPthreadFinished && iThread.ExitType() == EExitPending;
 }
 
 TInt CRgssVmWorker::ExitResult() const
@@ -360,6 +371,32 @@ TInt CRgssVmWorker::ExitResult() const
 TInt CRgssVmWorker::FrameRate() const
 {
     return iFrameRate;
+}
+
+TInt CRgssVmWorker::BootPhase() const
+{
+    return iBootPhase;
+}
+
+TInt CRgssVmWorker::BootPercent() const
+{
+    return iBootPercent;
+}
+
+void CRgssVmWorker::SetBootProgress(TInt aPhase, TInt aPercent)
+{
+    if (aPercent < 0)
+        aPercent = 0;
+    if (aPercent > 100)
+        aPercent = 100;
+    iBootPercent = aPercent;
+    iBootPhase = aPhase;
+}
+
+void CRgssVmWorker::VmBootProgress(void* aContext, int aPhase, int aPercent)
+{
+    if (aContext)
+        static_cast<CRgssVmWorker*>(aContext)->SetBootProgress(aPhase, aPercent);
 }
 
 TInt CRgssVmWorker::ThreadEntry(TAny* aContext)
@@ -376,6 +413,7 @@ TInt CRgssVmWorker::ThreadEntry(TAny* aContext)
     }
     const int stackResult = pthread_attr_setstacksize(&attributes, 0x40000);
     pthread_t thread = 0;
+    gVmPthreadFinished = EFalse;
     const int createResult = stackResult == 0
         ? pthread_create(&thread, &attributes, &CRgssVmWorker::PthreadEntry, self)
         : stackResult;
@@ -385,7 +423,14 @@ TInt CRgssVmWorker::ThreadEntry(TAny* aContext)
         self->SignalStarted(KErrGeneral);
         return KErrGeneral;
     }
-    pthread_join(thread, NULL);
+    // Never pthread_join()/pthread_detach() a PIPS child from this foreign
+    // Symbian RThread. Both paths corrupt the owner's TLS on S60. The child
+    // publishes completion itself; keeping the owner asleep is sufficient for
+    // its lifetime and the dedicated RGSS process reclaims the joinable PIPS
+    // thread on exit.
+    RThread().SetPriority(EPriorityMuchLess);
+    while (!gVmPthreadFinished)
+        User::After(TTimeIntervalMicroSeconds32(50000));
     return self->iExitResult;
 }
 
@@ -399,8 +444,14 @@ TAny* CRgssVmWorker::PthreadEntry(TAny* aContext)
     {
         self->iExitResult = KErrNoMemory;
         self->SignalStarted(KErrNoMemory);
+        gVmPthreadFinished = ETrue;
         return NULL;
     }
+    // Signal as soon as the pthread is alive. The engine main thread then
+    // runs its frame loop and presents the boot loading gauge while ruby_init,
+    // bootstrap and script eval still execute here. Later failures propagate
+    // through the VM-death check in AdvanceVmFrameL instead of this semaphore.
+    self->SignalStarted(KErrNone);
     {
         char line[96];
         snprintf(line, sizeof(line), "vm handler=%08x cleanup=%08x",
@@ -413,6 +464,7 @@ TAny* CRgssVmWorker::PthreadEntry(TAny* aContext)
     delete cleanup;
     EasyRpgRgssVmTrace("vm pthread end");
     TraceClose();
+    gVmPthreadFinished = ETrue;
     return NULL;
 }
 
@@ -434,6 +486,7 @@ TInt CRgssVmWorker::ThreadMain()
 
 void CRgssVmWorker::RunVmL()
 {
+    SetBootProgress(ERgssVmBootMounting, 2);
     CActiveScheduler* scheduler = new (ELeave) CActiveScheduler;
     CleanupStack::PushL(scheduler);
     CActiveScheduler::Install(scheduler);
@@ -484,6 +537,7 @@ void CRgssVmWorker::RunVmL()
     if (indexResult != ERgssScriptArchiveOk || indexedCount != iScriptCount)
         User::Leave(indexResult == ERgssScriptArchiveErrorNoMemory
             ? KErrNoMemory : KErrCorrupt);
+    SetBootProgress(ERgssVmBootMounting, 8);
 
     EasyRpgRgssGraphicsHost graphicsHost;
     graphicsHost.context = this;
@@ -497,6 +551,7 @@ void CRgssVmWorker::RunVmL()
     host.context = this;
     host.file_size = &CRgssVmWorker::VmFileSize;
     host.file_read = &CRgssVmWorker::VmFileRead;
+    host.file_write = &CRgssVmWorker::VmFileWrite;
     host.ticks = &CRgssVmWorker::VmTicks;
     host.input = &CRgssVmWorker::VmInput;
     host.bitmap_load = &CRgssVmWorker::VmBitmapLoad;
@@ -509,14 +564,17 @@ void CRgssVmWorker::RunVmL()
     host.release = &CRgssVmWorker::VmRelease;
     host.dirty = &CRgssVmWorker::VmDirty;
     host.audio = &CRgssVmWorker::VmAudio;
+    // Do not pass a tail function pointer through the E32 host struct here.
+    // elf2e32 leaves this final callback relocation unresolved on S60, which
+    // jumps to 0x00406000 before ruby_init. Worker-side boot phases remain safe.
+    host.boot_progress = NULL;
 
     const TInt initResult = EasyRpgRgssVmInitialize(iVersion, &host);
     if (initResult != ERgssVmOk)
     {
-        const TInt error = VmResultToError(initResult);
-        SignalStarted(error);
-        iFrameResume.Wait();
-        User::Leave(error);
+        // Start was already signaled: leaving ends the thread and the engine
+        // observes the exit through AdvanceVmFrameL's VM-death check.
+        User::Leave(VmResultToError(initResult));
     }
     iVmInitialized = ETrue;
     CleanupStack::PushL(TCleanupItem(&CRgssVmWorker::ShutdownVm, this));
@@ -626,6 +684,22 @@ int CRgssVmWorker::VmFileRead(void* aContext,
                                                            aOffset,
                                                            aBuffer,
                                                            aBytes);
+}
+
+int CRgssVmWorker::VmFileWrite(void* aContext,
+                               const char* aRelativePath,
+                               int aOffset,
+                               const void* aBuffer,
+                               int aBytes,
+                               int aTruncate)
+{
+    if (!aContext)
+        return ERgssVmErrorInvalidArgument;
+    return static_cast<CRgssVmWorker*>(aContext)->WriteFile(aRelativePath,
+                                                            aOffset,
+                                                            aBuffer,
+                                                            aBytes,
+                                                            aTruncate != 0);
 }
 
 unsigned int CRgssVmWorker::VmTicks(void*)
@@ -842,6 +916,8 @@ int CRgssVmWorker::VmFrameSync(void* aContext,
 
     self->iFrameRate = aFrameRate;
     self->iFrameCount = aFrameCount;
+    if (self->iBootPhase != ERgssVmBootRunning)
+        self->SetBootProgress(ERgssVmBootRunning, 100);
     self->iFrameReady.Signal();
     self->iFrameResume.Wait();
 
@@ -944,10 +1020,65 @@ TInt CRgssVmWorker::ResolveAudioPath(const char* aRelativePath, TDes8& aResolved
     return KErrNotFound;
 }
 
-TInt CRgssVmWorker::FileSize(const char* aRelativePath) const
+TInt CRgssVmWorker::BuildSaveFilePath(const char* aRelativePath, TDes& aPath) const
+{
+    TFileName relative;
+    if (CopyVmPath(aRelativePath, relative) != KErrNone || relative.Length() <= 0)
+        return ERgssVmErrorInvalidArgument;
+
+    TInt segmentStart = 0;
+    for (TInt index = 0; index <= relative.Length(); ++index)
+    {
+        const TBool atEnd = index == relative.Length();
+        if (!atEnd && relative[index] == ':')
+            return ERgssVmErrorInvalidArgument;
+        if (!atEnd && (relative[index] == '/' || relative[index] == '\\'))
+        {
+            relative[index] = '\\';
+            if (index == 0)
+                return ERgssVmErrorInvalidArgument;
+        }
+        if (atEnd || relative[index] == '\\')
+        {
+            const TInt segmentLength = index - segmentStart;
+            if (segmentLength == 2 &&
+                relative[segmentStart] == '.' && relative[segmentStart + 1] == '.')
+                return ERgssVmErrorInvalidArgument;
+            segmentStart = index + 1;
+        }
+    }
+
+    const TUint32 gameHash = HashText(iGamePath, 2166136261u);
+    TBuf<16> gameDirectory;
+    gameDirectory.Format(_L("%08x\\"), gameHash);
+    if (KSaveBasePath().Length() + gameDirectory.Length() + relative.Length() > aPath.MaxLength())
+        return ERgssVmErrorInvalidArgument;
+    aPath.Copy(KSaveBasePath);
+    aPath.Append(gameDirectory);
+    aPath.Append(relative);
+    return ERgssVmOk;
+}
+
+TInt CRgssVmWorker::FileSize(const char* aRelativePath)
 {
     if (!iResources)
         return ERgssVmErrorNotInitialized;
+
+    TFileName savePath;
+    if (BuildSaveFilePath(aRelativePath, savePath) == ERgssVmOk)
+    {
+        RFile saveFile;
+        const TInt openError = saveFile.Open(iFs, savePath, EFileRead | EFileShareReadersOnly);
+        if (openError == KErrNone)
+        {
+            TInt saveSize = 0;
+            const TInt sizeError = saveFile.Size(saveSize);
+            saveFile.Close();
+            return sizeError == KErrNone ? saveSize : ERgssVmErrorFile;
+        }
+        if (openError != KErrNotFound && openError != KErrPathNotFound)
+            return ERgssVmErrorFile;
+    }
 
     TFileName path;
     if (CopyVmPath(aRelativePath, path) != KErrNone)
@@ -964,10 +1095,34 @@ TInt CRgssVmWorker::FileSize(const char* aRelativePath) const
 TInt CRgssVmWorker::ReadFile(const char* aRelativePath,
                              TInt aOffset,
                              TAny* aBuffer,
-                             TInt aBytes) const
+                             TInt aBytes)
 {
     if (!iResources || aOffset < 0 || !aBuffer || aBytes < 0)
         return ERgssVmErrorInvalidArgument;
+
+    TFileName savePath;
+    if (BuildSaveFilePath(aRelativePath, savePath) == ERgssVmOk)
+    {
+        RFile saveFile;
+        const TInt openError = saveFile.Open(iFs, savePath, EFileRead | EFileShareReadersOnly);
+        if (openError == KErrNone)
+        {
+            TInt saveSize = 0;
+            TInt error = saveFile.Size(saveSize);
+            if (error == KErrNone && aOffset < saveSize && aBytes > 0)
+            {
+                const TInt count = Min(aBytes, saveSize - aOffset);
+                TPtr8 buffer(static_cast<TUint8*>(aBuffer), 0, count);
+                error = saveFile.Read(aOffset, buffer, count);
+                saveFile.Close();
+                return error == KErrNone ? buffer.Length() : ERgssVmErrorFile;
+            }
+            saveFile.Close();
+            return error == KErrNone ? 0 : ERgssVmErrorFile;
+        }
+        if (openError != KErrNotFound && openError != KErrPathNotFound)
+            return ERgssVmErrorFile;
+    }
 
     TFileName path;
     if (CopyVmPath(aRelativePath, path) != KErrNone)
@@ -990,4 +1145,44 @@ TInt CRgssVmWorker::ReadFile(const char* aRelativePath,
     if (readError != KErrNone)
         return ERgssVmErrorFile;
     return buffer.Length();
+}
+
+TInt CRgssVmWorker::WriteFile(const char* aRelativePath,
+                              TInt aOffset,
+                              const TAny* aBuffer,
+                              TInt aBytes,
+                              TBool aTruncate)
+{
+    if (!iResources || aBytes < 0 || (aBytes > 0 && !aBuffer) || aOffset < -1)
+        return ERgssVmErrorInvalidArgument;
+
+    TFileName savePath;
+    const TInt pathResult = BuildSaveFilePath(aRelativePath, savePath);
+    if (pathResult != ERgssVmOk)
+        return pathResult;
+
+    const TParsePtrC parsed(savePath);
+    const TInt directoryError = iFs.MkDirAll(parsed.DriveAndPath());
+    if (directoryError != KErrNone && directoryError != KErrAlreadyExists)
+        return ERgssVmErrorFile;
+
+    RFile file;
+    TInt error = aTruncate
+        ? file.Replace(iFs, savePath, EFileWrite | EFileShareAny)
+        : file.Open(iFs, savePath, EFileWrite | EFileShareAny);
+    if (!aTruncate && (error == KErrNotFound || error == KErrPathNotFound))
+        error = file.Replace(iFs, savePath, EFileWrite | EFileShareAny);
+    if (error != KErrNone)
+        return ERgssVmErrorFile;
+
+    TInt position = aOffset;
+    if (position < 0)
+        error = file.Size(position);
+    if (error == KErrNone && aBytes > 0)
+    {
+        const TPtrC8 data(static_cast<const TUint8*>(aBuffer), aBytes);
+        error = file.Write(position, data);
+    }
+    file.Close();
+    return error == KErrNone ? aBytes : ERgssVmErrorFile;
 }

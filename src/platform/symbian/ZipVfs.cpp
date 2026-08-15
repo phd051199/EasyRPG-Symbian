@@ -12,11 +12,33 @@ const TUint16 KMethodStored = 0u;
 const TUint16 KExtraUnicodePath = 0x7075u;
 const TInt KEndOfCentralDirectoryBytes = 22;
 const TInt KMaxZipCommentBytes = 65535;
+const TInt KRgss3HeaderBytes = 12;
+const TInt KRgss3RecordBytes = 16;
 
 TUint16 Read16(const TUint8* aBytes)
 {
     return static_cast<TUint16>(aBytes[0]) |
            static_cast<TUint16>(static_cast<TUint16>(aBytes[1]) << 8);
+}
+
+TUint32 AdvanceRgssDataKey(TUint32 aKey, TUint32 aBlocks)
+{
+    TUint32 accumulatedMultiplier = 1u;
+    TUint32 accumulatedIncrement = 0u;
+    TUint32 multiplier = 7u;
+    TUint32 increment = 3u;
+    while (aBlocks != 0)
+    {
+        if ((aBlocks & 1u) != 0)
+        {
+            accumulatedMultiplier *= multiplier;
+            accumulatedIncrement = accumulatedIncrement * multiplier + increment;
+        }
+        increment = (multiplier + 1u) * increment;
+        multiplier *= multiplier;
+        aBlocks >>= 1;
+    }
+    return accumulatedMultiplier * aKey + accumulatedIncrement;
 }
 
 TUint32 Read32(const TUint8* aBytes)
@@ -134,7 +156,9 @@ CZipVfs* CZipVfs::OpenL(RFs& aFs,
 CZipVfs::CZipVfs(RFs& aFs)
     : iFs(aFs),
       iProjectPrefix(NULL),
-      iCentralDirectory(NULL)
+      iCentralDirectory(NULL),
+      iRgssArchiveDataOffset(0),
+      iRgssArchiveFileSize(0)
 {
 }
 
@@ -150,14 +174,24 @@ void CZipVfs::ConstructL(const TDesC& aArchivePath)
 
     BuildIndexL();
     ResolveProjectRootL();
+    BuildRgss3ArchiveIndexL();
 }
 
 CZipVfs::~CZipVfs()
 {
     TInt bucket = 0;
     for (bucket = 0; bucket < KBucketCount; ++bucket)
+    {
         iBuckets[bucket].Close();
+        iRgssBuckets[bucket].Close();
+    }
 
+    for (TInt index = 0; index < iRgssEntries.Count(); ++index)
+    {
+        delete iRgssEntries[index].iPath;
+        iRgssEntries[index].iPath = NULL;
+    }
+    iRgssEntries.Close();
     iEntries.Close();
 
     delete iCentralDirectory;
@@ -402,6 +436,118 @@ void CZipVfs::ResolveProjectRootL()
     User::Leave(KErrNotFound);
 }
 
+void CZipVfs::BuildRgss3ArchiveIndexL()
+{
+    _LIT(KArchiveName, "Game.rgss3a");
+    const TZipVfsEntry* archiveEntry = FindEntry(KArchiveName);
+    if (!archiveEntry)
+        return;
+    if (archiveEntry->iFileSize > static_cast<TUint32>(KMaxTInt) ||
+        archiveEntry->iFileSize < KRgss3HeaderBytes)
+        User::Leave(KErrCorrupt);
+
+    iRgssArchiveDataOffset = EntryDataOffsetL(*archiveEntry);
+    iRgssArchiveFileSize = static_cast<TInt>(archiveEntry->iFileSize);
+
+    TBuf8<KRgss3HeaderBytes> header;
+    User::LeaveIfError(iArchive.Read(iRgssArchiveDataOffset,
+                                     header,
+                                     KRgss3HeaderBytes));
+    if (header.Length() != KRgss3HeaderBytes ||
+        header[0] != 'R' || header[1] != 'G' || header[2] != 'S' ||
+        header[3] != 'S' || header[4] != 'A' || header[5] != 'D' ||
+        header[6] != 0 || header[7] != 3)
+        User::Leave(KErrNotSupported);
+
+    const TUint32 rawKey = Read32(header.Ptr() + 8);
+    const TUint32 archiveKey = rawKey * 9u + 3u;
+    const TUint8 keyBytes[4] = {
+        static_cast<TUint8>(archiveKey & 0xffu),
+        static_cast<TUint8>((archiveKey >> 8) & 0xffu),
+        static_cast<TUint8>((archiveKey >> 16) & 0xffu),
+        static_cast<TUint8>((archiveKey >> 24) & 0xffu)
+    };
+
+    for (TInt bucket = 0; bucket < KBucketCount; ++bucket)
+        iRgssBuckets[bucket].ReserveL(8);
+
+    TInt cursor = KRgss3HeaderBytes;
+    TBool terminated = EFalse;
+    while (cursor <= iRgssArchiveFileSize - KRgss3RecordBytes)
+    {
+        TBuf8<KRgss3RecordBytes> record;
+        User::LeaveIfError(iArchive.Read(iRgssArchiveDataOffset + cursor,
+                                         record,
+                                         KRgss3RecordBytes));
+        if (record.Length() != KRgss3RecordBytes)
+            User::Leave(KErrEof);
+        cursor += KRgss3RecordBytes;
+
+        const TUint32 dataOffset = Read32(record.Ptr()) ^ archiveKey;
+        const TUint32 fileSize = Read32(record.Ptr() + 4) ^ archiveKey;
+        const TUint32 fileKey = Read32(record.Ptr() + 8) ^ archiveKey;
+        const TUint32 nameLength32 = Read32(record.Ptr() + 12) ^ archiveKey;
+        if (dataOffset == 0)
+        {
+            terminated = ETrue;
+            break;
+        }
+        if (nameLength32 == 0 ||
+            nameLength32 > static_cast<TUint32>(KMaxArchivePathChars * 4) ||
+            nameLength32 > static_cast<TUint32>(iRgssArchiveFileSize - cursor) ||
+            dataOffset > static_cast<TUint32>(iRgssArchiveFileSize) ||
+            fileSize > static_cast<TUint32>(iRgssArchiveFileSize) - dataOffset)
+            User::Leave(KErrCorrupt);
+
+        const TInt nameLength = static_cast<TInt>(nameLength32);
+        HBufC8* rawName = HBufC8::NewLC(nameLength);
+        TPtr8 rawNameBytes = rawName->Des();
+        User::LeaveIfError(iArchive.Read(iRgssArchiveDataOffset + cursor,
+                                         rawNameBytes,
+                                         nameLength));
+        if (rawNameBytes.Length() != nameLength)
+            User::Leave(KErrEof);
+        cursor += nameLength;
+
+        for (TInt index = 0; index < nameLength; ++index)
+            rawNameBytes[index] ^= keyBytes[index & 3];
+
+        TFileName path;
+        TInt utf8Error = KErrNone;
+        TRAP(utf8Error, TEncoding::Utf8ToUnicodeL(rawNameBytes, path));
+        if (utf8Error != KErrNone)
+            TEncoding::ShiftJisToUnicodeL(rawNameBytes, path);
+        NormalizePathInPlaceL(path);
+        CleanupStack::PopAndDestroy(rawName);
+
+        // Loose files in the outer ZIP override files packed in Game.rgss3a.
+        if (FindEntry(path) || FindRgssEntry(path))
+            continue;
+
+        TRgssVfsEntry entry;
+        entry.iPath = path.AllocLC();
+        entry.iHash = HashPath(path);
+        entry.iFileSize = fileSize;
+        entry.iDataOffset = dataOffset;
+        entry.iKey = fileKey;
+        User::LeaveIfError(iRgssEntries.Append(entry));
+        CleanupStack::Pop(entry.iPath);
+
+        const TInt entryIndex = iRgssEntries.Count() - 1;
+        const TInt bucket = static_cast<TInt>(entry.iHash & (KBucketCount - 1));
+        const TInt bucketError = iRgssBuckets[bucket].Append(entryIndex);
+        if (bucketError != KErrNone)
+        {
+            delete iRgssEntries[entryIndex].iPath;
+            iRgssEntries.Remove(entryIndex);
+            User::Leave(bucketError);
+        }
+    }
+
+    if (!terminated)
+        User::Leave(KErrCorrupt);
+}
+
 void CZipVfs::AddEntryL(const TDesC& aPath,
                         TUint32 aFileSize,
                         TUint32 aLocalHeaderOffset,
@@ -463,7 +609,7 @@ void CZipVfs::DecodeEntryPathL(const TZipVfsEntry& aEntry, TDes& aPath) const
 
 TBool CZipVfs::Exists(const TDesC& aRelativePath) const
 {
-    return FindEntry(aRelativePath) != NULL;
+    return FindEntry(aRelativePath) != NULL || FindRgssEntry(aRelativePath) != NULL;
 }
 
 const TZipVfsEntry* CZipVfs::FindEntry(const TDesC& aRelativePath) const
@@ -492,6 +638,37 @@ const TZipVfsEntry* CZipVfs::FindFullPath(const TDesC& aFullPath) const
         TRAPD(error, DecodeEntryPathL(entry, path));
         if (error == KErrNone && PathEquals(path, aFullPath))
             return &entry;
+    }
+    return NULL;
+}
+
+const TRgssVfsEntry* CZipVfs::FindRgssEntry(const TDesC& aRelativePath,
+                                             TInt* aIndex) const
+{
+    TFileName relative;
+    if (aRelativePath.Length() == 0 || aRelativePath.Length() > relative.MaxLength())
+        return NULL;
+    relative.Copy(aRelativePath);
+    TRAPD(error, NormalizePathInPlaceL(relative));
+    if (error != KErrNone)
+        return NULL;
+
+    const TUint32 hash = HashPath(relative);
+    const TInt bucket = static_cast<TInt>(hash & (KBucketCount - 1));
+    for (TInt position = 0; position < iRgssBuckets[bucket].Count(); ++position)
+    {
+        const TInt entryIndex = iRgssBuckets[bucket][position];
+        if (entryIndex < 0 || entryIndex >= iRgssEntries.Count())
+            continue;
+        const TRgssVfsEntry& entry = iRgssEntries[entryIndex];
+        if (entry.iHash != hash || !entry.iPath)
+            continue;
+        if (PathEquals(*entry.iPath, relative))
+        {
+            if (aIndex)
+                *aIndex = entryIndex;
+            return &entry;
+        }
     }
     return NULL;
 }
@@ -566,12 +743,26 @@ void CZipVfs::OpenStoredFileL(const TDesC& aRelativePath,
                               TInt& aFileSize) const
 {
     const TZipVfsEntry* entry = FindEntry(aRelativePath);
-    if (!entry)
+    if (entry)
+    {
+        if (entry->iFileSize > static_cast<TUint32>(KMaxTInt))
+            User::Leave(KErrTooBig);
+        aDataOffset = EntryDataOffsetL(*entry);
+        aFileSize = static_cast<TInt>(entry->iFileSize);
+        return;
+    }
+
+    TInt rgssIndex = -1;
+    const TRgssVfsEntry* rgssEntry = FindRgssEntry(aRelativePath, &rgssIndex);
+    if (!rgssEntry)
         User::Leave(KErrNotFound);
-    if (entry->iFileSize > static_cast<TUint32>(KMaxTInt))
+    if (rgssEntry->iFileSize > static_cast<TUint32>(KMaxTInt) || rgssIndex < 0)
         User::Leave(KErrTooBig);
-    aDataOffset = EntryDataOffsetL(*entry);
-    aFileSize = static_cast<TInt>(entry->iFileSize);
+
+    // Negative offsets are private virtual handles for files stored inside
+    // Game.rgss3a. Direct ZIP offsets are always non-negative.
+    aDataOffset = -(rgssIndex + 1);
+    aFileSize = static_cast<TInt>(rgssEntry->iFileSize);
 }
 
 void CZipVfs::ReadStoredFileL(TInt aDataOffset,
@@ -579,7 +770,7 @@ void CZipVfs::ReadStoredFileL(TInt aDataOffset,
                               TInt aPosition,
                               TDes8& aBuffer) const
 {
-    if (aDataOffset < 0 || aFileSize < 0 || aPosition < 0)
+    if (aFileSize < 0 || aPosition < 0)
         User::Leave(KErrArgument);
 
     aBuffer.Zero();
@@ -587,9 +778,47 @@ void CZipVfs::ReadStoredFileL(TInt aDataOffset,
         return;
 
     const TInt count = Min(aBuffer.MaxLength(), aFileSize - aPosition);
-    User::LeaveIfError(iArchive.Read(aDataOffset + aPosition, aBuffer, count));
+    if (aDataOffset >= 0)
+    {
+        User::LeaveIfError(iArchive.Read(aDataOffset + aPosition, aBuffer, count));
+        if (aBuffer.Length() != count)
+            User::Leave(KErrEof);
+        return;
+    }
+
+    const TInt rgssIndex = -aDataOffset - 1;
+    if (rgssIndex < 0 || rgssIndex >= iRgssEntries.Count())
+        User::Leave(KErrArgument);
+    const TRgssVfsEntry& entry = iRgssEntries[rgssIndex];
+    if (entry.iFileSize != static_cast<TUint32>(aFileSize) ||
+        entry.iDataOffset > static_cast<TUint32>(iRgssArchiveFileSize) ||
+        entry.iFileSize > static_cast<TUint32>(iRgssArchiveFileSize) - entry.iDataOffset)
+        User::Leave(KErrCorrupt);
+
+    const TUint32 absoluteOffset32 = static_cast<TUint32>(iRgssArchiveDataOffset) +
+                                     entry.iDataOffset +
+                                     static_cast<TUint32>(aPosition);
+    if (absoluteOffset32 > static_cast<TUint32>(KMaxTInt))
+        User::Leave(KErrTooBig);
+    User::LeaveIfError(iArchive.Read(static_cast<TInt>(absoluteOffset32),
+                                     aBuffer,
+                                     count));
     if (aBuffer.Length() != count)
         User::Leave(KErrEof);
+
+    TUint32 dataKey = AdvanceRgssDataKey(entry.iKey,
+                                          static_cast<TUint32>(aPosition) >> 2);
+    TInt keyBytePosition = aPosition & 3;
+    for (TInt index = 0; index < aBuffer.Length(); ++index)
+    {
+        aBuffer[index] ^= static_cast<TUint8>((dataKey >> (keyBytePosition * 8)) & 0xffu);
+        ++keyBytePosition;
+        if (keyBytePosition == 4)
+        {
+            keyBytePosition = 0;
+            dataKey = dataKey * 7u + 3u;
+        }
+    }
 }
 
 const TDesC& CZipVfs::ArchivePath() const
@@ -604,13 +833,25 @@ const TDesC& CZipVfs::ProjectPrefix() const
 
 TInt CZipVfs::EntryCount() const
 {
-    return iEntries.Count();
+    return iEntries.Count() + iRgssEntries.Count();
 }
 
 void CZipVfs::EntryRelativePathL(TInt aIndex, TDes& aPath) const
 {
-    if (aIndex < 0 || aIndex >= iEntries.Count() || !iProjectPrefix)
+    if (aIndex < 0 || !iProjectPrefix)
         User::Leave(KErrArgument);
+
+    if (aIndex >= iEntries.Count())
+    {
+        const TInt rgssIndex = aIndex - iEntries.Count();
+        if (rgssIndex < 0 || rgssIndex >= iRgssEntries.Count() ||
+            !iRgssEntries[rgssIndex].iPath)
+            User::Leave(KErrArgument);
+        if (iRgssEntries[rgssIndex].iPath->Length() > aPath.MaxLength())
+            User::Leave(KErrOverflow);
+        aPath.Copy(*iRgssEntries[rgssIndex].iPath);
+        return;
+    }
 
     TFileName fullPath;
     DecodeEntryPathL(iEntries[aIndex], fullPath);

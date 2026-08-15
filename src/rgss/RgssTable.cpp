@@ -52,19 +52,24 @@ int ValidateShape(int dimensions,
                   int& normalizedZ,
                   int& count)
 {
-    if (dimensions < 1 || dimensions > 3 || xSize <= 0)
+    if (dimensions < 1 || dimensions > 3 || xSize < 0)
         return 0;
     normalizedY = dimensions >= 2 ? ySize : 1;
     normalizedZ = dimensions >= 3 ? zSize : 1;
-    if (normalizedY <= 0 || normalizedZ <= 0)
+    if (normalizedY < 0 || normalizedZ < 0)
         return 0;
+    if (xSize == 0 || normalizedY == 0 || normalizedZ == 0)
+    {
+        count = 0;
+        return 1;
+    }
     if (xSize > 1073741823 / normalizedY)
         return 0;
     const int xy = xSize * normalizedY;
     if (xy > 1073741823 / normalizedZ)
         return 0;
     count = xy * normalizedZ;
-    return count > 0;
+    return 1;
 }
 
 int IndexOf(const TTableSlot& slot, int x, int y, int z, int& index)
@@ -90,8 +95,8 @@ void ResetSlot(TTableSlot& slot)
 
 short* AllocateData(int count)
 {
-    const unsigned int bytes = static_cast<unsigned int>(count) *
-                               static_cast<unsigned int>(sizeof(short));
+    const unsigned int elements = static_cast<unsigned int>(count > 0 ? count : 1);
+    const unsigned int bytes = elements * static_cast<unsigned int>(sizeof(short));
     short* data = static_cast<short*>(gTables.host.allocate(gTables.host.context, bytes));
     if (!data)
         return 0;
@@ -357,7 +362,7 @@ extern "C" int EasyRpgRgssTableLoadRaw(int handle,
     TTableSlot* slot = FindSlot(handle);
     if (!slot)
         return ERgssTableErrorInvalidHandle;
-    if (!data || count != slot->count)
+    if ((!data && count > 0) || count != slot->count)
         return ERgssTableErrorInvalidArgument;
     for (int index = 0; index < count; ++index)
         slot->data[index] = data[index];

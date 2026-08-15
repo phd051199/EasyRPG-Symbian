@@ -31,6 +31,7 @@ private:
     void StartDirectScreenL();
     void StopDirectScreen();
     void PresentL(TBool aForceFull);
+    void DrawBootGaugeL();
     void HandleKeyEvent(TInt aType, const TKeyEvent& aKey);
     TUint32 MapScanKey(const TKeyEvent& aKey) const;
     TUint32 MapCharacterKey(TInt aCode) const;
@@ -62,6 +63,10 @@ private:
     TBool iForeground;
     TBool iDirectScreenActive;
     TBool iPresentedFrame;
+    TInt iBootGaugePhase;
+    TInt iBootGaugePercent;
+    TUint32 iBootGaugeFrame;
+    TBool iBootGaugeActive;
 };
 
 #endif

@@ -127,6 +127,8 @@ void UpdateBgmStep()
         gBgmStep = 1;
 }
 
+TUint32 NowMilliseconds();
+
 class CNativeBgmPlayer : public CBase,
                          public MMdaAudioPlayerCallback
 {
@@ -224,12 +226,43 @@ public:
     void SetVolume(TInt aVolume)
     {
         iVolume = ClampVolume(aVolume);
+        iVolumePushValid = EFalse;
         if (iType == ESampled && iAudio)
         {
             const TInt maxVolume = iAudio->MaxVolume();
             const TInt error = iAudio->SetVolume(maxVolume * iVolume * gMasterVolumePercent / 10000);
             if (error != KErrNone)
                 gAudioAsyncError = error;
+        }
+    }
+
+    void SetVolumeSmoothed(TInt aVolume)
+    {
+        // Fade loops call this once per frame per channel; pushing every step
+        // costs ~2 IPC round trips per channel per frame to the audio server.
+        // The device volume only moves when the fade actually changes the
+        // audible level, so push at most every 100 ms or on a >= 2% step and
+        // always on the fade endpoints (0/100).
+        iVolume = ClampVolume(aVolume);
+        if (iType == ESampled && iAudio)
+        {
+            const TUint32 now = NowMilliseconds();
+            const TInt delta = iVolume - iLastPushedVolume;
+            if (!iVolumePushValid || iVolume == 0 || iVolume >= 100 ||
+                delta >= 2 || delta <= -2 || now - iLastVolumePushMs >= 100)
+            {
+                const TInt maxVolume = iAudio->MaxVolume();
+                const TInt error = iAudio->SetVolume(maxVolume * iVolume * gMasterVolumePercent / 10000);
+                if (error != KErrNone)
+                    gAudioAsyncError = error;
+                iLastPushedVolume = iVolume;
+                iLastVolumePushMs = now;
+                iVolumePushValid = ETrue;
+            }
+        }
+        else
+        {
+            iVolumePushValid = EFalse;
         }
     }
 
@@ -356,9 +389,78 @@ private:
     TBool iPending;
     TBool iPlaying;
     TBool iPaused;
+    // Volume-push throttling for SetVolumeSmoothed (fade loops).
+    TInt iLastPushedVolume;
+    TUint32 iLastVolumePushMs;
+    TBool iVolumePushValid;
 };
 
 const TInt KNativeSeVoiceCount = 4;
+
+// Small LRU of native SE file images. Native (non-mixer) SE playback used to
+// re-read the whole file through the VFS on every play; XP games replay
+// cursor/decision SEs several times per second. Voices borrow the cached
+// descriptor (read-only) instead of taking ownership; a slot is evicted only
+// when no voice is using it.
+const TInt KSeCacheEntries = 4;
+const TInt KSeCacheMaxFileBytes = 1024 * 1024;
+
+struct TSeCacheEntry
+{
+    TFileName iPath;
+    HBufC8* iData;
+    TInt iLoans;
+    TUint32 iLastUsedMs;
+    TBool iUsed;
+};
+
+TSeCacheEntry gSeCache[KSeCacheEntries];
+
+void PurgeSeCache()
+{
+    for (TInt index = 0; index < KSeCacheEntries; ++index)
+    {
+        delete gSeCache[index].iData;
+        gSeCache[index].iData = NULL;
+        gSeCache[index].iPath.Zero();
+        gSeCache[index].iLoans = 0;
+        gSeCache[index].iLastUsedMs = 0;
+        gSeCache[index].iUsed = EFalse;
+    }
+}
+
+TSeCacheEntry* FindSeCacheEntry(const TDesC& aPath)
+{
+    for (TInt index = 0; index < KSeCacheEntries; ++index)
+        if (gSeCache[index].iUsed && gSeCache[index].iPath == aPath)
+            return &gSeCache[index];
+    return NULL;
+}
+
+TSeCacheEntry* AcquireSeCacheSlot(TUint32 aNowMs)
+{
+    // Prefer a free slot, then the least-recently-used unloaned one.
+    TSeCacheEntry* candidate = NULL;
+    for (TInt index = 0; index < KSeCacheEntries; ++index)
+    {
+        TSeCacheEntry& entry = gSeCache[index];
+        if (!entry.iUsed)
+            return &entry;
+        if (entry.iLoans > 0)
+            continue;
+        if (!candidate || entry.iLastUsedMs < candidate->iLastUsedMs)
+            candidate = &entry;
+    }
+    if (candidate)
+    {
+        delete candidate->iData;
+        candidate->iData = NULL;
+        candidate->iPath.Zero();
+        candidate->iLoans = 0;
+        candidate->iUsed = EFalse;
+    }
+    return candidate;
+}
 
 class CNativeSeVoice : public CBase,
                        public MMdaAudioPlayerCallback
@@ -382,12 +484,13 @@ public:
         iAudio = NULL;
     }
 
-    void PlayL(HBufC8* aSource, TInt aVolume)
+    void PlayL(HBufC8* aSource, TInt aVolume, TSeCacheEntry* aCacheEntry)
     {
         if (!aSource)
             User::Leave(KErrArgument);
         Stop();
         iSource = aSource;
+        iCacheEntry = aCacheEntry;
         iVolume = ClampVolume(aVolume);
         iPending = ETrue;
         iAudio->OpenDesL(*iSource);
@@ -402,7 +505,17 @@ public:
         }
         iPending = EFalse;
         iPlaying = EFalse;
-        delete iSource;
+        if (iCacheEntry)
+        {
+            // Borrowed descriptor: return the loan, the cache owns the data.
+            if (iCacheEntry->iLoans > 0)
+                --iCacheEntry->iLoans;
+            iCacheEntry = NULL;
+        }
+        else
+        {
+            delete iSource;
+        }
         iSource = NULL;
     }
 
@@ -425,6 +538,7 @@ private:
     CNativeSeVoice()
         : iAudio(NULL),
           iSource(NULL),
+          iCacheEntry(NULL),
           iVolume(100),
           iPending(EFalse),
           iPlaying(EFalse)
@@ -471,6 +585,7 @@ private:
 private:
     CMdaAudioPlayerUtility* iAudio;
     HBufC8* iSource;
+    TSeCacheEntry* iCacheEntry;
     TInt iVolume;
     TBool iPending;
     TBool iPlaying;
@@ -558,17 +673,24 @@ void CopyAudioFileL(const TDesC& aSource, const TDesC& aTarget)
         User::Leave(error);
     }
 
-    TUint8 buffer[8192];
+    // Large chunks keep the synchronous ZIP-to-temp copy of a BGM track short
+    // enough not to stall the logic thread audibly.
+    HBufC8* buffer = HBufC8::NewLC(65536);
+    TPtr8 chunkBuffer(buffer->Des());
     for (;;)
     {
-        const size_t count = EasyRpgFread(buffer, 1, sizeof(buffer), input);
+        const size_t count = EasyRpgFread(const_cast<TUint8*>(chunkBuffer.Ptr()),
+                                          1,
+                                          chunkBuffer.MaxLength(),
+                                          input);
         if (count == 0)
             break;
-        const TPtrC8 chunk(buffer, static_cast<TInt>(count));
+        const TPtrC8 chunk(chunkBuffer.Ptr(), static_cast<TInt>(count));
         error = output.Write(chunk);
         if (error != KErrNone)
             break;
     }
+    CleanupStack::PopAndDestroy(buffer);
     if (error == KErrNone && EasyRpgFerror(input))
         error = KErrCorrupt;
     if (error == KErrNone)
@@ -647,9 +769,35 @@ void PlayNativeSeL(const TDesC& aPath, TInt aVolume)
         selected = gNativeSeCursor;
     if (!gNativeSeVoices[selected])
         gNativeSeVoices[selected] = CNativeSeVoice::NewL();
-    HBufC8* source = ReadFileLC(aPath, 8 * 1024 * 1024);
-    CleanupStack::Pop(source);
-    gNativeSeVoices[selected]->PlayL(source, aVolume);
+
+    const TUint32 nowMs = NowMilliseconds();
+    TSeCacheEntry* entry = FindSeCacheEntry(aPath);
+    HBufC8* owned = NULL;
+    if (entry)
+    {
+        ++entry->iLoans;
+        entry->iLastUsedMs = nowMs;
+    }
+    else
+    {
+        HBufC8* data = ReadFileLC(aPath, 8 * 1024 * 1024);
+        CleanupStack::Pop(data);
+        if (data->Size() <= KSeCacheMaxFileBytes)
+        {
+            entry = AcquireSeCacheSlot(nowMs);
+            if (entry)
+            {
+                entry->iPath = aPath;
+                entry->iData = data;
+                entry->iLoans = 1;
+                entry->iLastUsedMs = nowMs;
+                entry->iUsed = ETrue;
+            }
+        }
+        if (!entry)
+            owned = data; // too large or all slots busy: voice owns the copy
+    }
+    gNativeSeVoices[selected]->PlayL(entry ? entry->iData : owned, aVolume, entry);
     gNativeSeCursor = (selected + 1) % KNativeSeVoiceCount;
 }
 
@@ -1419,12 +1567,24 @@ void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
     TFileName path;
     AsciiPathL(aPath, path);
 
-    // One-shot effects are more stable and cheaper through Symbian's native
-    // audio player. The software WAV mixer can fault while the title scene is
-    // transitioning (e.g. the LOTAD cry in Pokemon Essentials), preventing the
-    // game from ever reaching the load screen. Native playback also avoids a
-    // full software mix pass on every output buffer. Pitch is currently
-    // accepted for RGSS compatibility but native SE playback uses device pitch.
+    _LIT(KWav, ".wav");
+    _LIT(KSoundBackslash, "Sound\\");
+    _LIT(KSoundSlash, "Sound/");
+    const TBool isRpg2kSound = HasExtension(path, KWav) &&
+        (path.FindF(KSoundBackslash) >= 0 || path.FindF(KSoundSlash) >= 0);
+    if (isRpg2kSound)
+    {
+        EnsureMixerL();
+        TBuf<160> cacheKey;
+        BuildCacheKeyL(path, aPitch, cacheKey);
+        if (!gMixer->IsCached(cacheKey))
+            CacheSeL(path, aPitch, EFalse);
+        if (!gMixer->PlaySe(cacheKey, aVolume))
+            User::Leave(KErrNotReady);
+        gMixer->CommitStreams();
+        return;
+    }
+
     PlayNativeSeL(path, aVolume);
 }
 }
@@ -1693,7 +1853,7 @@ extern "C" void EasyRpgAudioUpdate(void)
                 (gFadeDurationMs - static_cast<TInt>(elapsed)) /
                 gFadeDurationMs);
             if (gNativeBgm && gNativeBgm->Type() != CNativeBgmPlayer::ENone)
-                gNativeBgm->SetVolume(volume);
+                gNativeBgm->SetVolumeSmoothed(volume);
             if (gMixer)
                 gMixer->SetStreamVolume(CAudioMixer::EStreamBgm, volume);
         }
@@ -1711,7 +1871,7 @@ extern "C" void EasyRpgAudioUpdate(void)
                 static_cast<TInt64>(gBgsFadeStartVolume) *
                 (gBgsFadeDurationMs - static_cast<TInt>(elapsed)) /
                 gBgsFadeDurationMs);
-            gNativeBgs->SetVolume(volume);
+            gNativeBgs->SetVolumeSmoothed(volume);
         }
     }
     if (gMeActive && gNativeMe)
@@ -1727,7 +1887,7 @@ extern "C" void EasyRpgAudioUpdate(void)
                     static_cast<TInt64>(gMeFadeStartVolume) *
                     (gMeFadeDurationMs - static_cast<TInt>(elapsed)) /
                     gMeFadeDurationMs);
-                gNativeMe->SetVolume(volume);
+                gNativeMe->SetVolumeSmoothed(volume);
             }
         }
         if (gMeActive && !gNativeMe->IsActive())
@@ -1790,6 +1950,8 @@ extern "C" void EasyRpgAudioShutdown(void)
         delete gNativeSeVoices[index];
         gNativeSeVoices[index] = NULL;
     }
+    // Voices are gone, so no cache descriptors are on loan any more.
+    PurgeSeCache();
     delete gNativeBgm;
     gNativeBgm = NULL;
     delete gNativeBgs;

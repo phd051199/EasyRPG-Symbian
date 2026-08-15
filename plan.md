@@ -354,6 +354,58 @@ Initial clean test deliberately excludes the bundled `Save15.lsd`.
 - prefer integer/fixed-point math in hot paths where upstream floating point is unnecessary
 - profile on physical E72 before speculative micro-optimization
 
+### Implemented 2k/2k3 frame-path optimizations
+
+- dirty-rect pipeline keeps up to three separated regions instead of one
+  union (`RenderDamage.cpp` `KMaximumDirtyRegions`), with the paint pass
+  clipping per region and the presenter blitting per region; the launcher
+  display surface coalesces to at most three present regions
+- `FrameTimer` discards logic backlog older than four logic frames
+  (~66 ms) and re-anchors to the current tick, so a heavy frame can no
+  longer suppress rendering while the timer runs unbounded catch-up
+- tilemap wall/above sublayers (`z = 98/99`) use the anchored scroll cache
+  (memmove shift + edge-strip redraw) exactly like the below-passability
+  sublayers, always in A1555 so transparent gaps stay transparent; animated
+  upper sublayers keep the direct per-tile path
+- animated-tile damage is already gated on animation-step changes, not per
+  frame (verified; no extra throttling needed)
+
+### Implemented RGSS boot-time/UX optimizations
+
+- the RGSS engine starts DSA and its frame loop as soon as the VM thread
+  exists: an in-process loading gauge (determinate bar during script eval,
+  animated sweep during `ruby_init`) is presented while MRI boots, instead
+  of the previous black window that covered the launcher note
+- VM start is signaled immediately after pthread creation; later boot
+  failures propagate through the existing VM-death check in
+  `CRgssRuntime::AdvanceVmFrameL`
+- `Scripts.*` entries inflate in a single zlib pass with a geometrically
+  growing output buffer (previously every script was inflated twice:
+  once to measure, once to fill)
+- `load_data` no longer forces `GC.start` per `Data/MapNNN` load
+- the Marshal VFS input buffer grew from 4 KB to 32 KB (one ZIP entry open
+  per 32 KB instead of per 4 KB while parsing rxdata)
+- boot phases and per-16-script progress are traced with millisecond
+  timestamps (`rgss.trace`: `boot ruby_init/builtins/bootstrap/scripts*`) and
+  reported to the engine through the new `boot_progress` host callback
+- ZIP-to-temp copies of native-format BGM use 64 KB chunks to shorten the
+  synchronous stall when a virtual-path track starts
+
+### Validation status (EKA2L1 headless, WASM)
+
+- host unit tests: `render_damage_test` locks the multi-region behavior,
+  `rgss_core_test` locks the single-pass script inflate; both pass
+- XP (Littleroot Researchers): boot gauge presented during `ruby_init` /
+  script eval instead of a black screen; `rgss.trace` now records
+  `boot ruby_init/builtins/bootstrap/scripts*` millisecond timings and
+  per-16-script progress; game boots to the intro scene and runs ~30 fps
+  presentation on the emulator; NOTE: the EKA2L1 web emulator serves a
+  stale installed exe unless `--reset-profile` is used for a new SIS
+- RPG2k (Nobihaza VH): new game, four-direction walking/scrolling across
+  the map with the upper-sublayer scroll cache active — no crash, no
+  visual corruption, clean exit
+- physical E72 benchmarking of the 30 FPS target is still pending
+
 ## 10. Build pipeline
 
 ### Device build
@@ -479,6 +531,7 @@ The XP/VX/VX Ace runtime is isolated from the RPG Maker 2000/2003 player. It use
 - [x] separate `EasyRpgRgssCore.lib` build for ARMV5 UREL/UDEB
 - [x] VM host ABI for streaming file access, ticks, input, dirty regions, GC and heap reporting
 - [x] ZIP project-root detection for `Game.ini` plus RGSS1/2/3 script archives
+- [x] VX Ace `Game.rgss3a` v3 overlay with lazy indexed path lookup and random-access decryption for packed `Data/*` and `Graphics/*`
 - [x] launcher metadata labels for XP, VX and VX Ace
 - [x] separate `EasyRPGRgss.exe` process and SIS packaging
 - [x] single RGSS MRI runtime based on Ruby 3.0.7; Ruby 1.8.7 and the split `EasyRPGRgssModern.exe` target are removed from the active build/package graph

@@ -8,6 +8,7 @@
 namespace
 {
 const int KAutotileCount = 7;
+const int KRgss3BitmapCount = 9;
 const int KPriorityLayerCount = 24;
 const int KRenderLayerCount = KPriorityLayerCount + 1;
 const int KMaxCommands = 6144;
@@ -61,6 +62,19 @@ struct TTilemapSlot
     unsigned int viewport_revision;
     int animation_tick;
     int animation_frame;
+    // Scroll-only fast path: SetOrigin raises origin_dirty and EnsureCommands
+    // then shifts the cached command destinations instead of rebuilding the
+    // whole command list (the tile set only changes when the 32px cell
+    // FloorDiv32(scroll) changes; inside a cell every destination just moves
+    // by the scroll delta).
+    unsigned char origin_dirty;
+    unsigned char commands_valid;
+    int last_scroll_x;
+    int last_scroll_y;
+    int last_view_x;
+    int last_view_y;
+    int last_view_width;
+    int last_view_height;
     unsigned short generation;
     unsigned char used;
     unsigned char commands_dirty;
@@ -118,6 +132,9 @@ void DefaultState(EasyRpgRgssTilemapState& state)
     state.map_data_handle = 0;
     state.flash_data_handle = 0;
     state.priorities_handle = 0;
+    for (int index = 0; index < KRgss3BitmapCount; ++index)
+        state.bitmap_handles[index] = 0;
+    state.flags_handle = 0;
     state.ox = 0;
     state.oy = 0;
     state.visible = 1;
@@ -173,6 +190,86 @@ int Wrap(int value, int range)
     if (result < 0)
         result += range;
     return result;
+}
+
+void ResetScrollState(TTilemapSlot& slot)
+{
+    slot.origin_dirty = 0;
+    slot.commands_valid = 0;
+    slot.last_scroll_x = 0;
+    slot.last_scroll_y = 0;
+    slot.last_view_x = 0;
+    slot.last_view_y = 0;
+    slot.last_view_width = 0;
+    slot.last_view_height = 0;
+}
+
+void RecordScrollState(TTilemapSlot& slot, int scrollX, int scrollY, const EasyRpgRgssRect& view)
+{
+    slot.last_scroll_x = scrollX;
+    slot.last_scroll_y = scrollY;
+    slot.last_view_x = view.x;
+    slot.last_view_y = view.y;
+    slot.last_view_width = view.width;
+    slot.last_view_height = view.height;
+    slot.commands_valid = 1;
+}
+
+int EffectiveScroll(const TTilemapSlot& slot,
+                    int& scrollX,
+                    int& scrollY,
+                    EasyRpgRgssRect& view,
+                    int& viewUsable)
+{
+    // Mirrors the view/scroll computation at the top of BuildCommands so the
+    // scroll fast path can decide whether a rebuild is really needed.
+    EasyRpgRgssConfig config;
+    if (EasyRpgRgssCoreGetConfig(&config) != ERgssOk)
+        return ERgssTilemapErrorRender;
+    view.x = 0;
+    view.y = 0;
+    view.width = config.logical_width;
+    view.height = config.logical_height;
+    int viewportOx = 0;
+    int viewportOy = 0;
+    viewUsable = 1;
+    if (slot.state.viewport_handle != 0)
+    {
+        EasyRpgRgssViewportState viewport;
+        if (EasyRpgRgssViewportGetState(slot.state.viewport_handle, &viewport) != ERgssViewportOk)
+            return ERgssTilemapErrorResource;
+        if (!viewport.visible || viewport.rect.width <= 0 || viewport.rect.height <= 0)
+        {
+            viewUsable = 0;
+        }
+        else
+        {
+            view = viewport.rect;
+            viewportOx = viewport.ox;
+            viewportOy = viewport.oy;
+        }
+    }
+    scrollX = ClampAdd(slot.state.ox, viewportOx);
+    scrollY = ClampAdd(slot.state.oy, viewportOy);
+    return ERgssTilemapOk;
+}
+
+int ShiftCommandDestinations(TTilemapSlot& slot, int shiftX, int shiftY)
+{
+    // Moves every cached command by the scroll delta. Returns a negative
+    // value when a destination would leave the short range so the caller can
+    // fall back to a full rebuild.
+    for (int index = 0; index < slot.command_count; ++index)
+    {
+        TTileCommand& command = slot.commands[index];
+        const int x = command.destination_x + shiftX;
+        const int y = command.destination_y + shiftY;
+        if (x < -32768 || x > 32767 || y < -32768 || y > 32767)
+            return -1;
+        command.destination_x = static_cast<short>(x);
+        command.destination_y = static_cast<short>(y);
+    }
+    return ERgssTilemapOk;
 }
 
 int ValidBitmap(int handle)
@@ -329,13 +426,23 @@ int BuildCommands(TTilemapSlot& slot)
 {
     ResetCommands(slot);
     if (!slot.state.visible || slot.state.map_data_handle == 0)
+    {
+        // Empty but consistent command list; keep the scroll fast path from
+        // rebasing against a stale snapshot by invalidating it.
+        ResetScrollState(slot);
+        slot.commands_valid = 1;
         return ERgssTilemapOk;
+    }
 
     const int mapWidth = EasyRpgRgssTableXSize(slot.state.map_data_handle);
     const int mapHeight = EasyRpgRgssTableYSize(slot.state.map_data_handle);
     const int mapDepth = EasyRpgRgssTableZSize(slot.state.map_data_handle);
     if (mapWidth <= 0 || mapHeight <= 0 || mapDepth <= 0)
+    {
+        ResetScrollState(slot);
+        slot.commands_valid = 1;
         return ERgssTilemapOk;
+    }
 
     EasyRpgRgssConfig config;
     if (EasyRpgRgssCoreGetConfig(&config) != ERgssOk)
@@ -353,11 +460,17 @@ int BuildCommands(TTilemapSlot& slot)
         EasyRpgRgssViewportState viewport;
         if (EasyRpgRgssViewportGetState(slot.state.viewport_handle, &viewport) != ERgssViewportOk)
             return ERgssTilemapErrorResource;
-        if (!viewport.visible || viewport.rect.width <= 0 || viewport.rect.height <= 0)
-            return ERgssTilemapOk;
         view = viewport.rect;
         viewportOx = viewport.ox;
         viewportOy = viewport.oy;
+        if (!viewport.visible || viewport.rect.width <= 0 || viewport.rect.height <= 0)
+        {
+            RecordScrollState(slot,
+                              ClampAdd(slot.state.ox, viewportOx),
+                              ClampAdd(slot.state.oy, viewportOy),
+                              view);
+            return ERgssTilemapOk;
+        }
     }
 
     const int scrollX = ClampAdd(slot.state.ox, viewportOx);
@@ -406,6 +519,7 @@ int BuildCommands(TTilemapSlot& slot)
             }
         }
     }
+    RecordScrollState(slot, scrollX, scrollY, view);
     return ERgssTilemapOk;
 }
 
@@ -416,11 +530,41 @@ int EnsureCommands(TTilemapSlot& slot)
     const unsigned int prioritiesRevision = slot.state.priorities_handle != 0
         ? EasyRpgRgssTableRevision(slot.state.priorities_handle) : 0;
     const unsigned int viewportRevision = EasyRpgRgssViewportRevision();
-    if (!slot.commands_dirty &&
-        slot.map_revision == mapRevision &&
-        slot.priorities_revision == prioritiesRevision &&
-        slot.viewport_revision == viewportRevision)
+    const int structuralChange =
+        slot.commands_dirty ||
+        slot.map_revision != mapRevision ||
+        slot.priorities_revision != prioritiesRevision ||
+        slot.viewport_revision != viewportRevision;
+    if (!structuralChange && !slot.origin_dirty && slot.commands_valid)
         return ERgssTilemapOk;
+
+    if (!structuralChange && slot.origin_dirty && slot.commands_valid)
+    {
+        // Scroll-only update: when the 32px tile cell did not change the tile
+        // set is identical and every destination just shifts by the scroll
+        // delta, so rebase the cached commands instead of rebuilding them.
+        int scrollX = 0;
+        int scrollY = 0;
+        EasyRpgRgssRect view;
+        int viewUsable = 0;
+        if (EffectiveScroll(slot, scrollX, scrollY, view, viewUsable) == ERgssTilemapOk &&
+            viewUsable &&
+            view.x == slot.last_view_x && view.y == slot.last_view_y &&
+            view.width == slot.last_view_width && view.height == slot.last_view_height &&
+            FloorDiv32(scrollX) == FloorDiv32(slot.last_scroll_x) &&
+            FloorDiv32(scrollY) == FloorDiv32(slot.last_scroll_y))
+        {
+            const int shiftX = FloorMod32(slot.last_scroll_x) - FloorMod32(scrollX);
+            const int shiftY = FloorMod32(slot.last_scroll_y) - FloorMod32(scrollY);
+            if (ShiftCommandDestinations(slot, shiftX, shiftY) == ERgssTilemapOk)
+            {
+                slot.last_scroll_x = scrollX;
+                slot.last_scroll_y = scrollY;
+                slot.origin_dirty = 0;
+                return ERgssTilemapOk;
+            }
+        }
+    }
 
     const int result = BuildCommands(slot);
     if (result != ERgssTilemapOk)
@@ -429,6 +573,7 @@ int EnsureCommands(TTilemapSlot& slot)
     slot.priorities_revision = prioritiesRevision;
     slot.viewport_revision = viewportRevision;
     slot.commands_dirty = 0;
+    slot.origin_dirty = 0;
     return ERgssTilemapOk;
 }
 
@@ -557,6 +702,7 @@ void ReleaseSlot(TTilemapSlot& slot)
     slot.command_count = 0;
     slot.used = 0;
     slot.commands_dirty = 1;
+    ResetScrollState(slot);
     DefaultState(slot.state);
 }
 }
@@ -594,6 +740,7 @@ extern "C" int EasyRpgRgssTilemapInitialize(const EasyRpgRgssTilemapHost* host)
         slot.generation = 0;
         slot.used = 0;
         slot.commands_dirty = 1;
+        ResetScrollState(slot);
         ResetCommands(slot);
         for (int layer = 0; layer < KRenderLayerCount; ++layer)
         {
@@ -662,6 +809,7 @@ extern "C" int EasyRpgRgssTilemapCreate(int viewport_handle, int* handle)
         slot.generation = generation;
         slot.used = 1;
         slot.commands_dirty = 1;
+        ResetScrollState(slot);
         ResetCommands(slot);
         const int tilemapHandle = MakeHandle(index, generation);
 
@@ -801,6 +949,38 @@ extern "C" int EasyRpgRgssTilemapSetPriorities(int handle, int table_handle)
     return ERgssTilemapOk;
 }
 
+extern "C" int EasyRpgRgssTilemapSetBitmap(int handle, int index, int bitmap_handle)
+{
+    TTilemapSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssTilemapErrorInvalidHandle;
+    if (index < 0 || index >= KRgss3BitmapCount)
+        return ERgssTilemapErrorInvalidArgument;
+    if (!ValidBitmap(bitmap_handle))
+        return ERgssTilemapErrorResource;
+    if (slot->state.bitmap_handles[index] != bitmap_handle)
+    {
+        slot->state.bitmap_handles[index] = bitmap_handle;
+        slot->commands_dirty = 1;
+    }
+    return ERgssTilemapOk;
+}
+
+extern "C" int EasyRpgRgssTilemapSetFlags(int handle, int table_handle)
+{
+    TTilemapSlot* slot = FindSlot(handle);
+    if (!slot)
+        return ERgssTilemapErrorInvalidHandle;
+    if (!ValidTable(table_handle))
+        return ERgssTilemapErrorResource;
+    if (slot->state.flags_handle != table_handle)
+    {
+        slot->state.flags_handle = table_handle;
+        slot->commands_dirty = 1;
+    }
+    return ERgssTilemapOk;
+}
+
 extern "C" int EasyRpgRgssTilemapSetOrigin(int handle, int ox, int oy)
 {
     TTilemapSlot* slot = FindSlot(handle);
@@ -811,7 +991,9 @@ extern "C" int EasyRpgRgssTilemapSetOrigin(int handle, int ox, int oy)
         const int oldY = slot->state.oy;
         slot->state.ox = ox;
         slot->state.oy = oy;
-        slot->commands_dirty = 1;
+        // Pure scroll change: EnsureCommands rebases the cached destinations
+        // while the tile cell is unchanged instead of a full command rebuild.
+        slot->origin_dirty = 1;
         if (oldY != oy)
             EasyRpgRgssRenderMarkOrderDirty();
     }
@@ -823,7 +1005,14 @@ extern "C" int EasyRpgRgssTilemapSetVisible(int handle, int visible)
     TTilemapSlot* slot = FindSlot(handle);
     if (!slot)
         return ERgssTilemapErrorInvalidHandle;
-    slot->state.visible = visible ? 1 : 0;
+    const int value = visible ? 1 : 0;
+    if (slot->state.visible != value)
+    {
+        slot->state.visible = value;
+        // A tilemap built while hidden has an empty command list; rebuild
+        // when visibility flips so the tiles (re)appear.
+        slot->commands_dirty = 1;
+    }
     return ERgssTilemapOk;
 }
 

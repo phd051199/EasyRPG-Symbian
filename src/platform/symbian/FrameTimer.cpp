@@ -3,6 +3,13 @@
 
 #include "FrameTimer.h"
 
+namespace {
+// After a stall the timer must not run unbounded catch-up logic with all
+// renders suppressed: discard any backlog older than four logic frames
+// (~66 ms) and continue from the current tick.
+const TInt KMaxCatchUpLogicFrames = 4;
+}
+
 CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
 {
     CFrameTimer* self = new (ELeave) CFrameTimer(aObserver);
@@ -125,25 +132,25 @@ TInt CFrameTimer::CounterTicksToMicroseconds(TInt64 aTicks) const
 
 void CFrameTimer::ScheduleNext()
 {
-    if (!iRunning || IsActive())
-        return;
+	if (!iRunning || IsActive())
+		return;
 
-    UpdateElapsedCounter(User::FastCounter());
-    const TInt64 remaining = iNextDeadlineCounter - iElapsedCounter;
-    if (remaining <= 0)
-    {
-        iStatus = KRequestPending;
-        SetActive();
-        TRequestStatus* status = &iStatus;
-        User::RequestComplete(status, KErrNone);
-        return;
-    }
+	UpdateElapsedCounter(User::FastCounter());
+	const TInt64 remaining = iNextDeadlineCounter - iElapsedCounter;
+	if (remaining <= 0)
+	{
+		iStatus = KRequestPending;
+		SetActive();
+		TRequestStatus* status = &iStatus;
+		User::RequestComplete(status, KErrNone);
+		return;
+	}
 
-    TInt delay = CounterTicksToMicroseconds(remaining);
-    if (delay < 1)
-        delay = 1;
-    iTimer.HighRes(iStatus, TTimeIntervalMicroSeconds32(delay));
-    SetActive();
+	TInt delay = CounterTicksToMicroseconds(remaining);
+	if (delay < 1)
+		delay = 1;
+	iTimer.HighRes(iStatus, TTimeIntervalMicroSeconds32(delay));
+	SetActive();
 }
 
 void CFrameTimer::RunL()
@@ -157,12 +164,20 @@ void CFrameTimer::RunL()
         return;
     }
 
-    UpdateElapsedCounter(User::FastCounter());
-    if (iElapsedCounter < iNextDeadlineCounter)
-    {
-        ScheduleNext();
-        return;
-    }
+	UpdateElapsedCounter(User::FastCounter());
+	const TInt64 behindTicks = iElapsedCounter - iNextDeadlineCounter;
+	if (behindTicks > static_cast<TInt64>(KMaxCatchUpLogicFrames) * iFramePeriodCounter)
+	{
+		// Backlog beyond the catch-up cap: re-anchor to now so one logic
+		// frame runs and the next render is presented instead of starving.
+		iNextDeadlineCounter = iElapsedCounter;
+		iFrameRemainderAccumulator = 0;
+	}
+	if (iElapsedCounter < iNextDeadlineCounter)
+	{
+		ScheduleNext();
+		return;
+	}
 
     AdvanceDeadline();
     ++iLogicFrame;
