@@ -598,49 +598,34 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
     }
     else
     {
-        TInt scrollX = 0;
-        TInt scrollY = 0;
         const TBool presentScroll = iDisplaySurface->HasPresentScroll();
         if (presentScroll)
         {
-            iDisplaySurface->PresentScroll(scrollX, scrollY);
-            const TInt absX = Abs(scrollX);
-            const TInt absY = Abs(scrollY);
-            const TInt copyWidth = bitmapSize.iWidth - absX;
-            const TInt copyHeight = bitmapSize.iHeight - absY;
-            if (copyWidth > 0 && copyHeight > 0)
-            {
-                const TInt sourceX = scrollX < 0 ? -scrollX : 0;
-                const TInt sourceY = scrollY < 0 ? -scrollY : 0;
-                const TRect sourceRect(destination + TPoint(sourceX, sourceY),
-                                       TSize(copyWidth, copyHeight));
-                gc->CopyRect(TPoint(scrollX, scrollY), sourceRect);
-            }
-        }
-
-        const TInt dirtyCount = iDisplaySurface->DirtyRegionCount();
-        for (TInt index = 0; index < dirtyCount; ++index)
-        {
-            const TRect& dirty = iDisplaySurface->DirtyRegion(index);
-            gc->BitBlt(destination + dirty.iTl,
+            // A scrolling frame already updates essentially one screen worth
+            // of pixels: CopyRect(overlap) + the newly exposed strip. Doing
+            // that directly on the scan-out buffer makes the shifted old
+            // frame visible before the strip/other damage is copied and is a
+            // common source of tearing on E72 DSA. The off-screen bitmap is
+            // already the complete new frame, so use one contiguous blit.
+            // Pixel bandwidth stays approximately the same while the number
+            // of screen mutations drops to one.
+            gc->BitBlt(destination,
                        &frameBitmap,
-                       dirty);
-            if (iPerfOverlay && RectsOverlap(dirty, overlayRect))
-                overlayNeedsDraw = ETrue;
+                       TRect(TPoint(0, 0), bitmapSize));
+            overlayNeedsDraw = iPerfOverlay != NULL;
         }
-
-        if (presentScroll && iPerfOverlay)
+        else
         {
-            TRect shiftedOverlay(overlayRect);
-            shiftedOverlay.Move(scrollX, scrollY);
-            shiftedOverlay.Intersection(TRect(TPoint(0, 0), bitmapSize));
-            if (!shiftedOverlay.IsEmpty())
+            const TInt dirtyCount = iDisplaySurface->DirtyRegionCount();
+            for (TInt index = 0; index < dirtyCount; ++index)
             {
-                gc->BitBlt(destination + shiftedOverlay.iTl,
+                const TRect& dirty = iDisplaySurface->DirtyRegion(index);
+                gc->BitBlt(destination + dirty.iTl,
                            &frameBitmap,
-                           shiftedOverlay);
+                           dirty);
+                if (iPerfOverlay && RectsOverlap(dirty, overlayRect))
+                    overlayNeedsDraw = ETrue;
             }
-            overlayNeedsDraw = ETrue;
         }
         iDisplaySurface->ClearDirtyRegions();
     }

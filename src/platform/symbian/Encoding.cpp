@@ -1,14 +1,162 @@
 #include "Encoding.h"
+#include "CoreEncoding.h"
 
-#ifdef EASYRPG_LAUNCHER_PROCESS
 #include <charconv.h>
 #include <f32file.h>
-#else
-#include "CoreEncoding.h"
-#endif
 
 namespace
 {
+#ifndef EASYRPG_LAUNCHER_PROCESS
+RFs gLegacyEncodingFs;
+TBool gLegacyEncodingFsConnected = EFalse;
+CCnvCharacterSetConverter* gLegacyEncodingConverter = NULL;
+CArrayFix<CCnvCharacterSetConverter::SCharacterSet>* gLegacyEncodingCharsets = NULL;
+TUint gLegacyEncodingPrepared = 0;
+
+TUint CharacterSetForCodepage(TUint aCodepage)
+{
+    switch (aCodepage)
+    {
+    case 932: return KCharacterSetIdentifierShiftJis;
+    case 936: return KCharacterSetIdentifierGbk;
+    case 950: return KCharacterSetIdentifierBig5;
+    case 65001: return KCharacterSetIdentifierUtf8;
+    default: return 0;
+    }
+}
+
+void EnsureLegacyEncodingL()
+{
+    if (!gLegacyEncodingFsConnected)
+    {
+        User::LeaveIfError(gLegacyEncodingFs.Connect());
+        gLegacyEncodingFsConnected = ETrue;
+    }
+    if (!gLegacyEncodingConverter)
+        gLegacyEncodingConverter = CCnvCharacterSetConverter::NewL();
+    if (!gLegacyEncodingCharsets)
+        gLegacyEncodingCharsets = CCnvCharacterSetConverter::CreateArrayOfCharacterSetsAvailableL(gLegacyEncodingFs);
+}
+
+TBool HasLegacyEncoding(TUint aIdentifier)
+{
+    if (!gLegacyEncodingCharsets)
+        return EFalse;
+    for (TInt index = 0; index < gLegacyEncodingCharsets->Count(); ++index)
+    {
+        if (gLegacyEncodingCharsets->At(index).Identifier() == aIdentifier)
+            return ETrue;
+    }
+    return EFalse;
+}
+
+void PrepareLegacyEncodingL(TUint aCodepage)
+{
+    EnsureLegacyEncodingL();
+    const TUint identifier = CharacterSetForCodepage(aCodepage);
+    if (!identifier || !HasLegacyEncoding(identifier))
+        User::Leave(KErrNotSupported);
+    if (gLegacyEncodingPrepared == identifier)
+        return;
+    gLegacyEncodingConverter->PrepareToConvertToOrFromL(identifier, *gLegacyEncodingCharsets, gLegacyEncodingFs);
+    gLegacyEncodingPrepared = identifier;
+}
+
+TInt CoreEncodingStatus(TInt aError)
+{
+    if (aError == KErrNone)
+        return 0;
+    if (aError == KErrOverflow)
+        return -2;
+    return -1;
+}
+
+void RankLegacyEncodingsL(const TDesC8& aSample,
+                          unsigned int* aCodepages,
+                          int* aConfidences,
+                          unsigned int aCapacity,
+                          unsigned int& aCount)
+{
+    EnsureLegacyEncodingL();
+    const TUint candidates[] = {932, 936, 950, 65001};
+    aCount = 0;
+    for (TUint candidate = 0; candidate < sizeof(candidates) / sizeof(candidates[0]); ++candidate)
+    {
+        const TUint identifier = CharacterSetForCodepage(candidates[candidate]);
+        if (!HasLegacyEncoding(identifier))
+            continue;
+        TInt confidence = 0;
+        TInt error = KErrNone;
+        TRAP(error, gLegacyEncodingConverter->ConvertibleToCharSetL(
+            confidence, identifier, *gLegacyEncodingCharsets, aSample));
+        if (error != KErrNone || confidence < CCnvCharacterSetConverter::ELowestThreshold)
+            continue;
+
+        TUint insert = aCount;
+        if (insert >= aCapacity)
+            insert = aCapacity;
+        while (insert > 0 && aConfidences[insert - 1] < confidence)
+        {
+            if (insert < aCapacity)
+            {
+                aCodepages[insert] = aCodepages[insert - 1];
+                aConfidences[insert] = aConfidences[insert - 1];
+            }
+            --insert;
+        }
+        if (insert < aCapacity)
+        {
+            aCodepages[insert] = candidates[candidate];
+            aConfidences[insert] = confidence;
+        }
+        if (aCount < aCapacity)
+            ++aCount;
+    }
+}
+
+void LegacyToUtf16L(TUint aCodepage,
+                    const unsigned char* aSource,
+                    TUint aSourceLength,
+                    unsigned short* aDestination,
+                    TUint aDestinationCapacity,
+                    unsigned int& aDestinationLength)
+{
+    PrepareLegacyEncodingL(aCodepage);
+    TPtrC8 source(reinterpret_cast<const TUint8*>(aSource), static_cast<TInt>(aSourceLength));
+    TPtr16 destination(reinterpret_cast<TUint16*>(aDestination), 0, static_cast<TInt>(aDestinationCapacity));
+    TInt state = CCnvCharacterSetConverter::KStateDefault;
+    TInt unconvertible = 0;
+    const TInt remaining = gLegacyEncodingConverter->ConvertToUnicode(destination, source, state, unconvertible);
+    if (remaining < 0)
+        User::Leave(remaining);
+    if (remaining != 0)
+        User::Leave(KErrOverflow);
+    if (unconvertible != 0)
+        User::Leave(KErrCorrupt);
+    aDestinationLength = static_cast<unsigned int>(destination.Length());
+}
+
+void Utf16ToLegacyL(TUint aCodepage,
+                    const unsigned short* aSource,
+                    TUint aSourceLength,
+                    unsigned char* aDestination,
+                    TUint aDestinationCapacity,
+                    unsigned int& aDestinationLength)
+{
+    PrepareLegacyEncodingL(aCodepage);
+    TPtrC16 source(reinterpret_cast<const TUint16*>(aSource), static_cast<TInt>(aSourceLength));
+    TPtr8 destination(reinterpret_cast<TUint8*>(aDestination), 0, static_cast<TInt>(aDestinationCapacity));
+    TInt unconvertible = 0;
+    const TInt remaining = gLegacyEncodingConverter->ConvertFromUnicode(destination, source, unconvertible);
+    if (remaining < 0)
+        User::Leave(remaining);
+    if (remaining != 0)
+        User::Leave(KErrOverflow);
+    if (unconvertible != 0)
+        User::Leave(KErrCorrupt);
+    aDestinationLength = static_cast<unsigned int>(destination.Length());
+}
+#endif
 TUint16 ComposeJapaneseKana(TUint16 aBase, TUint16 aMark)
 {
     const TBool dakuten = (aMark == 0x3099);
@@ -81,6 +229,71 @@ void AppendUtf16L(TUint32 aCodePoint, TDes& aDestination)
     aDestination.Append(static_cast<TUint16>(0xdc00u + (aCodePoint & 0x3ffu)));
 }
 }
+
+#ifndef EASYRPG_LAUNCHER_PROCESS
+extern "C" int EasyRpgPlatformRankLegacyEncodings(const unsigned char* aSample,
+                                                   unsigned int aSampleLength,
+                                                   unsigned int* aCodepages,
+                                                   int* aConfidences,
+                                                   unsigned int aCapacity,
+                                                   unsigned int* aCount)
+{
+    if (!aCount || (!aSample && aSampleLength != 0) ||
+        (aCapacity != 0 && (!aCodepages || !aConfidences)))
+        return -1;
+    *aCount = 0;
+    if (aSampleLength == 0 || aCapacity == 0)
+        return 0;
+
+    const TPtrC8 sample(reinterpret_cast<const TUint8*>(aSample), static_cast<TInt>(aSampleLength));
+    unsigned int count = 0;
+    TInt error = KErrNone;
+    TRAP(error, RankLegacyEncodingsL(sample, aCodepages, aConfidences, aCapacity, count));
+    if (error == KErrNone)
+        *aCount = count;
+    return CoreEncodingStatus(error);
+}
+
+extern "C" int EasyRpgPlatformLegacyToUtf16(unsigned int aCodepage,
+                                             const unsigned char* aSource,
+                                             unsigned int aSourceLength,
+                                             unsigned short* aDestination,
+                                             unsigned int aDestinationCapacity,
+                                             unsigned int* aDestinationLength)
+{
+    if (!aDestinationLength || (!aSource && aSourceLength != 0) ||
+        (!aDestination && aDestinationCapacity != 0))
+        return -1;
+    *aDestinationLength = 0;
+    unsigned int written = 0;
+    TInt error = KErrNone;
+    TRAP(error, LegacyToUtf16L(aCodepage, aSource, aSourceLength,
+                               aDestination, aDestinationCapacity, written));
+    if (error == KErrNone)
+        *aDestinationLength = written;
+    return CoreEncodingStatus(error);
+}
+
+extern "C" int EasyRpgPlatformUtf16ToLegacy(unsigned int aCodepage,
+                                             const unsigned short* aSource,
+                                             unsigned int aSourceLength,
+                                             unsigned char* aDestination,
+                                             unsigned int aDestinationCapacity,
+                                             unsigned int* aDestinationLength)
+{
+    if (!aDestinationLength || (!aSource && aSourceLength != 0) ||
+        (!aDestination && aDestinationCapacity != 0))
+        return -1;
+    *aDestinationLength = 0;
+    unsigned int written = 0;
+    TInt error = KErrNone;
+    TRAP(error, Utf16ToLegacyL(aCodepage, aSource, aSourceLength,
+                               aDestination, aDestinationCapacity, written));
+    if (error == KErrNone)
+        *aDestinationLength = written;
+    return CoreEncodingStatus(error);
+}
+#endif
 
 void TEncoding::ShiftJisToUnicodeL(const TDesC8& aSource,
                                    TDes& aDestination)

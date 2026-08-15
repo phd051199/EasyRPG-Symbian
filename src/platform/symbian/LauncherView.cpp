@@ -311,14 +311,16 @@ void CLauncherView::DismissLoadingDialog()
 void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion)
 {
     _LIT(KEasyRpgRuntime, "EasyRPGGame.exe");
-    _LIT(KEasyRpgRgssRuntime, "EasyRPGRgss.exe");
-    const TDesC* executable = &KEasyRpgRuntime;
-    if (aVersion == EGameEngineRpgXp ||
-        aVersion == EGameEngineRpgVx ||
-        aVersion == EGameEngineRpgVxAce)
-        executable = &KEasyRpgRgssRuntime;
-    else if (aVersion != EGameEngineRpg2000 &&
-             aVersion != EGameEngineRpg2003)
+    _LIT(KEasyRpgScriptRuntime, "EasyRPGScript.exe");
+    const TDesC* executable = NULL;
+    if (aVersion == EGameEngineRpg2000 ||
+        aVersion == EGameEngineRpg2003)
+        executable = &KEasyRpgRuntime;
+    else if (aVersion == EGameEngineRpgXp ||
+             aVersion == EGameEngineRpgVx ||
+             aVersion == EGameEngineRpgVxAce)
+        executable = &KEasyRpgScriptRuntime;
+    else
         User::Leave(KErrNotSupported);
 
     const TFileName currentExecutable = RProcess().FileName();
