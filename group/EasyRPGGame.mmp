@@ -34,6 +34,7 @@ LIBRARY           gdi.lib
 LIBRARY           hal.lib
 LIBRARY           efsrv.lib
 LIBRARY           bafl.lib
+LIBRARY           charconv.lib
 LIBRARY           libc.lib
 LIBRARY           libm.lib
 LIBRARY           libz.lib
@@ -41,7 +42,7 @@ LIBRARY           mediaclientaudio.lib
 LIBRARY           mediaclientaudiostream.lib
 LIBRARY           mediaclientvideo.lib
 LIBRARY           ws32.lib
-STATICLIBRARY     EasyRpgModernCore.lib
+STATICLIBRARY     EasyRpgPlayer.lib
 
 LANG              SC
 

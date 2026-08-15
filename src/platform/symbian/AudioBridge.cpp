@@ -1914,7 +1914,7 @@ extern "C" void EasyRpgAudioUpdate(void)
         }
         else
         {
-#ifdef EASYRPG_RGSS_PROCESS
+#ifdef EASYRPG_SCRIPT_PROCESS
             PumpBgm(KBgmLogicPumpFrames);
 #else
             PumpBgm(EasyRpgUpstreamPlayerShouldRender() ? KBgmRenderPumpFrames : KBgmLogicPumpFrames);

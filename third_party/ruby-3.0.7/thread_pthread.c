@@ -44,7 +44,7 @@
 #  define USE_EVENTFD (0)
 #endif
 
-#if defined(SIGVTALRM) && !defined(__CYGWIN__) && !defined(__SYMBIAN32__)
+#if defined(SIGVTALRM) && !defined(__CYGWIN__)
 #  define USE_UBF_LIST 1
 #endif
 
@@ -658,11 +658,7 @@ native_thread_destroy(rb_thread_t *th)
 static rb_thread_t *register_cached_thread_and_wait(void *);
 #endif
 
-#if defined(__SYMBIAN32__)
-#define STACKADDR_AVAILABLE 1
-#undef MAINSTACKADDR_AVAILABLE
-#define MAINSTACKADDR_AVAILABLE 1
-#elif defined HAVE_PTHREAD_GETATTR_NP || defined HAVE_PTHREAD_ATTR_GET_NP
+#if defined HAVE_PTHREAD_GETATTR_NP || defined HAVE_PTHREAD_ATTR_GET_NP
 #define STACKADDR_AVAILABLE 1
 #elif defined HAVE_PTHREAD_GET_STACKADDR_NP && defined HAVE_PTHREAD_GET_STACKSIZE_NP
 #define STACKADDR_AVAILABLE 1
@@ -698,10 +694,7 @@ get_stack(void **addr, size_t *size)
 {
 #define CHECK_ERR(expr)				\
     {int err = (expr); if (err) return err;}
-#ifdef __SYMBIAN32__
-    extern int easyrpg_symbian_stack_bounds(void **, size_t *);
-    return easyrpg_symbian_stack_bounds(addr, size);
-#elif defined HAVE_PTHREAD_GETATTR_NP /* Linux */
+#ifdef HAVE_PTHREAD_GETATTR_NP /* Linux */
     pthread_attr_t attr;
     size_t guard = 0;
     STACK_GROW_DIR_DETECTION;
@@ -1739,9 +1732,6 @@ ubf_timer_create(rb_pid_t current)
 static void
 rb_thread_create_timer_thread(void)
 {
-#ifdef __SYMBIAN32__
-    return;
-#else
     /* we only create the pipe, and lazy-spawn */
     rb_pid_t current = getpid();
     rb_pid_t owner = signal_self_pipe.owner_process;
@@ -1761,7 +1751,6 @@ rb_thread_create_timer_thread(void)
         sigwait_th = THREAD_INVALID;
         signal_self_pipe.owner_process = current;
     }
-#endif
 }
 
 static void
@@ -2153,12 +2142,6 @@ native_ppoll_sleep(rb_thread_t *th, rb_hrtime_t *rel)
 static void
 native_sleep(rb_thread_t *th, rb_hrtime_t *rel)
 {
-#ifdef __SYMBIAN32__
-    rb_ractor_blocking_threads_inc(th->ractor, __FILE__, __LINE__);
-    native_cond_sleep(th, rel);
-    rb_ractor_blocking_threads_dec(th->ractor, __FILE__, __LINE__);
-    return;
-#endif
     int sigwait_fd = rb_sigwait_fd_get(th);
     rb_ractor_blocking_threads_inc(th->ractor, __FILE__, __LINE__);
 

@@ -107,16 +107,13 @@ printf 'S60 SDK: %s\n' "$SDK_HOST_ROOT"
 printf 'Profile: %s\n' "$PROFILE"
 
 if [[ $PROFILE != clean ]]; then
-    bash "$PROJECT_DIR/tools/fetch_renderer_upstream.sh" "$PROJECT_DIR/build/vendor"
+    bash "$PROJECT_DIR/tools/prepare_third_party.sh"
     EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
     EASYRPG_WINE_BIN="$WINE_BIN" \
-        bash "$PROJECT_DIR/tools/build_modern_core.sh" "$PROFILE"
+        bash "$PROJECT_DIR/tools/build_player.sh" "$PROFILE"
     EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
     EASYRPG_WINE_BIN="$WINE_BIN" \
-        bash "$PROJECT_DIR/tools/build_rgss_core.sh" "$PROFILE"
-    EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
-    EASYRPG_WINE_BIN="$WINE_BIN" \
-        bash "$PROJECT_DIR/tools/build_rgss_mri.sh" "$PROFILE"
+        bash "$PROJECT_DIR/tools/build_ruby3.sh" "$PROFILE"
 fi
 
 exec "$WINE_BIN" cmd.exe /d /s /c \

@@ -49,6 +49,11 @@ struct EasyRpgDir
 class CVirtualFile : public CBase
 {
 public:
+    enum
+    {
+        KReadAheadBytes = 4096
+    };
+
     CVirtualFile(CZipVfs* aVfs,
                  TInt aDataOffset,
                  TInt aFileSize,
@@ -58,6 +63,8 @@ public:
           iDataOffset(aDataOffset),
           iFileSize(aFileSize),
           iPosition(0),
+          iReadAheadStart(-1),
+          iReadAheadLength(0),
           iError(KErrNone),
           iEof(EFalse),
           iHasPushback(EFalse),
@@ -76,6 +83,9 @@ public:
     TInt iDataOffset;
     TInt iFileSize;
     TInt iPosition;
+    TInt iReadAheadStart;
+    TInt iReadAheadLength;
+    TUint8 iReadAhead[KReadAheadBytes];
     TInt iError;
     TBool iEof;
     TBool iHasPushback;
@@ -320,7 +330,13 @@ FILE* OpenFileL(const char* aPath, const char* aMode)
             gVirtualVfs->OpenStoredFileL(relative, dataOffset, fileSize);
             HBufC8* buffer = NULL;
             if (ShouldBufferVirtualFile(relative, fileSize))
-                buffer = gVirtualVfs->ReadFileLC(relative, KVirtualBufferMaxBytes);
+            {
+                buffer = HBufC8::NewLC(fileSize);
+                TPtr8 bytes = buffer->Des();
+                gVirtualVfs->ReadStoredFileL(dataOffset, fileSize, 0, bytes);
+                if (bytes.Length() != fileSize)
+                    User::Leave(KErrEof);
+            }
             CVirtualFile* file = new (ELeave) CVirtualFile(gVirtualVfs,
                                                            dataOffset,
                                                            fileSize,
@@ -464,19 +480,66 @@ extern "C" size_t EasyRpgFread(void* aBuffer,
         }
         else
         {
-            TPtr8 bytes(output + written, 0, wanted);
-            TRAPD(error,
-                  file->iVfs->ReadStoredFileL(file->iDataOffset,
-                                              file->iFileSize,
-                                              file->iPosition,
-                                              bytes));
-            if (error != KErrNone)
+            while (written < requested && file->iPosition < file->iFileSize)
             {
-                file->iError = error;
-                return static_cast<size_t>(written) / aSize;
+                const TInt cacheEnd = file->iReadAheadStart >= 0
+                    ? file->iReadAheadStart + file->iReadAheadLength
+                    : -1;
+                if (file->iReadAheadStart >= 0 &&
+                    file->iPosition >= file->iReadAheadStart &&
+                    file->iPosition < cacheEnd)
+                {
+                    const TInt cacheOffset = file->iPosition - file->iReadAheadStart;
+                    const TInt available = file->iReadAheadLength - cacheOffset;
+                    const TInt count = Min(requested - written, available);
+                    Mem::Copy(output + written,
+                              file->iReadAhead + cacheOffset,
+                              count);
+                    file->iPosition += count;
+                    written += count;
+                    continue;
+                }
+
+                const TInt remaining = file->iFileSize - file->iPosition;
+                const TInt needed = Min(requested - written, remaining);
+                if (needed >= CVirtualFile::KReadAheadBytes)
+                {
+                    TPtr8 bytes(output + written, 0, needed);
+                    TRAPD(error,
+                          file->iVfs->ReadStoredFileL(file->iDataOffset,
+                                                      file->iFileSize,
+                                                      file->iPosition,
+                                                      bytes));
+                    if (error != KErrNone)
+                    {
+                        file->iError = error;
+                        return static_cast<size_t>(written) / aSize;
+                    }
+                    file->iPosition += bytes.Length();
+                    written += bytes.Length();
+                    if (bytes.Length() == 0)
+                        break;
+                    continue;
+                }
+
+                TPtr8 readAhead(file->iReadAhead,
+                                0,
+                                CVirtualFile::KReadAheadBytes);
+                TRAPD(error,
+                      file->iVfs->ReadStoredFileL(file->iDataOffset,
+                                                  file->iFileSize,
+                                                  file->iPosition,
+                                                  readAhead));
+                if (error != KErrNone)
+                {
+                    file->iError = error;
+                    return static_cast<size_t>(written) / aSize;
+                }
+                file->iReadAheadStart = file->iPosition;
+                file->iReadAheadLength = readAhead.Length();
+                if (file->iReadAheadLength == 0)
+                    break;
             }
-            file->iPosition += bytes.Length();
-            written += bytes.Length();
         }
     }
 

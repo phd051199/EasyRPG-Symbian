@@ -363,7 +363,7 @@ cc_new(VALUE klass, ID mid, int argc, const rb_callable_method_entry_t *cme)
             cc = ccs->entries[0].cc;
         }
         else {
-            const struct rb_callinfo *ci = vm_ci_new(mid, 0, argc, NULL); // TODO: proper ci
+            const struct rb_callinfo *ci = vm_ci_new(mid, 0, argc, false); // TODO: proper ci
             cc = vm_cc_new(klass, cme, vm_call_general);
             METHOD_ENTRY_CACHED_SET((struct rb_callable_method_entry_struct *)cme);
             vm_ccs_push(klass, ccs, ci, cc);

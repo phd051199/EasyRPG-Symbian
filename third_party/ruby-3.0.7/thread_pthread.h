@@ -72,7 +72,7 @@ typedef struct rb_global_vm_lock_struct {
 
 #if __STDC_VERSION__ >= 201112
   #define RB_THREAD_LOCAL_SPECIFIER _Thread_local
-#elif defined(__GNUC__) && !defined(RB_THREAD_LOCAL_SPECIFIER_IS_UNSUPPORTED)
+#elif defined(__GNUC__)
   /* note that ICC (linux) and Clang are covered by __GNUC__ */
   #define RB_THREAD_LOCAL_SPECIFIER __thread
 #else

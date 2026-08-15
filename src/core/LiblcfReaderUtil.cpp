@@ -466,16 +466,13 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
     if (IsMixedVietnameseSample(sample))
         PushEncoding(encodings, "EASYRPG_VI_CP932");
 
-    unsigned int codepages[4] = {0, 0, 0, 0};
-    int confidences[4] = {0, 0, 0, 0};
-    unsigned int count = 0;
-    if (EasyRpgPlatformRankLegacyEncodings(
+    unsigned int codepage = 0;
+    int confidence = 0;
+    if (EasyRpgPlatformDetectLegacyEncoding(
             reinterpret_cast<const unsigned char*>(sample.data()),
             static_cast<unsigned int>(sample.size()),
-            codepages, confidences, 4, &count) == 0) {
-        for (unsigned int index = 0; index < count; ++index)
-            PushEncoding(encodings, CodepageToEncoding(static_cast<int>(codepages[index])));
-    }
+            &codepage, &confidence) == 0 && codepage != 0)
+        PushEncoding(encodings, CodepageToEncoding(static_cast<int>(codepage)));
 
     PushEncoding(encodings, "SHIFT_JIS");
     PushEncoding(encodings, "GBK");

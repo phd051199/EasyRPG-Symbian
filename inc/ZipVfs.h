@@ -76,6 +76,7 @@ private:
     TFileName iArchivePath;
     HBufC* iProjectPrefix;
     HBufC8* iCentralDirectory;
+    TInt iArchiveSize;
     RArray<TZipVfsEntry> iEntries;
     RArray<TInt> iBuckets[KBucketCount];
 };

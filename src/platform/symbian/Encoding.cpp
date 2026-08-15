@@ -2,6 +2,7 @@
 #include "CoreEncoding.h"
 
 #include <charconv.h>
+#include <utf.h>
 #include <f32file.h>
 
 namespace
@@ -17,10 +18,8 @@ TUint CharacterSetForCodepage(TUint aCodepage)
 {
     switch (aCodepage)
     {
-    case 932: return KCharacterSetIdentifierShiftJis;
     case 936: return KCharacterSetIdentifierGbk;
     case 950: return KCharacterSetIdentifierBig5;
-    case 65001: return KCharacterSetIdentifierUtf8;
     default: return 0;
     }
 }
@@ -71,47 +70,29 @@ TInt CoreEncodingStatus(TInt aError)
     return -1;
 }
 
-void RankLegacyEncodingsL(const TDesC8& aSample,
-                          unsigned int* aCodepages,
-                          int* aConfidences,
-                          unsigned int aCapacity,
-                          unsigned int& aCount)
+TUint CodepageForCharacterSet(TUint aIdentifier)
+{
+    switch (aIdentifier)
+    {
+    case KCharacterSetIdentifierShiftJis: return 932;
+    case KCharacterSetIdentifierGbk: return 936;
+    case KCharacterSetIdentifierBig5: return 950;
+    case KCharacterSetIdentifierUtf8: return 65001;
+    default: return 0;
+    }
+}
+
+void DetectLegacyEncodingL(const TDesC8& aSample,
+                           unsigned int& aCodepage,
+                           int& aConfidence)
 {
     EnsureLegacyEncodingL();
-    const TUint candidates[] = {932, 936, 950, 65001};
-    aCount = 0;
-    for (TUint candidate = 0; candidate < sizeof(candidates) / sizeof(candidates[0]); ++candidate)
-    {
-        const TUint identifier = CharacterSetForCodepage(candidates[candidate]);
-        if (!HasLegacyEncoding(identifier))
-            continue;
-        TInt confidence = 0;
-        TInt error = KErrNone;
-        TRAP(error, gLegacyEncodingConverter->ConvertibleToCharSetL(
-            confidence, identifier, *gLegacyEncodingCharsets, aSample));
-        if (error != KErrNone || confidence < CCnvCharacterSetConverter::ELowestThreshold)
-            continue;
-
-        TUint insert = aCount;
-        if (insert >= aCapacity)
-            insert = aCapacity;
-        while (insert > 0 && aConfidences[insert - 1] < confidence)
-        {
-            if (insert < aCapacity)
-            {
-                aCodepages[insert] = aCodepages[insert - 1];
-                aConfidences[insert] = aConfidences[insert - 1];
-            }
-            --insert;
-        }
-        if (insert < aCapacity)
-        {
-            aCodepages[insert] = candidates[candidate];
-            aConfidences[insert] = confidence;
-        }
-        if (aCount < aCapacity)
-            ++aCount;
-    }
+    TUint identifier = 0;
+    TInt confidence = 0;
+    CCnvCharacterSetConverter::AutoDetectCharacterSetL(
+        confidence, identifier, *gLegacyEncodingCharsets, aSample);
+    aCodepage = CodepageForCharacterSet(identifier);
+    aConfidence = confidence;
 }
 
 void LegacyToUtf16L(TUint aCodepage,
@@ -206,51 +187,31 @@ TUint16 ComposeJapaneseKana(TUint16 aBase, TUint16 aMark)
 
     return 0;
 }
-
-void AppendUtf16L(TUint32 aCodePoint, TDes& aDestination)
-{
-    if (aCodePoint <= 0xffffu)
-    {
-        if (aCodePoint >= 0xd800u && aCodePoint <= 0xdfffu)
-            User::Leave(KErrCorrupt);
-        if (aDestination.Length() >= aDestination.MaxLength())
-            User::Leave(KErrOverflow);
-        aDestination.Append(static_cast<TUint16>(aCodePoint));
-        return;
-    }
-
-    if (aCodePoint > 0x10ffffu)
-        User::Leave(KErrCorrupt);
-    if (aDestination.MaxLength() - aDestination.Length() < 2)
-        User::Leave(KErrOverflow);
-
-    aCodePoint -= 0x10000u;
-    aDestination.Append(static_cast<TUint16>(0xd800u + (aCodePoint >> 10)));
-    aDestination.Append(static_cast<TUint16>(0xdc00u + (aCodePoint & 0x3ffu)));
-}
 }
 
 #ifndef EASYRPG_LAUNCHER_PROCESS
-extern "C" int EasyRpgPlatformRankLegacyEncodings(const unsigned char* aSample,
-                                                   unsigned int aSampleLength,
-                                                   unsigned int* aCodepages,
-                                                   int* aConfidences,
-                                                   unsigned int aCapacity,
-                                                   unsigned int* aCount)
+extern "C" int EasyRpgPlatformDetectLegacyEncoding(const unsigned char* aSample,
+                                                     unsigned int aSampleLength,
+                                                     unsigned int* aCodepage,
+                                                     int* aConfidence)
 {
-    if (!aCount || (!aSample && aSampleLength != 0) ||
-        (aCapacity != 0 && (!aCodepages || !aConfidences)))
+    if (!aCodepage || !aConfidence || (!aSample && aSampleLength != 0))
         return -1;
-    *aCount = 0;
-    if (aSampleLength == 0 || aCapacity == 0)
+    *aCodepage = 0;
+    *aConfidence = 0;
+    if (aSampleLength == 0)
         return 0;
 
     const TPtrC8 sample(reinterpret_cast<const TUint8*>(aSample), static_cast<TInt>(aSampleLength));
-    unsigned int count = 0;
+    unsigned int codepage = 0;
+    int confidence = 0;
     TInt error = KErrNone;
-    TRAP(error, RankLegacyEncodingsL(sample, aCodepages, aConfidences, aCapacity, count));
+    TRAP(error, DetectLegacyEncodingL(sample, codepage, confidence));
     if (error == KErrNone)
-        *aCount = count;
+    {
+        *aCodepage = codepage;
+        *aConfidence = confidence;
+    }
     return CoreEncodingStatus(error);
 }
 
@@ -344,60 +305,14 @@ void TEncoding::Utf8ToUnicodeL(const TDesC8& aSource,
                                TDes& aDestination)
 {
     aDestination.Zero();
-    TInt position = 0;
-    while (position < aSource.Length())
-    {
-        const TUint8 first = aSource[position++];
-        TUint32 codePoint = 0;
-        TInt continuationCount = 0;
-        TUint32 minimumValue = 0;
+    if (aSource.Length() == 0)
+        return;
 
-        if (first < 0x80)
-        {
-            codePoint = first;
-        }
-        else if ((first & 0xe0) == 0xc0)
-        {
-            codePoint = first & 0x1f;
-            continuationCount = 1;
-            minimumValue = 0x80;
-        }
-        else if ((first & 0xf0) == 0xe0)
-        {
-            codePoint = first & 0x0f;
-            continuationCount = 2;
-            minimumValue = 0x800;
-        }
-        else if ((first & 0xf8) == 0xf0)
-        {
-            codePoint = first & 0x07;
-            continuationCount = 3;
-            minimumValue = 0x10000;
-        }
-        else
-        {
-            User::Leave(KErrCorrupt);
-        }
-
-        if (position + continuationCount > aSource.Length())
-            User::Leave(KErrCorrupt);
-        for (TInt index = 0; index < continuationCount; ++index)
-        {
-            const TUint8 next = aSource[position++];
-            if ((next & 0xc0) != 0x80)
-                User::Leave(KErrCorrupt);
-            codePoint = (codePoint << 6) | (next & 0x3f);
-        }
-
-        if (continuationCount > 0 && codePoint < minimumValue)
-            User::Leave(KErrCorrupt);
-        if (codePoint >= 0xd800u && codePoint <= 0xdfffu)
-            User::Leave(KErrCorrupt);
-        if (codePoint > 0x10ffffu)
-            User::Leave(KErrCorrupt);
-
-        AppendUtf16L(codePoint, aDestination);
-    }
+    const TInt remaining = CnvUtfConverter::ConvertToUnicodeFromUtf8(aDestination, aSource);
+    if (remaining < 0)
+        User::Leave(KErrCorrupt);
+    if (remaining != 0)
+        User::Leave(KErrOverflow);
 
     NormalizeJapaneseNfcInPlace(aDestination);
 }
@@ -406,51 +321,11 @@ void TEncoding::UnicodeToUtf8L(const TDesC& aSource,
                                TDes8& aDestination)
 {
     aDestination.Zero();
-    TInt position = 0;
-    while (position < aSource.Length())
-    {
-        TUint32 codePoint = aSource[position++];
-        if (codePoint >= 0xd800u && codePoint <= 0xdbffu)
-        {
-            if (position >= aSource.Length())
-                User::Leave(KErrCorrupt);
-            const TUint32 low = aSource[position++];
-            if (low < 0xdc00u || low > 0xdfffu)
-                User::Leave(KErrCorrupt);
-            codePoint = 0x10000u + ((codePoint - 0xd800u) << 10) + (low - 0xdc00u);
-        }
-        else if (codePoint >= 0xdc00u && codePoint <= 0xdfffu)
-        {
-            User::Leave(KErrCorrupt);
-        }
-
-        TInt bytes = codePoint < 0x80u ? 1 : codePoint < 0x800u ? 2 : codePoint < 0x10000u ? 3 : 4;
-        if (aDestination.MaxLength() - aDestination.Length() < bytes)
-            User::Leave(KErrOverflow);
-
-        if (bytes == 1)
-        {
-            aDestination.Append(static_cast<TUint8>(codePoint));
-        }
-        else if (bytes == 2)
-        {
-            aDestination.Append(static_cast<TUint8>(0xc0u | (codePoint >> 6)));
-            aDestination.Append(static_cast<TUint8>(0x80u | (codePoint & 0x3fu)));
-        }
-        else if (bytes == 3)
-        {
-            aDestination.Append(static_cast<TUint8>(0xe0u | (codePoint >> 12)));
-            aDestination.Append(static_cast<TUint8>(0x80u | ((codePoint >> 6) & 0x3fu)));
-            aDestination.Append(static_cast<TUint8>(0x80u | (codePoint & 0x3fu)));
-        }
-        else
-        {
-            aDestination.Append(static_cast<TUint8>(0xf0u | (codePoint >> 18)));
-            aDestination.Append(static_cast<TUint8>(0x80u | ((codePoint >> 12) & 0x3fu)));
-            aDestination.Append(static_cast<TUint8>(0x80u | ((codePoint >> 6) & 0x3fu)));
-            aDestination.Append(static_cast<TUint8>(0x80u | (codePoint & 0x3fu)));
-        }
-    }
+    const TInt remaining = CnvUtfConverter::ConvertFromUnicodeToUtf8(aDestination, aSource);
+    if (remaining < 0)
+        User::Leave(KErrCorrupt);
+    if (remaining != 0)
+        User::Leave(KErrOverflow);
 }
 
 void TEncoding::NormalizeJapaneseNfcInPlace(TDes& aText)

@@ -11,14 +11,9 @@ enum TPhase {
 
 const int KCommandCapacity = 2048;
 const int KDirtyCapacity = 16;
-// Separated moving events must not collapse into one union rect: with a
-// single region two events at opposite screen corners force a full-frame
-// repaint. Up to four regions keeps scattered animated-tile patches (water)
-// repainting as small local rects instead of merging to a near-full frame;
-// per-region DrawFrameContents traversal cost stays bounded.
-const int KMaximumDirtyRegions = 4;
+const int KMaximumDirtyRegions = 2;
 const int KFullRedrawAreaPercent = 88;
-const int KDirtyRegionFixedCostDivisor = 6;
+const int KDirtyRegionFixedCostDivisor = 4;
 const int KCommandResyncLookahead = 8;
 
 struct TCommand {

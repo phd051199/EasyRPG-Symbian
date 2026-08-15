@@ -134,7 +134,8 @@ CZipVfs* CZipVfs::OpenL(RFs& aFs,
 CZipVfs::CZipVfs(RFs& aFs)
     : iFs(aFs),
       iProjectPrefix(NULL),
-      iCentralDirectory(NULL)
+      iCentralDirectory(NULL),
+      iArchiveSize(0)
 {
 }
 
@@ -172,6 +173,7 @@ void CZipVfs::BuildIndexL()
     User::LeaveIfError(iArchive.Size(fileSize));
     if (fileSize < KEndOfCentralDirectoryBytes)
         User::Leave(KErrCorrupt);
+    iArchiveSize = fileSize;
 
     TInt tailSize = KEndOfCentralDirectoryBytes + KMaxZipCommentBytes;
     if (tailSize > fileSize)
@@ -536,6 +538,9 @@ HBufC8* CZipVfs::ReadFileLC(const TDesC& aRelativePath, TInt aMaxBytes) const
 
 TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry& aEntry) const
 {
+    if (aEntry.iDataOffset >= 0)
+        return aEntry.iDataOffset;
+
     TBuf8<30> localHeader;
     User::LeaveIfError(iArchive.Read(static_cast<TInt>(aEntry.iLocalHeaderOffset),
                                     localHeader,
@@ -552,12 +557,12 @@ TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry& aEntry) const
     const TUint32 dataOffset32 = aEntry.iLocalHeaderOffset + 30u +
                                  localNameLength + localExtraLength;
 
-    TInt archiveSize = 0;
-    User::LeaveIfError(iArchive.Size(archiveSize));
-    if (dataOffset32 > static_cast<TUint32>(archiveSize) ||
-        aEntry.iFileSize > static_cast<TUint32>(archiveSize) - dataOffset32)
+    if (iArchiveSize <= 0 ||
+        dataOffset32 > static_cast<TUint32>(iArchiveSize) ||
+        aEntry.iFileSize > static_cast<TUint32>(iArchiveSize) - dataOffset32)
         User::Leave(KErrCorrupt);
-    return static_cast<TInt>(dataOffset32);
+    aEntry.iDataOffset = static_cast<TInt>(dataOffset32);
+    return aEntry.iDataOffset;
 }
 
 void CZipVfs::OpenStoredFileL(const TDesC& aRelativePath,

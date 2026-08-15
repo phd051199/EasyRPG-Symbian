@@ -1,0 +1,54 @@
+TARGET            EasyRPGScript.exe
+TARGETTYPE        exe
+UID               0x100039CE 0xE31EA5A3
+
+EPOCHEAPSIZE      0x100000 0x03800000
+EPOCSTACKSIZE     0x18000
+OPTION GCCE       -O2 -fomit-frame-pointer -fno-rtti
+MACRO             EASYRPG_SCRIPT_PROCESS
+
+SOURCEPATH        ..\src\platform\symbian
+SOURCE            ScriptRuntimeMain.cpp
+SOURCE            ZipVfs.cpp
+SOURCE            Encoding.cpp
+
+SOURCEPATH        ..\src\script
+SOURCE            ScriptRuntime.cpp
+SOURCE            Ruby3Vm.cpp
+SOURCE            Ruby3Platform.cpp
+
+SOURCEPATH        ..\build\work\third-party\mkxp-z-2.4.2\binding
+SOURCE            module_rpg.cpp
+
+USERINCLUDE       ..\inc
+USERINCLUDE       ..\src
+USERINCLUDE       ..\src\script\ruby3
+USERINCLUDE       ..\build\work\third-party\ruby-3.0.7
+USERINCLUDE       ..\build\work\third-party\ruby-3.0.7\include
+USERINCLUDE       ..\build\work\third-party\ruby-3.0.7\include\ruby
+SYSTEMINCLUDE     \epoc32\include
+SYSTEMINCLUDE     \epoc32\include\stdapis
+SYSTEMINCLUDE     \epoc32\include\libc
+
+LIBRARY           euser.lib
+LIBRARY           apparc.lib
+LIBRARY           apgrfx.lib
+LIBRARY           efsrv.lib
+LIBRARY           bafl.lib
+LIBRARY           charconv.lib
+LIBRARY           libc.lib
+LIBRARY           libm.lib
+LIBRARY           libz.lib
+LIBRARY           libpthread.lib
+STATICLIBRARY     EasyRpgRuby3.lib
+STATICLIBRARY     EasyRpgPlayer.lib
+
+LANG              SC
+
+VENDORID          0
+SECUREID          0xE31EA5A3
+CAPABILITY        None
+
+#ifdef ENABLE_ABIV2_MODE
+DEBUGGABLE_UDEBONLY
+#endif

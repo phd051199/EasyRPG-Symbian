@@ -54,28 +54,28 @@ Initial working budgets (to be verified on a physical E72):
 - total process working set target: <= 30-35 MiB under ordinary gameplay
 - MMP hard heap ceiling currently: 40 MiB; this is a ceiling, not a target
 
-## 3. Key architecture decision: hybrid C++11 -> CSL EABI4
+## 3. EasyRPG Player build for CSL EABI4
 
 GCCE 3.4.3 cannot parse EasyRPG 0.5-era C++11 source directly. A full mechanical C++03 rewrite would create a large permanent fork.
 
-A working hybrid pipeline has now been proven in this repository:
+A working Player build pipeline has now been proven in this repository:
 
-1. modern Clang parses/optimizes the C++11 core source for `arm-none-eabi`, ARMv5T, soft-float;
+1. host Clang parses/optimizes the EasyRPG Player C++11 source for `arm-none-eabi`, ARMv5T, soft-float;
 2. Clang emits ARM assembly only;
 3. generated `.eabi_attribute` and `.cpu` metadata directives unsupported by the old CSL assembler are removed; ARM instructions are not rewritten;
 4. the S60 SDK `arm-none-symbianelf-as` assembles that code into **EABI4** objects;
-5. the S60 SDK `arm-none-symbianelf-ar` builds `EasyRpgModernCore.lib`;
+5. the S60 SDK `arm-none-symbianelf-ar` builds `EasyRpgPlayer.lib`;
 6. the normal GCCE MMP links that static library with the Avkon platform shell;
 7. `arm-none-symbianelf-ld` and `elf2e32` generate the final Symbian EXE.
 
-The current `EasyRpgModernCoreProbe` C++11 lambda/range-for probe links successfully through this full path. Therefore this is the primary route for the EasyRPG/liblcf gameplay core.
+The current `EasyRpgPlayerProbe` C++11 lambda/range-for probe links successfully through this full path. Therefore this is the build route for EasyRPG Player and liblcf.
 
 ### ABI boundary rule
 
-Keep the boundary between modern core and Symbian platform code narrow and C-compatible:
+Keep the boundary between EasyRPG Player and Symbian platform code narrow and C-compatible:
 
 ```text
-EasyRPG/liblcf-derived C++11 core
+EasyRPG Player/liblcf C++11
         |
         | extern "C" bridge / POD buffers / integer handles
         v
@@ -90,7 +90,7 @@ Symbian platform adapter (GCCE C++03)
 
 Do not pass STL objects, exceptions, RTTI objects, C++ ownership, or C++ ABI-sensitive types across this boundary.
 
-The modern core is compiled initially with:
+EasyRPG Player is compiled with:
 
 - `-fno-exceptions`
 - `-fno-rtti`
@@ -165,7 +165,7 @@ Runtime locates `.zip` archives directly. On the target E72, internal storage is
 
 ### DONE — native LCF/core bootstrap
 
-The device shell keeps one `RFile` open for the mounted ZIP, gets game bytes through `CZipVfs`, then passes LCF bytes through the C ABI into the modern C++11 core. The current core now validates/parses enough real LCF structure to bootstrap the target:
+The device shell keeps one `RFile` open for the mounted ZIP, gets game bytes through `CZipVfs`, then passes LCF bytes through the C ABI into EasyRPG Player. The Player library now validates/parses enough real LCF structure to bootstrap the target:
 
 - `RPG_RT.ldb`: top-level tagged records + `System.title_name` / `System.system_name` raw CP932 bytes
 - `RPG_RT.lmt`: MapInfo array count, tree order, active node, and New Game start map/x/y
@@ -176,7 +176,7 @@ The device shell keeps one `RFile` open for the mounted ZIP, gets game bytes thr
 
 For NobihazaVH the regression result is currently `LDB=15`, `LMT=203`, `active_node=53`, `start=M1(1,0)`, `LMU=5`.
 
-This separates Symbian filesystem/path failures from core parser/interpreter failures and proves that the modern-core boundary is processing the actual game data.
+This separates Symbian filesystem/path failures from Player parser/interpreter failures and proves that the Player boundary is processing the actual game data.
 
 ### DONE — build correctness guard
 
@@ -370,41 +370,32 @@ Initial clean test deliberately excludes the bundled `Save15.lsd`.
 - animated-tile damage is already gated on animation-step changes, not per
   frame (verified; no extra throttling needed)
 
-### Implemented RGSS boot-time/UX optimizations
+### Fresh script-runtime foundation
 
-- the RGSS engine starts DSA and its frame loop as soon as the VM thread
-  exists: an in-process loading gauge (determinate bar during script eval,
-  animated sweep during `ruby_init`) is presented while MRI boots, instead
-  of the previous black window that covered the launcher note
-- VM start is signaled immediately after pthread creation; later boot
-  failures propagate through the existing VM-death check in
-  `CRgssRuntime::AdvanceVmFrameL`
-- `Scripts.*` entries inflate in a single zlib pass with a geometrically
-  growing output buffer (previously every script was inflated twice:
-  once to measure, once to fill)
-- `load_data` no longer forces `GC.start` per `Data/MapNNN` load
-- the Marshal VFS input buffer grew from 4 KB to 32 KB (one ZIP entry open
-  per 32 KB instead of per 4 KB while parsing rxdata)
-- boot phases and per-16-script progress are traced with millisecond
-  timestamps (`rgss.trace`: `boot ruby_init/builtins/bootstrap/scripts*`) and
-  reported to the engine through the new `boot_progress` host callback
-- ZIP-to-temp copies of native-format BGM use 64 KB chunks to shorten the
-  synchronous stall when a virtual-path track starts
+- the discarded custom script engine, its build targets, tests, bridges, and
+  platform classes are removed instead of retained as a historical fallback
+- XP, VX, and VX Ace share one isolated `EasyRPGScript.exe` process and one
+  pinned Ruby 3.0.7 static library
+- the VM is behind a plain C ABI so Ruby's `RArray`/`RFile` types never share a
+  translation unit with the same-named Symbian types
+- boot selects exactly one of `Scripts.rxdata`, `Scripts.rvdata`, or
+  `Scripts.rvdata2`, Marshal-loads the upstream archive, inflates scripts once,
+  and evaluates them in source order
+- RPG data class definitions come from the small allowlisted mkxp-z 2.4.2
+  module files; no desktop/mobile renderer tree is copied into the repository
+- packed game archives and native Graphics/Input/Audio bindings are deliberately
+  not marked complete; loose script archives are the first bring-up milestone
 
-### Validation status (EKA2L1 headless, WASM)
+### Validation status
 
-- host unit tests: `render_damage_test` locks the multi-region behavior,
-  `rgss_core_test` locks the single-pass script inflate; both pass
-- XP (Littleroot Researchers): boot gauge presented during `ruby_init` /
-  script eval instead of a black screen; `rgss.trace` now records
-  `boot ruby_init/builtins/bootstrap/scripts*` millisecond timings and
-  per-16-script progress; game boots to the intro scene and runs ~30 fps
-  presentation on the emulator; NOTE: the EKA2L1 web emulator serves a
-  stale installed exe unless `--reset-profile` is used for a new SIS
-- RPG2k (Nobihaza VH): new game, four-direction walking/scrolling across
-  the map with the upper-sublayer scroll cache active — no crash, no
-  visual corruption, clean exit
-- physical E72 benchmarking of the 30 FPS target is still pending
+- Ruby 3.0.7 builds as an 81-object ARMv5 EABI archive and exports the embedding
+  and Marshal APIs required by the loader
+- `EasyRPGScript.exe` compiles and links successfully for GCCE UREL with the
+  new C ABI boundary
+- RPG Maker 2000/2003 regression coverage remains separate from the new script
+  runtime
+- physical E72 boot, memory, Graphics/Input/Audio, packed archive support, and
+  gameplay compatibility remain pending
 
 ## 10. Build pipeline
 
@@ -417,16 +408,23 @@ bash build-wine.sh build
 Pipeline:
 
 ```text
-modern core C++11
+pinned allowlists + patch files
+  -> build/work/third-party
+
+EasyRPG Player C++11
   -> Apple Clang ARMv5 assembly
   -> compatibility metadata filter
   -> CSL arm-none-symbianelf-as (EABI4)
-  -> EasyRpgModernCore.lib
+  -> EasyRpgPlayer.lib
 
-Avkon platform C++03
+Ruby 3.0.7 C99 + E72 ABI shim
+  -> GCCE 3.4.3
+  -> EasyRpgRuby3.lib
+
+Avkon/platform C++03 + one script runtime
   -> GCCE 3.4.3
 
-both
+all targets
   -> arm-none-symbianelf-ld
   -> elf2e32
   -> makesis
@@ -434,7 +432,7 @@ both
 
 Output:
 
-- `sis/EasyRPG_S60_3_X_v_0_1_0.sis` (unsigned development SIS)
+- `sis/EasyRPG.sis` (unsigned UREL SIS)
 
 ## 11. Milestones / acceptance tests
 
@@ -454,11 +452,11 @@ Output:
 - focus cleanup
 - locate game directory
 - native LCF magic probe
-- C++11 modern-core symbol executes through C ABI (device runtime verification pending)
+- EasyRPG Player C++11 symbol executes through C ABI (device runtime verification pending)
 
 ### M2 — liblcf target parse — PARTIAL, BOOTSTRAP PATH PASSING
 
-- [x] actual Nobihaza LDB/LMT/start-LMU processed in modern core
+- [x] actual Nobihaza LDB/LMT/start-LMU processed by EasyRPG Player
 - [x] CP932 title/system resource bytes extracted correctly
 - [x] LMT resolves `active_node=53`, New Game `Map0001`, `(1,0)`
 - [x] host regression test locks exact target checksums/summary
@@ -514,56 +512,43 @@ Output:
 
 EasyRPG Player/liblcf code brought into this repository must retain the upstream license/notices and satisfy the applicable GPL source-distribution requirements. Keep upstream-derived code clearly separated from original Symbian platform adapters and document the exact upstream revision used.
 
-## 13. RGSS runtime branch
+## 13. One Ruby 3 script runtime for XP, VX, and VX Ace
 
-The XP/VX/VX Ace runtime is isolated from the RPG Maker 2000/2003 player. It uses a separate C ABI bridge and a separate ARM static core so Ruby/RGSS memory, compatibility work, and failures cannot affect `EasyRPGGame.exe`.
+The script lane is a new implementation under `src/script/`; the removed
+project-specific engine is not an alternate build or fallback. Compatibility is
+selected from the detected script filename while every game runs in the same
+Ruby 3.0.7 VM implementation and the same `EasyRPGScript.exe` binary.
 
-### RGSS foundation — IMPLEMENTED
+Ownership and lifecycle:
 
-- [x] pure C ABI in `RgssCoreBridge.h`
-- [x] RGSS1/2/3 logical resolution profiles
-- [x] XP 640x480 logical space maps exactly to E72 320x240
-- [x] VX/VX Ace preserve aspect ratio inside the 320x240 output viewport
-- [x] RGB565 framebuffer contract
-- [x] logical point/dirty-rect mapping without a 640x480 post-scale framebuffer
-- [x] project detector for `Scripts.rxdata`, `Scripts.rvdata`, and `Scripts.rvdata2`
-- [x] host C++03 regression test
-- [x] separate `EasyRpgRgssCore.lib` build for ARMV5 UREL/UDEB
-- [x] VM host ABI for streaming file access, ticks, input, dirty regions, GC and heap reporting
-- [x] ZIP project-root detection for `Game.ini` plus RGSS1/2/3 script archives
-- [x] VX Ace `Game.rgss3a` v3 overlay with lazy indexed path lookup and random-access decryption for packed `Data/*` and `Graphics/*`
-- [x] launcher metadata labels for XP, VX and VX Ace
-- [x] separate `EasyRPGRgss.exe` process and SIS packaging
-- [x] single RGSS MRI runtime based on Ruby 3.0.7; Ruby 1.8.7 and the split `EasyRPGRgssModern.exe` target are removed from the active build/package graph
-- [x] launcher dispatches XP/VX/VX Ace to the Ruby 3 `EasyRPGRgss.exe` runtime and keeps 2000/2003 on `EasyRPGGame.exe`
-- [x] ARMV5 UREL full build and SIS packaging with the RGSS process
-- [x] ARMV5 UDEB full build and debug SIS packaging with the RGSS process
-- [x] dedicated RGSS RGB565 framebuffer, DSA presenter and dirty-region path
-- [x] dedicated RGSS window/event/focus/input lifecycle
-- [x] RGSS scheduler keeps XP logic at 40 Hz and RGSS2/3 logic at 60 Hz while presenting at 30 Hz
-- [x] logical-resolution RGSS Bitmap core with RGB565+A8 storage and scaled framebuffer blit
-- [x] native S60 Image Conversion decode from stored ZIP resources into RGSS Bitmap handles
-- [x] ARMV5 UREL/UDEB builds link `imageconversion.lib` and package the image path
-- [x] native RGSS Sprite registry with cached z-order, src rect, origin, zoom, mirror, opacity and blend modes
-- [x] 30 Hz native sprite compositor separated from 40/60 Hz VM logic
-- [x] RGSS ARM assembly normalization produces warning-free new core objects
-- [x] RGSS VM worker thread yields at `Graphics.update` while Window Server/DSA stays on the main thread
-- [x] XP 40 Hz and VX/VX Ace 60 Hz worker frames use a 30 Hz presentation accumulator without slowing game logic
-- [x] native RGSS Graphics frame-rate/frame-count/update/wait contract backed by worker frame sync
-- [x] native RGSS Viewport registry with clipping, origin translation, visibility and z propagation
-- [x] global allocation-free render registry merges renderables by effective z and creation order
-- [x] native RGSS Plane tiled compositor with zoom, origin scrolling, opacity, blend and viewport support
-- [x] native RGSS Table and Input state cores for future MRI bindings
-- [x] streaming Ruby Marshal script archive validation/indexing without loading `Scripts.*` whole into RAM
-- [x] two-pass streaming zlib inflate per script with exact output allocation and bounded source size
-- [x] VM host exposes script count/info/name/inflate/release so MRI can eval one script at a time
-- [x] native RGSS Bitmap text_size/draw_text with Gohu fallback and worker-thread Symbian font-server glyph cache
-- [x] native RGSS Bitmap blt/stretch_blt/hue_change including safe self-overlap blits
-- [x] native RGSS Sprite tone/color/bush effects keep the normal no-effect render path unchanged
-- [ ] vendor MRI source directly into `third_party`
-- [ ] boot MRI with a minimal embedded script on ARMV5
-- [ ] RGSS1 Marshal and `Scripts.rxdata` loading
-- [ ] RGSS1 native Graphics/Input/Audio bindings
-- [x] RGSS runtime input/framebuffer/dirty-region platform loop
-- [ ] RGSS2 compatibility layer
-- [ ] RGSS3 compatibility layer
+- the launcher detects 2000/2003 versus XP/VX/VX Ace and starts the appropriate
+  isolated process
+- `CScriptRuntime` owns the ZIP VFS and passes only the script archive bytes and
+  generation number across `ScriptVmBridge.h`
+- `Ruby3Vm.cpp` owns VM initialization, the rooted Marshal array, one-pass zlib
+  inflation, ordered evaluation, error capture, and VM cleanup
+- `Ruby3Platform.cpp` owns only E72 libc/thread/atomic/GC-page compatibility
+- upstream Ruby and mkxp-z files remain pristine in `third_party/`; all Ruby
+  source changes are in `patches/ruby-3.0.7-symbian.patch`
+
+Bring-up sequence:
+
+- [x] one pinned Ruby 3.0.7 source subset and one Ruby static library
+- [x] one XP/VX/VX Ace executable and launcher/package dispatch
+- [x] clean C ABI between Symbian and Ruby headers
+- [x] loose `Scripts.rxdata` / `Scripts.rvdata` / `Scripts.rvdata2` selection
+- [x] Ruby Marshal load, one-pass zlib inflate, ordered script evaluation
+- [x] upstream RPG data modules selected per game generation
+- [x] GCCE ARMv5 UREL compile and link for the new executable
+- [ ] packed `Game.rgssad`, `Game.rgss2a`, and `Game.rgss3a` readers
+- [ ] native Color/Tone/Rect/Table value types and serialization parity
+- [ ] E72 Graphics/Bitmap/Sprite/Viewport/Plane/Tilemap renderer
+- [ ] E72 key mapping and generation-specific Input behavior
+- [ ] E72 BGM/BGS/ME/SE bridge and resource lookup
+- [ ] save paths, fonts, transitions, weather, movie policy, and RTP policy
+- [ ] XP/VX/VX Ace compatibility fixtures plus physical-E72 memory/soak tests
+
+Ruby 3 can host both old and newer scripts, but it does not make Ruby 1.8-era
+syntax and removed APIs automatically compatible. Compatibility shims must be
+small, test-driven, and shared in this one VM; a second Ruby version or a
+per-game executable is not permitted.

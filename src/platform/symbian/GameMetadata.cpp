@@ -16,10 +16,10 @@ TInt DetectEngine(CZipVfs& aResources)
                         aResources.Exists(_L("Game.rgss2a"));
     const TBool hasVxa = aResources.Exists(_L("Data/Scripts.rvdata2")) ||
                          aResources.Exists(_L("Game.rgss3a"));
-    const TInt rgssMatches = static_cast<TInt>(hasXp) +
-                             static_cast<TInt>(hasVx) +
-                             static_cast<TInt>(hasVxa);
-    if (rgssMatches > 1 || (hasLdb && hasLmt && rgssMatches != 0))
+    const TInt scriptMatches = static_cast<TInt>(hasXp) +
+                               static_cast<TInt>(hasVx) +
+                               static_cast<TInt>(hasVxa);
+    if (scriptMatches > 1 || (hasLdb && hasLmt && scriptMatches != 0))
         return EGameEngineUnknown;
     if (hasXp)
         return EGameEngineRpgXp;

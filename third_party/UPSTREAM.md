@@ -1,88 +1,49 @@
-# Vendored EasyRPG upstream
+# Pinned third-party source policy
 
-This repository vendors the actual upstream EasyRPG source code instead of reimplementing the Player/interpreter.
+`third_party/` contains only files selected by the manifests in `tools/vendor/`.
+Every selected file must be byte-identical to its pinned upstream archive. S60
+changes are never edited into this directory; they live in `patches/` and are
+applied only to `build/work/third-party/` by `tools/prepare_third_party.sh`.
 
-## EasyRPG Player
+Run these checks after changing a dependency:
 
-- Upstream: EasyRPG/Player
-- Version: 0.5.0
-- Official source archive: `https://easyrpg.org/downloads/player/0.5.0/easyrpg-player-0.5.0.tar.gz`
-- Archive SHA-256: `21c9b95536fb6348e84b11ac8e5908688c6e61e9b4eb426247d546a44869241e`
-- Vendored path: `third_party/easyrpg-player-0.5.0/`
-- License: GNU GPL v3 or later (retain upstream `COPYING` and per-file notices)
+```sh
+bash tools/sync_third_party.sh
+bash tools/verify_third_party.sh
+bash tools/prepare_third_party.sh
+```
 
-## liblcf
+`sync_third_party.sh` downloads into `build/cache/upstream`, verifies SHA-256,
+extracts into `build/import/third-party`, and imports only the explicit
+allowlists. Adding a dependency file requires adding it to the corresponding
+manifest. Do not copy a complete upstream repository into `third_party/`.
 
-- Upstream: EasyRPG/liblcf
-- Version: 0.5.0
-- Official source archive: `https://easyrpg.org/downloads/player/0.5.0/liblcf-0.5.0.tar.gz`
-- Archive SHA-256: `5f77e40bac5b48ab3163c9628846825e44ae8b5ecb4367de2d55845b2ba48524`
-- Vendored path: `third_party/liblcf-0.5.0/`
-- License: MIT (retain upstream `COPYING` and per-file notices)
+## Pinned components
 
-## LLVM C++ standard library headers
+| Component | Official source | SHA-256 | Allowlist | S60 patch |
+|---|---|---|---|---|
+| EasyRPG Player 0.5.0 | `https://easyrpg.org/downloads/player/0.5.0/easyrpg-player-0.5.0.tar.gz` | `21c9b95536fb6348e84b11ac8e5908688c6e61e9b4eb426247d546a44869241e` | `tools/vendor/easyrpg-player-0.5.0.files` | `patches/easyrpg-player-0.5.0-symbian.patch` |
+| pixman 0.34.0 | `https://www.cairographics.org/releases/pixman-0.34.0.tar.gz` | `21b6b249b51c6800dc9553b65106e1e37d0e25df942c90531d4c3997aa20a88e` | `tools/vendor/pixman-0.34.0.files` | `patches/pixman-0.34.0-symbian.patch` |
+| liblcf 0.5.0 | `https://easyrpg.org/downloads/player/0.5.0/liblcf-0.5.0.tar.gz` | `5f77e40bac5b48ab3163c9628846825e44ae8b5ecb4367de2d55845b2ba48524` | `tools/vendor/liblcf-0.5.0.files` | none |
+| LLVM libc++ 4.0.1 | `https://releases.llvm.org/4.0.1/libcxx-4.0.1.src.tar.xz` | `520a1171f272c9ff82f324d5d89accadcec9bc9f3c78de11f5575cdb99accc4c` | `tools/vendor/libcxx-4.0.1.files` | `patches/libcxx-4.0.1-symbian.patch` |
+| Ruby 3.0.7 | `https://cache.ruby-lang.org/pub/ruby/3.0/ruby-3.0.7.tar.gz` | `2a3411977f2850431136b0fab8ad53af09fb74df2ee2f4fb7f11b378fe034388` | `tools/vendor/ruby-3.0.7.files` | `patches/ruby-3.0.7-symbian.patch` |
+| mkxp-z 2.4.2 | `https://codeload.github.com/mkxp-z/mkxp-z/tar.gz/refs/tags/v2.4.2` | `4c2df25e30139678307a8d072c325dc94c01ebc024c47d51eee17dd6f2ee1aac` | `tools/vendor/mkxp-z-2.4.2.files` | none |
 
-The Symbian ARMv5 build vendors the dependency-driven libc++ 4.0.1 header subset used by Player/liblcf without depending on the host Xcode libc++ ABI.
+The mkxp-z import is deliberately limited to its license plus the three
+upstream RPG data-module sources and their small wrapper. It does not include
+desktop/mobile projects, SDL/OpenGL code, shaders, tests, or packaged assets.
 
+Ruby 3.0.7 is the only Ruby implementation and version in the repository. The
+single `EasyRPGScript.exe` process selects the RPG Maker XP, VX, or VX Ace
+compatibility module at runtime; there is no separate classic/modern VM lane.
 
-- Upstream: LLVM libc++
-- Version: 4.0.1
-- Official source archive: `https://releases.llvm.org/4.0.1/libcxx-4.0.1.src.tar.xz`
-- Archive SHA-256: `520a1171f272c9ff82f324d5d89accadcec9bc9f3c78de11f5575cdb99accc4c`
-- Vendored path: `third_party/libcxx-4.0.1/`
-- License: dual University of Illinois/NCSA and MIT; retain `LICENSE.TXT` and per-file notices
+## Ownership boundary
 
-The ARMv5 lane uses only the referenced libc++ headers. Symbian configuration and runtime compatibility live in the platform glue instead of a vendored libc++abi tree.
+- Upstream trees own Player/liblcf behavior, pixman, Ruby, and RPG data-module
+  definitions.
+- Patch files own the smallest necessary compiler/OS compatibility deltas.
+- `src/platform/symbian/` owns E72 filesystem, process, display, input, audio,
+  timing, and character-conversion adapters.
+- `src/script/` owns the clean Ruby 3 embedding boundary and script loader.
 
-## Ruby MRI
-
-The RGSS runtime vendors a curated Ruby MRI core subset rather than keeping an extracted upstream tarball in the build tree.
-
-- Upstream: Ruby MRI
-- Version: 3.0.7
-- Official source archive: `https://cache.ruby-lang.org/pub/ruby/3.0/ruby-3.0.7.tar.gz`
-- Archive SHA-256: `2a3411977f2850431136b0fab8ad53af09fb74df2ee2f4fb7f11b378fe034388`
-- Vendored path: `third_party/ruby-3.0.7/`
-- License: Ruby License / BSD-2-Clause components; retain upstream `COPYING` and `LEGAL`
-- Scope: only MRI core translation units compiled by `tools/build_rgss_mri.sh`, directly included core fragments, required root headers/generated includes, public/internal Ruby headers, ARM coroutine support, selected `missing/` compatibility code, and Unicode data used by the compiled encoders
-- Explicitly excluded: `ext/`, `test/`, `spec/`, `doc/`, `benchmark/`, `sample/`, `gems/`, `lib/`, `tool/`, platform source trees not used by the Symbian ARM build, and other release-package material unrelated to the embedded VM
-
-`tools/fetch_rgss_mri.sh` is a maintenance importer for refreshing this curated dependency. Normal builds never fetch Ruby and compile only the checked-in `third_party/ruby-3.0.7` tree.
-
-## Symbian port policy
-
-The vendored source is the implementation of RPG Maker semantics. Do not recreate Player scenes, event commands, map logic, battle logic or liblcf structures in a parallel Symbian-specific engine.
-
-Symbian-specific work belongs in platform adapters whenever possible: filesystem/ZIP VFS, display/pixel presentation, input, timing, audio, font integration and writable save paths.
-
-When an upstream source file must be changed for S60 3rd FP2 / ARMv5 compatibility, keep the change in the vendored file with a small `EASYRPG_SYMBIAN` conditional where practical and document the modified path below. Do not maintain an opaque generated patch stack.
-
-### Upstream files modified for Symbian
-
-None yet. Files currently present in the vendored trees are intended to match the 0.5.0 release byte-for-byte.
-
-## Current direct-vendor inventory
-
-The following Player implementation files are already present directly under `third_party/easyrpg-player-0.5.0/src/` and have been compared byte-for-byte with the official 0.5.0 release during bring-up:
-
-- `player.cpp`, `player.h`
-- `game_interpreter.cpp`, `game_interpreter.h`
-- `game_map.cpp`, `game_map.h`
-- `bitmap.cpp`, `bitmap.h`
-- `tilemap.cpp`, `tilemap.h`
-- `input.cpp`, `input.h`
-- `filefinder.cpp`, `filefinder.h`
-
-The liblcf tree already contains the real upstream reader path and generated RPG model subset needed for LMU bring-up, including:
-
-- `reader_lcf.cpp`, `reader_lcf.h`
-- `reader_types.h`, `reader_options.h`
-- `reader_util.h`
-- `lmu_reader.cpp`, `lmu_reader.h`
-- `generated/lmu_chunks.h`
-- generated `RPG::Map`, `Event`, `EventPage`, `EventCommand`, `MoveRoute` model headers
-- upstream `COPYING`
-
-## ARMv5 integration status
-
-The old S60 FP2 GCCE frontend is not the implementation source for EasyRPG C++ code. Player/liblcf are compiled through the modern ARMv5 core pipeline, with Symbian-specific compatibility supplied by the platform adapters and compatibility runtime in this repository.
+Licenses and per-file notices selected by the manifests must remain intact.

@@ -5,7 +5,7 @@ PROFILE=${1:-build}
 case "$PROFILE" in
     build) SDK_CFG=UREL; OPT=(-O2 -DNDEBUG) ;;
     debug) SDK_CFG=UDEB; OPT=(-O0 -g) ;;
-    *) echo "Usage: build_rgss_mri.sh [build|debug]" >&2; exit 2 ;;
+    *) echo "Usage: build_ruby3.sh [build|debug]" >&2; exit 2 ;;
 esac
 
 PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -17,16 +17,16 @@ CC="$CSL_BIN/arm-none-symbianelf-gcc.exe"
 AR="$CSL_BIN/arm-none-symbianelf-ar.exe"
 NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
 RUBY_VERSION=3.0.7
-LIBRARY_NAME=EasyRpgRuby300.lib
+LIBRARY_NAME=EasyRpgRuby3.lib
 C_STANDARD=gnu99
 RUBY_EXTRA_FLAGS="-DRUBY_EXPORT -D_REENTRANT -DDISABLE_RUBYGEMS=1 -DCROSS_COMPILING=1"
-RUBY_ROOT="$PROJECT_DIR/third_party/ruby-$RUBY_VERSION"
-BUILD_DIR="$PROJECT_DIR/build/rgss-mri-$RUBY_VERSION/$SDK_CFG"
+RUBY_ROOT="$PROJECT_DIR/build/work/third-party/ruby-$RUBY_VERSION"
+BUILD_DIR="$PROJECT_DIR/build/ruby3-$RUBY_VERSION/$SDK_CFG"
 SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
 LIBRARY="$BUILD_DIR/$LIBRARY_NAME"
 WIN_PROJECT="C:\\work\\EasyRPG"
-WIN_RUBY="$WIN_PROJECT\\third_party\\ruby-$RUBY_VERSION"
-WIN_BUILD="$WIN_PROJECT\\build\\rgss-mri-$RUBY_VERSION\\$SDK_CFG"
+WIN_RUBY="$WIN_PROJECT\\build\\work\\third-party\\ruby-$RUBY_VERSION"
+WIN_BUILD="$WIN_PROJECT\\build\\ruby3-$RUBY_VERSION\\$SDK_CFG"
 WIN_SDK="C:\\S60\\devices\\S60_3rd_FP2_SDK_v1.1\\epoc32\\include"
 RUBY_EXTRA_INCLUDE="-I $WIN_RUBY\\enc\\unicode\\12.1.0"
 
@@ -61,7 +61,7 @@ done
 
 if [[ ! -f "$RUBY_ROOT/ruby.c" || ! -f "$RUBY_ROOT/include/ruby.h" ]]; then
     echo "Missing vendored Ruby core: $RUBY_ROOT" >&2
-    echo "Run tools/fetch_rgss_mri.sh once when updating the vendored dependency." >&2
+    echo "Run tools/prepare_third_party.sh before building." >&2
     exit 1
 fi
 mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR"
@@ -159,8 +159,8 @@ for source in "${SOURCES[@]}"; do
     win_output="$WIN_BUILD\\$name.o"
     source_path="$RUBY_ROOT/$source"
     if [[ -f $output && $output -nt $source_path && \
-          $output -nt "$PROJECT_DIR/src/rgss/mri/prelude.h" && \
-          $output -nt "$PROJECT_DIR/src/rgss/mri/ruby/config.h" ]]; then
+          $output -nt "$PROJECT_DIR/src/script/ruby3/prelude.h" && \
+          $output -nt "$PROJECT_DIR/src/script/ruby3/ruby/config.h" ]]; then
         objects+=("$win_output")
         continue
     fi
@@ -185,8 +185,8 @@ for source in "${SOURCES[@]}"; do
             -DDTRACE_PROBES_DISABLED=1 \
             $RUBY_EXTRA_FLAGS \
             -include "$WIN_SDK\\gcce\\gcce.h" \
-            -include "$WIN_PROJECT\\src\\rgss\\mri\\prelude.h" \
-            -I "$WIN_PROJECT\\src\\rgss\\mri" \
+            -include "$WIN_PROJECT\\src\\script\\ruby3\\prelude.h" \
+            -I "$WIN_PROJECT\\src\\script\\ruby3" \
             -I "$WIN_RUBY" \
             -I "$WIN_RUBY\\include" \
             $RUBY_EXTRA_INCLUDE \
@@ -205,11 +205,11 @@ WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
 symbols=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all "$WINE_BIN" "$NM" -g "$WIN_BUILD\\$LIBRARY_NAME" | tr -d '\r')
 for symbol in ruby_init ruby_cleanup rb_eval_string_protect rb_define_class rb_define_module rb_define_method rb_define_singleton_method rb_marshal_load; do
     if ! grep -q "[[:space:]]$symbol$" <<<"$symbols"; then
-        echo "MRI archive does not export $symbol." >&2
+        echo "Ruby 3 archive does not export $symbol." >&2
         exit 1
     fi
 done
 
 cp -f "$LIBRARY" "$SDK_LIBRARY_DIR/$LIBRARY_NAME"
-printf 'MRI %s: %s (%s bytes, %s objects)\n' "$RUBY_VERSION" "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
+printf 'Ruby %s for E72: %s (%s bytes, %s objects)\n' "$RUBY_VERSION" "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
 printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY_DIR/$LIBRARY_NAME"

@@ -8,22 +8,6 @@
  *   may be void.
  */
 #if 0
-#elif defined(__SYMBIAN32__)
-typedef unsigned int rb_atomic_t;
-unsigned int easyrpg_atomic_fetch_add(volatile unsigned int *, unsigned int);
-unsigned int easyrpg_atomic_fetch_sub(volatile unsigned int *, unsigned int);
-unsigned int easyrpg_atomic_or(volatile unsigned int *, unsigned int);
-unsigned int easyrpg_atomic_exchange(volatile unsigned int *, unsigned int);
-unsigned int easyrpg_atomic_cas(volatile unsigned int *, unsigned int, unsigned int);
-void *easyrpg_atomic_ptr_exchange(void *volatile *, void *);
-void *easyrpg_atomic_ptr_cas(void *volatile *, void *, void *);
-# define RUBY_ATOMIC_FETCH_ADD(var, val) easyrpg_atomic_fetch_add((volatile unsigned int *)&(var), (unsigned int)(val))
-# define RUBY_ATOMIC_FETCH_SUB(var, val) easyrpg_atomic_fetch_sub((volatile unsigned int *)&(var), (unsigned int)(val))
-# define RUBY_ATOMIC_OR(var, val) easyrpg_atomic_or((volatile unsigned int *)&(var), (unsigned int)(val))
-# define RUBY_ATOMIC_EXCHANGE(var, val) easyrpg_atomic_exchange((volatile unsigned int *)&(var), (unsigned int)(val))
-# define RUBY_ATOMIC_CAS(var, oldval, newval) ((__typeof__(var))easyrpg_atomic_cas((volatile unsigned int *)&(var), (unsigned int)(oldval), (unsigned int)(newval)))
-# define RUBY_ATOMIC_PTR_EXCHANGE(var, val) easyrpg_atomic_ptr_exchange((void *volatile *)&(var), (void *)(val))
-# define RUBY_ATOMIC_PTR_CAS(var, oldval, newval) easyrpg_atomic_ptr_cas((void *volatile *)&(var), (void *)(oldval), (void *)(newval))
 #elif defined HAVE_GCC_ATOMIC_BUILTINS
 typedef unsigned int rb_atomic_t;
 # define RUBY_ATOMIC_FETCH_ADD(var, val) __atomic_fetch_add(&(var), (val), __ATOMIC_SEQ_CST)

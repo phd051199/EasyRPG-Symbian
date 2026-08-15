@@ -5,66 +5,54 @@ PROFILE=${1:-build}
 case "$PROFILE" in
     build) SDK_CFG=UREL ;;
     debug) SDK_CFG=UDEB ;;
-    *) echo "Usage: build_modern_core.sh [build|debug]" >&2; exit 2 ;;
+    *) echo "Usage: build_player.sh [build|debug]" >&2; exit 2 ;;
 esac
 
 PROJECT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 WINE_PREFIX=${EASYRPG_WINE_PREFIX:-"$HOME/.wine-symbian"}
 SDK_ROOT=${EASYRPG_SYMBIAN_SDK_ROOT:-"$WINE_PREFIX/drive_c/S60/devices/S60_3rd_FP2_SDK_v1.1"}
-CLANGXX=${EASYRPG_CORE_CLANGXX:-/usr/bin/clang++}
+CLANGXX=${EASYRPG_PLAYER_CLANGXX:-/usr/bin/clang++}
 WINE_BIN=${EASYRPG_WINE_BIN:-}
 CSL_BIN="$WINE_PREFIX/drive_c/Program Files/CSL Arm Toolchain/bin"
 ASSEMBLER="$CSL_BIN/arm-none-symbianelf-as.exe"
 ARCHIVER="$CSL_BIN/arm-none-symbianelf-ar.exe"
 NM="$CSL_BIN/arm-none-symbianelf-nm.exe"
-BUILD_DIR="$PROJECT_DIR/build/modern-core/$SDK_CFG"
-LOCK_DIR="$PROJECT_DIR/build/.modern-core-$SDK_CFG.lock"
+BUILD_DIR="$PROJECT_DIR/build/player/$SDK_CFG"
+LOCK_DIR="$PROJECT_DIR/build/.player-$SDK_CFG.lock"
 mkdir -p "$PROJECT_DIR/build"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
     existing_pid=$(cat "$LOCK_DIR/pid" 2>/dev/null || true)
     if [[ $existing_pid =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
-        echo "Another modern-core build is already running for $SDK_CFG (pid $existing_pid)." >&2
+        echo "Another Player build is already running for $SDK_CFG (pid $existing_pid)." >&2
         exit 75
     fi
     rm -rf "$LOCK_DIR"
     mkdir "$LOCK_DIR"
 fi
 printf '%s\n' "$$" > "$LOCK_DIR/pid"
-cleanup_modern_core_lock() {
+cleanup_player_lock() {
     rm -rf "$LOCK_DIR"
 }
-trap cleanup_modern_core_lock EXIT INT TERM
-LIBRARY="$BUILD_DIR/EasyRpgModernCore.lib"
+trap cleanup_player_lock EXIT INT TERM
+LIBRARY="$BUILD_DIR/EasyRpgPlayer.lib"
 SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
-WIN_BUILD_DIR="C:\\work\\EasyRPG\\build\\modern-core\\$SDK_CFG"
+WIN_BUILD_DIR="C:\\work\\EasyRPG\\build\\player\\$SDK_CFG"
 GENERATED_DIR="$PROJECT_DIR/build/generated"
 GENERATED_CP932="$GENERATED_DIR/CoreCp932Table.cpp"
 GENERATED_READER_STRUCT="$GENERATED_DIR/reader_struct.cpp"
-LIBLCF_ROOT="$PROJECT_DIR/third_party/liblcf-0.5.0/src"
+WORK_ROOT="$PROJECT_DIR/build/work/third-party"
+LIBLCF_ROOT="$WORK_ROOT/liblcf-0.5.0/src"
 LIBLCF_GENERATED_ROOT="$LIBLCF_ROOT/generated"
 LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/libcxx_compat"
-PLAYER_ROOT="$PROJECT_DIR/third_party/easyrpg-player-0.5.0/src"
-PLAYER_VENDOR_ROOT="$PROJECT_DIR/build/vendor/easyrpg-player-0.5.0/src"
-PIXMAN_ROOT="$PROJECT_DIR/third_party/pixman-0.34.0/pixman"
-for header in "$PLAYER_ROOT"/*.h; do
-    name=$(basename "$header")
-    if [[ -f "$PLAYER_VENDOR_ROOT/$name" ]]; then
-        cp "$header" "$PLAYER_VENDOR_ROOT/$name"
-    fi
-done
-PLAYER_WINDOW_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-window-symbian.patch"
-PLAYER_GAMEPLAY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-gameplay.patch"
-PLAYER_PARITY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-parity.patch"
-PLAYER_E72_PARITY_PATCH="$PROJECT_DIR/patches/easyrpg-player-0.5.0-e72-parity.patch"
-PLAYER_VENDOR_BASE=$(dirname "$PLAYER_VENDOR_ROOT")
-for player_patch in "$PLAYER_WINDOW_PATCH" "$PLAYER_GAMEPLAY_PATCH" "$PLAYER_PARITY_PATCH" "$PLAYER_E72_PARITY_PATCH"; do
-    if patch --batch --forward -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$player_patch" >/dev/null 2>&1; then
-        patch --batch --forward -p1 -d "$PLAYER_VENDOR_BASE" < "$player_patch"
-    elif ! patch --batch -R -p1 -d "$PLAYER_VENDOR_BASE" --dry-run < "$player_patch" >/dev/null 2>&1; then
-        echo "Unable to apply EasyRPG Player patch: $player_patch" >&2
-        exit 1
-    fi
-done
+LIBCXX_ROOT="$WORK_ROOT/libcxx-4.0.1/include"
+PLAYER_ROOT="$WORK_ROOT/easyrpg-player-0.5.0/src"
+PIXMAN_ROOT="$WORK_ROOT/pixman-0.34.0/pixman"
+if [[ ! -f "$PLAYER_ROOT/bitmap.cpp" || ! -f "$PLAYER_ROOT/scene_battle.cpp" ||
+      ! -f "$PIXMAN_ROOT/pixman.c" || ! -f "$PIXMAN_ROOT/pixman-fast-path.c" ||
+      ! -f "$LIBLCF_ROOT/reader_lcf.cpp" || ! -f "$LIBCXX_ROOT/vector" ]]; then
+    echo "Missing prepared dependencies. Run tools/prepare_third_party.sh." >&2
+    exit 1
+fi
 SOURCES=(
     "$LIBLCF_ROOT/reader_lcf.cpp"
     "$LIBLCF_ROOT/data.cpp"
@@ -97,7 +85,7 @@ SOURCES=(
     "$PROJECT_DIR/src/core/AsyncHandler.cpp"
     "$PROJECT_DIR/src/core/Audio.cpp"
     "$PROJECT_DIR/src/core/MidiLite.cpp"
-    "$PLAYER_VENDOR_ROOT/midisequencer.cpp"
+    "$PLAYER_ROOT/midisequencer.cpp"
     "$PROJECT_DIR/src/core/Output.cpp"
     "$PROJECT_DIR/src/core/Aeabi.cpp"
     "$PROJECT_DIR/src/core/Image.cpp"
@@ -117,8 +105,8 @@ SOURCES=(
     "$PIXMAN_ROOT/pixman-image.c"
     "$PIXMAN_ROOT/pixman-bits-image.c"
     "$PIXMAN_ROOT/pixman-combine32.c"
-    "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/pixman-fast-path.c"
-    "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/pixman.c"
+    "$PIXMAN_ROOT/pixman-fast-path.c"
+    "$PIXMAN_ROOT/pixman.c"
     "$PROJECT_DIR/src/core/PixmanCompat.c"
     "$PLAYER_ROOT/color.cpp"
     "$PLAYER_ROOT/rect.cpp"
@@ -155,84 +143,84 @@ SOURCES=(
     "$PLAYER_ROOT/input_buttons_desktop.cpp"
     "$PLAYER_ROOT/filefinder.cpp"
     "$PLAYER_ROOT/cache.cpp"
-    "$PLAYER_VENDOR_ROOT/game_actor.cpp"
-    "$PLAYER_VENDOR_ROOT/game_battler.cpp"
-    "$PLAYER_VENDOR_ROOT/game_enemy.cpp"
-    "$PLAYER_VENDOR_ROOT/game_party.cpp"
-    "$PLAYER_VENDOR_ROOT/game_battle.cpp"
-    "$PLAYER_VENDOR_ROOT/game_interpreter_battle.cpp"
-    "$PLAYER_VENDOR_ROOT/battle_animation.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_logo.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_title.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_map.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_gamebrowser.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_actortarget.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_battle.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_battle_rpg2k.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_battle_rpg2k3.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_debug.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_end.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_equip.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_file.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_gameover.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_item.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_load.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_menu.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_name.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_order.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_save.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_shop.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_skill.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_status.cpp"
-    "$PLAYER_VENDOR_ROOT/scene_teleport.cpp"
-    "$PLAYER_VENDOR_ROOT/background.cpp"
-    "$PLAYER_VENDOR_ROOT/game_battlealgorithm.cpp"
-    "$PLAYER_VENDOR_ROOT/audio_secache.cpp"
-    "$PLAYER_VENDOR_ROOT/window_about.cpp"
-    "$PLAYER_VENDOR_ROOT/window_actorinfo.cpp"
-    "$PLAYER_VENDOR_ROOT/window_actorstatus.cpp"
-    "$PLAYER_VENDOR_ROOT/window_actortarget.cpp"
-    "$PLAYER_VENDOR_ROOT/window_base.cpp"
-    "$PLAYER_VENDOR_ROOT/window_battlemessage.cpp"
-    "$PLAYER_VENDOR_ROOT/window_battlestatus.cpp"
-    "$PLAYER_VENDOR_ROOT/window_command.cpp"
-    "$PLAYER_VENDOR_ROOT/window_equip.cpp"
-    "$PLAYER_VENDOR_ROOT/window_equipitem.cpp"
-    "$PLAYER_VENDOR_ROOT/window_equipstatus.cpp"
-    "$PLAYER_VENDOR_ROOT/window_face.cpp"
-    "$PLAYER_VENDOR_ROOT/window_gamelist.cpp"
-    "$PLAYER_VENDOR_ROOT/window_gold.cpp"
-    "$PLAYER_VENDOR_ROOT/window_help.cpp"
-    "$PLAYER_VENDOR_ROOT/window_item.cpp"
-    "$PLAYER_VENDOR_ROOT/window_keyboard.cpp"
-    "$PLAYER_VENDOR_ROOT/window_menustatus.cpp"
-    "$PLAYER_VENDOR_ROOT/window_message.cpp"
-    "$PLAYER_VENDOR_ROOT/window_name.cpp"
-    "$PLAYER_VENDOR_ROOT/window_numberinput.cpp"
-    "$PLAYER_VENDOR_ROOT/window_savefile.cpp"
-    "$PLAYER_VENDOR_ROOT/window_selectable.cpp"
-    "$PLAYER_VENDOR_ROOT/window_shop.cpp"
-    "$PLAYER_VENDOR_ROOT/window_shopbuy.cpp"
-    "$PLAYER_VENDOR_ROOT/window_shopnumber.cpp"
-    "$PLAYER_VENDOR_ROOT/window_shopparty.cpp"
-    "$PLAYER_VENDOR_ROOT/window_shopsell.cpp"
-    "$PLAYER_VENDOR_ROOT/window_shopstatus.cpp"
-    "$PLAYER_VENDOR_ROOT/window_skill.cpp"
-    "$PLAYER_VENDOR_ROOT/window_skillstatus.cpp"
-    "$PLAYER_VENDOR_ROOT/window_targetstatus.cpp"
-    "$PLAYER_VENDOR_ROOT/window_teleport.cpp"
-    "$PLAYER_VENDOR_ROOT/window_varlist.cpp"
-    "$PLAYER_VENDOR_ROOT/spriteset_map.cpp"
-    "$PLAYER_VENDOR_ROOT/spriteset_battle.cpp"
-    "$PLAYER_VENDOR_ROOT/sprite_battler.cpp"
+    "$PLAYER_ROOT/game_actor.cpp"
+    "$PLAYER_ROOT/game_battler.cpp"
+    "$PLAYER_ROOT/game_enemy.cpp"
+    "$PLAYER_ROOT/game_party.cpp"
+    "$PLAYER_ROOT/game_battle.cpp"
+    "$PLAYER_ROOT/game_interpreter_battle.cpp"
+    "$PLAYER_ROOT/battle_animation.cpp"
+    "$PLAYER_ROOT/scene_logo.cpp"
+    "$PLAYER_ROOT/scene_title.cpp"
+    "$PLAYER_ROOT/scene_map.cpp"
+    "$PLAYER_ROOT/scene_gamebrowser.cpp"
+    "$PLAYER_ROOT/scene_actortarget.cpp"
+    "$PLAYER_ROOT/scene_battle.cpp"
+    "$PLAYER_ROOT/scene_battle_rpg2k.cpp"
+    "$PLAYER_ROOT/scene_battle_rpg2k3.cpp"
+    "$PLAYER_ROOT/scene_debug.cpp"
+    "$PLAYER_ROOT/scene_end.cpp"
+    "$PLAYER_ROOT/scene_equip.cpp"
+    "$PLAYER_ROOT/scene_file.cpp"
+    "$PLAYER_ROOT/scene_gameover.cpp"
+    "$PLAYER_ROOT/scene_item.cpp"
+    "$PLAYER_ROOT/scene_load.cpp"
+    "$PLAYER_ROOT/scene_menu.cpp"
+    "$PLAYER_ROOT/scene_name.cpp"
+    "$PLAYER_ROOT/scene_order.cpp"
+    "$PLAYER_ROOT/scene_save.cpp"
+    "$PLAYER_ROOT/scene_shop.cpp"
+    "$PLAYER_ROOT/scene_skill.cpp"
+    "$PLAYER_ROOT/scene_status.cpp"
+    "$PLAYER_ROOT/scene_teleport.cpp"
+    "$PLAYER_ROOT/background.cpp"
+    "$PLAYER_ROOT/game_battlealgorithm.cpp"
+    "$PLAYER_ROOT/audio_secache.cpp"
+    "$PLAYER_ROOT/window_about.cpp"
+    "$PLAYER_ROOT/window_actorinfo.cpp"
+    "$PLAYER_ROOT/window_actorstatus.cpp"
+    "$PLAYER_ROOT/window_actortarget.cpp"
+    "$PLAYER_ROOT/window_base.cpp"
+    "$PLAYER_ROOT/window_battlemessage.cpp"
+    "$PLAYER_ROOT/window_battlestatus.cpp"
+    "$PLAYER_ROOT/window_command.cpp"
+    "$PLAYER_ROOT/window_equip.cpp"
+    "$PLAYER_ROOT/window_equipitem.cpp"
+    "$PLAYER_ROOT/window_equipstatus.cpp"
+    "$PLAYER_ROOT/window_face.cpp"
+    "$PLAYER_ROOT/window_gamelist.cpp"
+    "$PLAYER_ROOT/window_gold.cpp"
+    "$PLAYER_ROOT/window_help.cpp"
+    "$PLAYER_ROOT/window_item.cpp"
+    "$PLAYER_ROOT/window_keyboard.cpp"
+    "$PLAYER_ROOT/window_menustatus.cpp"
+    "$PLAYER_ROOT/window_message.cpp"
+    "$PLAYER_ROOT/window_name.cpp"
+    "$PLAYER_ROOT/window_numberinput.cpp"
+    "$PLAYER_ROOT/window_savefile.cpp"
+    "$PLAYER_ROOT/window_selectable.cpp"
+    "$PLAYER_ROOT/window_shop.cpp"
+    "$PLAYER_ROOT/window_shopbuy.cpp"
+    "$PLAYER_ROOT/window_shopnumber.cpp"
+    "$PLAYER_ROOT/window_shopparty.cpp"
+    "$PLAYER_ROOT/window_shopsell.cpp"
+    "$PLAYER_ROOT/window_shopstatus.cpp"
+    "$PLAYER_ROOT/window_skill.cpp"
+    "$PLAYER_ROOT/window_skillstatus.cpp"
+    "$PLAYER_ROOT/window_targetstatus.cpp"
+    "$PLAYER_ROOT/window_teleport.cpp"
+    "$PLAYER_ROOT/window_varlist.cpp"
+    "$PLAYER_ROOT/spriteset_map.cpp"
+    "$PLAYER_ROOT/spriteset_battle.cpp"
+    "$PLAYER_ROOT/sprite_battler.cpp"
     "$PLAYER_ROOT/sprite_character.cpp"
-    "$PLAYER_VENDOR_ROOT/sprite_airshipshadow.cpp"
-    "$PLAYER_VENDOR_ROOT/sprite_timer.cpp"
-    "$PLAYER_VENDOR_ROOT/plane.cpp"
-    "$PLAYER_VENDOR_ROOT/screen.cpp"
+    "$PLAYER_ROOT/sprite_airshipshadow.cpp"
+    "$PLAYER_ROOT/sprite_timer.cpp"
+    "$PLAYER_ROOT/plane.cpp"
+    "$PLAYER_ROOT/screen.cpp"
     "$PLAYER_ROOT/weather.cpp"
-    "$PLAYER_VENDOR_ROOT/frame.cpp"
-    "$PLAYER_VENDOR_ROOT/rtp_table.cpp"
+    "$PLAYER_ROOT/frame.cpp"
+    "$PLAYER_ROOT/rtp_table.cpp"
     "$GENERATED_CP932"
 )
 
@@ -257,7 +245,7 @@ while IFS= read -r upstream_source; do
     if [[ $already_added == false ]]; then
         SOURCES+=("$upstream_source")
     fi
-done < <(find "$PLAYER_VENDOR_ROOT" -maxdepth 1 -type f -name '*.cpp' | sort)
+done < <(find "$PLAYER_ROOT" -maxdepth 1 -type f -name '*.cpp' | sort)
 
 find_wine() {
     if [[ -n $WINE_BIN && -x $WINE_BIN ]]; then
@@ -316,21 +304,21 @@ for source in "${SOURCES[@]}"; do
     win_object="$WIN_BUILD_DIR\\$base.o"
 
     if [[ ! -f $source ]]; then
-        echo "Modern core source missing: $source" >&2
+        echo "EasyRPG Player source missing: $source" >&2
         exit 1
     fi
 
-    # GCCE 3.4.3 cannot parse EasyRPG 0.5-era C++11. Modern Clang is used
+    # GCCE 3.4.3 cannot parse EasyRPG 0.5-era C++11. Host Clang is used
     # only as frontend/optimizer/code generator. The final object is produced
     # by the original S60 CSL assembler so its ELF/EABI format is linkable by
     # the SDK's arm-none-symbianelf-ld and elf2e32.
     source_define=
     stdio_read_define='-Dfopen=EasyRpgFopen -Dfclose=EasyRpgFclose -Dfread=EasyRpgFread -Dfseek=EasyRpgFseek -Dftell=EasyRpgFtell -Dfeof=EasyRpgFeof -Dferror=EasyRpgFerror -Dungetc=EasyRpgUngetc -Dfgets=EasyRpgFgets'
-    if [[ $source == "$PLAYER_VENDOR_ROOT/midisequencer.cpp" || $source == "$PROJECT_DIR/src/core/MidiLite.cpp" ]]; then
+    if [[ $source == "$PLAYER_ROOT/midisequencer.cpp" || $source == "$PROJECT_DIR/src/core/MidiLite.cpp" ]]; then
         source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN -DWANT_FMMIDI=1 $stdio_read_define"
-    elif [[ $source == "$PLAYER_ROOT/filefinder.cpp" || $source == "$PLAYER_VENDOR_ROOT/filefinder.cpp" ]]; then
+    elif [[ $source == "$PLAYER_ROOT/filefinder.cpp" ]]; then
         source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
-    elif [[ $source == "$PLAYER_ROOT/"* || $source == "$PLAYER_VENDOR_ROOT/"* ]]; then
+    elif [[ $source == "$PLAYER_ROOT/"* ]]; then
         source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
     elif [[ $source == "$PROJECT_DIR/src/core/Ui.cpp" ||
             $source == "$PROJECT_DIR/src/core/RenderDamage.cpp" ||
@@ -356,7 +344,7 @@ for source in "${SOURCES[@]}"; do
         standard_flag=-std=c99
         preinclude_flag=
     fi
-    if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/build/vendor/pixman-0.34.0/pixman/"* || $source == "$PROJECT_DIR/src/core/PixmanCompat.c" ]]; then
+    if [[ $source == "$PIXMAN_ROOT/"* || $source == "$PROJECT_DIR/src/core/PixmanCompat.c" ]]; then
         pixman_define='-DPACKAGE=1 -DPIXMAN_NO_TLS'
     fi
 
@@ -388,18 +376,17 @@ for source in "${SOURCES[@]}"; do
         $preinclude_flag \
         -nostdinc++ \
         -I "$LIBCXX_COMPAT_INCLUDE" \
-        -I "$PROJECT_DIR/third_party/libcxx-4.0.1/include" \
+        -I "$LIBCXX_ROOT" \
         -I "$PROJECT_DIR/inc/libc_compat" \
         -I "$PROJECT_DIR/inc" \
         -I "$PLAYER_ROOT" \
-        -I "$PLAYER_VENDOR_ROOT" \
         -I "$PIXMAN_ROOT" \
         -I "$LIBLCF_ROOT" \
         -I "$LIBLCF_GENERATED_ROOT" \
         -S "$source" \
         -o "$assembly_raw"
 
-    # CSL's old assembler predates these metadata directives and some modern
+    # CSL's old assembler predates these metadata directives and some current
     # GNU assembler spellings. ARM's default stm/ldm alias is increment-after.
     # Clang also emits three-operand register shifts (e.g. lsl r2,r9,r1), while
     # CSL requires the equivalent data-processing spelling (mov r2,r9,lsl r1).
@@ -424,7 +411,7 @@ for source in "${SOURCES[@]}"; do
     win_objects+=("$win_object")
 done
 
-WIN_LIBRARY="$WIN_BUILD_DIR\\EasyRpgModernCore.lib"
+WIN_LIBRARY="$WIN_BUILD_DIR\\EasyRpgPlayer.lib"
 rm -f "$LIBRARY"
 chunk_size=32
 for ((chunk_start=0; chunk_start<${#win_objects[@]}; chunk_start+=chunk_size)); do
@@ -442,18 +429,18 @@ symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
 for required_symbol in EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgMidiLiteCreate EasyRpgMidiLiteRender EasyRpgMidiLiteDestroy _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
-        echo "Modern core archive does not export $required_symbol." >&2
+        echo "EasyRPG Player archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2
         exit 1
     fi
 done
 
-SDK_LIBRARY="$SDK_LIBRARY_DIR/EasyRpgModernCore.lib"
-SDK_LIBRARY_TMP="$SDK_LIBRARY_DIR/.EasyRpgModernCore.lib.$$"
+SDK_LIBRARY="$SDK_LIBRARY_DIR/EasyRpgPlayer.lib"
+SDK_LIBRARY_TMP="$SDK_LIBRARY_DIR/.EasyRpgPlayer.lib.$$"
 cp -f "$LIBRARY" "$SDK_LIBRARY_TMP"
 mv -f "$SDK_LIBRARY_TMP" "$SDK_LIBRARY"
 
-printf 'Modern C++11 -> CSL EABI4 core: %s (%s bytes, %s objects)\n' \
+printf 'EasyRPG Player: %s (%s bytes, %s objects)\n' \
     "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
 printf 'Verified symbols: upstream LDB/LMT/LMU read path + CP932/ZIP platform adapters\n'
 printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY"

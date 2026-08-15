@@ -20,18 +20,13 @@ private:
     explicit CScriptRuntime(RFs& aFs);
     void ConstructL(const TDesC& aArchivePath);
     void SelectGenerationL();
-    void InitializeRubyL(const TDesC8& aScriptArchive);
-    void EvaluateModuleL();
-    void EvaluateScriptsL();
-    void SetRubyError(TInt aScriptIndex);
+    void CopyVmError(const char* aError);
 
 private:
     RFs& iFs;
     CZipVfs* iResources;
     TInt iGeneration;
-    TBool iRubyInitialized;
-    TBool iScriptsRegistered;
-    unsigned long iScripts;
+    TBool iVmCreated;
     TBuf8<512> iLastError;
 };
 

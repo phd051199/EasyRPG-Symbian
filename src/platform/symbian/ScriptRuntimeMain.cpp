@@ -91,7 +91,12 @@ GLDEF_C TInt E32Main()
         return KErrNoMemory;
     TRAPD(error, RunScriptRuntimeL());
     if (error != KErrNone)
+    {
+        const TBool launcherAlreadyReleased = gRendezvousSignaled;
         SignalRendezvous(error);
+        if (launcherAlreadyReleased)
+            TRAP_IGNORE(LaunchMainL());
+    }
     delete cleanup;
     return error;
 }
