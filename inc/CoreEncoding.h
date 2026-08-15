@@ -15,6 +15,24 @@ int EasyRpgCoreUtf16ToCp932(const unsigned short* aSource,
                             unsigned char* aDestination,
                             unsigned int aDestinationCapacity,
                             unsigned int* aDestinationLength);
+int EasyRpgPlatformRankLegacyEncodings(const unsigned char* aSample,
+                                       unsigned int aSampleLength,
+                                       unsigned int* aCodepages,
+                                       int* aConfidences,
+                                       unsigned int aCapacity,
+                                       unsigned int* aCount);
+int EasyRpgPlatformLegacyToUtf16(unsigned int aCodepage,
+                                 const unsigned char* aSource,
+                                 unsigned int aSourceLength,
+                                 unsigned short* aDestination,
+                                 unsigned int aDestinationCapacity,
+                                 unsigned int* aDestinationLength);
+int EasyRpgPlatformUtf16ToLegacy(unsigned int aCodepage,
+                                 const unsigned short* aSource,
+                                 unsigned int aSourceLength,
+                                 unsigned char* aDestination,
+                                 unsigned int aDestinationCapacity,
+                                 unsigned int* aDestinationLength);
 
 #ifdef __cplusplus
 }

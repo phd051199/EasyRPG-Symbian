@@ -13,15 +13,6 @@ struct TZipVfsEntry
     mutable TInt iDataOffset;
 };
 
-struct TRgssVfsEntry
-{
-    HBufC* iPath;
-    TUint32 iHash;
-    TUint32 iFileSize;
-    TUint32 iDataOffset;
-    TUint32 iKey;
-};
-
 class CZipVfs : public CBase
 {
 public:
@@ -63,7 +54,6 @@ private:
     void ConstructL(const TDesC& aArchivePath);
     void BuildIndexL();
     void ResolveProjectRootL();
-    void BuildRgss3ArchiveIndexL();
     void AddEntryL(const TDesC& aPath,
                    TUint32 aFileSize,
                    TUint32 aLocalHeaderOffset,
@@ -72,8 +62,6 @@ private:
 
     const TZipVfsEntry* FindEntry(const TDesC& aRelativePath) const;
     const TZipVfsEntry* FindFullPath(const TDesC& aFullPath) const;
-    const TRgssVfsEntry* FindRgssEntry(const TDesC& aRelativePath,
-                                       TInt* aIndex = NULL) const;
     void BuildFullPathL(const TDesC& aRelativePath, TDes& aFullPath) const;
     TInt EntryDataOffsetL(const TZipVfsEntry& aEntry) const;
 
@@ -90,10 +78,6 @@ private:
     HBufC8* iCentralDirectory;
     RArray<TZipVfsEntry> iEntries;
     RArray<TInt> iBuckets[KBucketCount];
-    RArray<TRgssVfsEntry> iRgssEntries;
-    RArray<TInt> iRgssBuckets[KBucketCount];
-    TInt iRgssArchiveDataOffset;
-    TInt iRgssArchiveFileSize;
 };
 
 #endif
