@@ -52,12 +52,6 @@ public:
 		bool started_by_decision_key = false,
 		int dbg_x = -1, int dbg_y = -1
 	);
-	void SetupReference(
-		const std::vector<RPG::EventCommand>& _list,
-		int _event_id,
-		bool started_by_decision_key = false,
-		int dbg_x = -1, int dbg_y = -1
-	);
 
 	bool IsRunning() const;
 	void Update();
@@ -92,32 +86,7 @@ protected:
 	typedef bool (Game_Interpreter::*ContinuationFunction)(RPG::EventCommand const& com);
 	ContinuationFunction continuation;
 
-	class CommandList {
-	public:
-		CommandList() : ref(&owned) {}
-		CommandList& operator=(const std::vector<RPG::EventCommand>& value) {
-			owned = value;
-			ref = &owned;
-			return *this;
-		}
-		void Reference(const std::vector<RPG::EventCommand>& value) {
-			owned.clear();
-			ref = &value;
-		}
-		void clear() {
-			owned.clear();
-			ref = &owned;
-		}
-		bool empty() const { return ref->empty(); }
-		size_t size() const { return ref->size(); }
-		RPG::EventCommand const& operator[](size_t value) const { return (*ref)[value]; }
-		const std::vector<RPG::EventCommand>& Get() const { return *ref; }
-	private:
-		std::vector<RPG::EventCommand> owned;
-		const std::vector<RPG::EventCommand>* ref;
-	};
-
-	CommandList list;
+	std::vector<RPG::EventCommand> list;
 
 	int button_timer;
 	bool waiting_battle_anim;

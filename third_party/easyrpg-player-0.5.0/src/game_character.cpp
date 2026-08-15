@@ -475,7 +475,7 @@ void Game_Character::Move(int dir) {
 	}
 
 	stop_count = 0;
-	max_stop_count = GetMoveFrequency() > 7 ? 0 : 1 << (9 - GetMoveFrequency());
+	max_stop_count = (GetMoveFrequency() > 7) ? 0 : pow(2.0, 9 - GetMoveFrequency());
 }
 
 void Game_Character::MoveForward() {
@@ -533,7 +533,7 @@ void Game_Character::Turn(int dir) {
 	SetSpriteDirection(dir);
 	move_failed = false;
 	stop_count = 0;
-	max_stop_count = GetMoveFrequency() > 7 ? 0 : 1 << (8 - GetMoveFrequency());
+	max_stop_count = (GetMoveFrequency() > 7) ? 0 : pow(2.0, 8 - GetMoveFrequency());
 }
 
 void Game_Character::Turn90DegreeLeft() {
@@ -692,7 +692,7 @@ void Game_Character::BeginJump(const RPG::MoveRoute* current_route, int* current
 
 	remaining_step = SCREEN_TILE_WIDTH;
 	stop_count = 0;
-	max_stop_count = GetMoveFrequency() > 7 ? 0 : 1 << (9 - GetMoveFrequency());
+	max_stop_count = (GetMoveFrequency() > 7) ? 0 : pow(2.0, 9 - GetMoveFrequency());
 	move_failed = false;
 }
 
@@ -857,7 +857,6 @@ void Game_Character::SetGraphic(const std::string& name, int index) {
 
 void Game_Character::Flash(Color color, int duration) {
 	SetFlashColor(color);
-	SetFlashLevel(color.alpha);
 	SetFlashTimeLeft(duration * DEFAULT_FPS / 10);
 }
 

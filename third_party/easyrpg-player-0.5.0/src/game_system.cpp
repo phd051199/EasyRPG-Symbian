@@ -34,54 +34,6 @@
 namespace {
 	FileRequestBinding music_request_id;
 	std::map<std::string, FileRequestBinding> se_request_ids;
-	std::map<std::pair<std::string, int>, FileRequestBinding> se_preload_request_ids;
-	std::map<std::pair<std::string, int>, FileRequestBinding> se_warm_request_ids;
-
-	void PreloadSeReady(FileRequestResult* result, int tempo) {
-		se_preload_request_ids.erase(std::make_pair(result->file, tempo));
-		if (!EasyRpgAudioEnabled())
-			return;
-		if (!result->success) {
-			return;
-		}
-		std::string const path = FileFinder::FindSound(result->file);
-		if (!path.empty()) {
-			Audio().SE_Preload(path, tempo);
-		}
-	}
-
-	void WarmSeReady(FileRequestResult* result, int tempo) {
-		se_warm_request_ids.erase(std::make_pair(result->file, tempo));
-		if (!EasyRpgAudioEnabled())
-			return;
-		if (!result->success)
-			return;
-		std::string const path = FileFinder::FindSound(result->file);
-		if (!path.empty())
-			Audio().SE_Warm(path, tempo);
-	}
-
-	void PreloadSystemSe(const RPG::Sound& se) {
-		if (!EasyRpgAudioEnabled())
-			return;
-		if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)" || se.volume == 0) {
-			return;
-		}
-		if (se.name.length() >= 7 && se.name.compare(se.name.length() - 7, 7, ".script") == 0) {
-			return;
-		}
-		int tempo = se.tempo;
-		if (tempo < 50 || tempo > 200) {
-			tempo = 100;
-		}
-		std::pair<std::string, int> const key = std::make_pair(se.name, tempo);
-		if (se_preload_request_ids.find(key) != se_preload_request_ids.end()) {
-			return;
-		}
-		FileRequestAsync* request = AsyncHandler::RequestFile("Sound", se.name);
-		se_preload_request_ids[key] = request->Bind(std::bind(&PreloadSeReady, std::placeholders::_1, tempo));
-		request->Start();
-	}
 }
 
 static RPG::SaveSystem& data = Main_Data::game_data.system;
@@ -90,22 +42,6 @@ bool bgm_pending = false;
 
 void Game_System::Init() {
 	data.Setup();
-	se_preload_request_ids.clear();
-	se_warm_request_ids.clear();
-#ifndef EASYRPG_SYMBIAN
-	PreloadSystemSe(data.cursor_se);
-	PreloadSystemSe(data.decision_se);
-	PreloadSystemSe(data.cancel_se);
-	PreloadSystemSe(data.buzzer_se);
-	PreloadSystemSe(data.battle_se);
-	PreloadSystemSe(data.escape_se);
-	PreloadSystemSe(data.enemy_attack_se);
-	PreloadSystemSe(data.enemy_damaged_se);
-	PreloadSystemSe(data.actor_damaged_se);
-	PreloadSystemSe(data.dodge_se);
-	PreloadSystemSe(data.enemy_death_se);
-	PreloadSystemSe(data.item_se);
-#endif
 }
 
 int Game_System::GetSaveCount() {
@@ -113,10 +49,10 @@ int Game_System::GetSaveCount() {
 }
 
 void Game_System::BgmPlay(RPG::Music const& bgm) {
-	Output::Debug("BGM request: %s volume=%d tempo=%d fade=%d", bgm.name.c_str(), bgm.volume, bgm.tempo, bgm.fadein);
 	RPG::Music previous_music = data.current_music;
 	data.current_music = bgm;
 
+	// Validate
 	if (bgm.volume < 0 || bgm.volume > 100) {
 		data.current_music.volume = 100;
 
@@ -135,21 +71,22 @@ void Game_System::BgmPlay(RPG::Music const& bgm) {
 		Output::Debug("BGM %s has invalid tempo %d", bgm.name.c_str(), bgm.tempo);
 	}
 
-	if (!EasyRpgAudioEnabled()) {
-		music_request_id = FileRequestBinding();
-		bgm_pending = false;
-		return;
-	}
-
+	// (OFF) means play nothing
+	// A Polish RPG Maker translation overtranslated the (OFF) reserved string.
+	// This particular translation uses (Brak) in editor for these cases.
+	// Because RPG_RT doesn't show warnings about audios not found,
+	// theses strings are ignored to prevent filling the log.
+	// Though RPG_RT plays files named (Brak) is still preferred to ignore it.
 	if (!bgm.name.empty() && bgm.name != "(OFF)" && bgm.name != "(Brak)") {
-		if (previous_music.name == bgm.name && (bgm_pending || Audio().BGM_IsPlaying())) {
+		// Same music: Only adjust volume and speed
+		if (previous_music.name == bgm.name) {
 			if (previous_music.volume != data.current_music.volume) {
-				if (!bgm_pending) {
+				if (!bgm_pending) { // Delay if not ready
 					Audio().BGM_Volume(data.current_music.volume);
 				}
 			}
 			if (previous_music.tempo != data.current_music.tempo) {
-				if (!bgm_pending) {
+				if (!bgm_pending) { // Delay if not ready
 					Audio().BGM_Pitch(data.current_music.tempo);
 				}
 			}
@@ -171,30 +108,9 @@ void Game_System::BgmStop() {
 	Audio().BGM_Stop();
 }
 
-void Game_System::SeWarm(RPG::Sound const& se) {
-	if (!EasyRpgAudioEnabled())
-		return;
-	if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)" || se.volume == 0)
-		return;
-	if (se.name.length() >= 7 && se.name.compare(se.name.length() - 7, 7, ".script") == 0)
-		return;
-
-	int tempo = se.tempo;
-	if (tempo < 50 || tempo > 200)
-		tempo = 100;
-	std::pair<std::string, int> const key = std::make_pair(se.name, tempo);
-	if (se_warm_request_ids.find(key) != se_warm_request_ids.end())
-		return;
-	FileRequestAsync* request = AsyncHandler::RequestFile("Sound", se.name);
-	se_warm_request_ids[key] = request->Bind(std::bind(&WarmSeReady, std::placeholders::_1, tempo));
-	request->Start();
-}
-
 void Game_System::SePlay(RPG::Sound const& se) {
 	static bool ineluki_warning_shown = false;
 
-	if (!EasyRpgAudioEnabled())
-		return;
 	if (se.name.empty() || se.name == "(OFF)" || se.name == "(Brak)")
 		return;
 
@@ -210,12 +126,15 @@ void Game_System::SePlay(RPG::Sound const& se) {
 		return;
 	}
 
+	// NOTE: Yume Nikki plays hundreds of sound effects at 0% volume on startup,
+	// probably for caching. This avoids "No free channels" warnings.
 	if (se.volume == 0)
 		return;
 
 	int volume = se.volume;
 	int tempo = se.tempo;
 
+	// Validate
 	if (se.volume < 0 || se.volume > 100) {
 		Output::Debug("SE %s has invalid volume %d", se.name.c_str(), se.volume);
 		volume = 100;
@@ -248,11 +167,11 @@ RPG::Music& Game_System::GetSystemBGM(int which) {
 		case BGM_Inn:			return data.inn_music;
 		case BGM_Boat:			return data.boat_music;
 		case BGM_Ship:			return data.ship_music;
-		case BGM_Airship:			return data.airship_music;
+		case BGM_Airship:		return data.airship_music;
 		case BGM_GameOver:		return data.gameover_music;
 	}
 
-	return data.battle_music;
+	return data.battle_music; // keep the compiler happy
 }
 
 RPG::Music& Game_System::GetCurrentBGM() {
@@ -281,17 +200,16 @@ RPG::Sound& Game_System::GetSystemSE(int which) {
 		case SFX_Escape:		return data.escape_se;
 		case SFX_EnemyAttacks:	return data.enemy_attack_se;
 		case SFX_EnemyDamage:	return data.enemy_damaged_se;
-		case SFX_AllyDamage:		return data.actor_damaged_se;
+		case SFX_AllyDamage:	return data.actor_damaged_se;
 		case SFX_Evasion:		return data.dodge_se;
 		case SFX_EnemyKill:		return data.enemy_death_se;
 		case SFX_UseItem:		return data.item_se;
 	}
-	return data.cursor_se;
+	return data.cursor_se; // keep the compiler happy
 }
 
 void Game_System::SetSystemSE(int which, const RPG::Sound& sfx) {
 	GetSystemSE(which) = sfx;
-	PreloadSystemSe(sfx);
 }
 
 void Game_System::SetAllowTeleport(bool allow) {
@@ -424,9 +342,8 @@ void Game_System::SetTransition(int which, int transition) {
 }
 
 void Game_System::OnBgmReady(FileRequestResult* result) {
+	// Take from current_music, params could have changed over time
 	bgm_pending = false;
-	if (!EasyRpgAudioEnabled())
-		return;
 	std::string const path = FileFinder::FindMusic(result->file);
 	if (path.empty()) {
 		Output::Debug("Music not found: %s", result->file.c_str());
@@ -434,31 +351,15 @@ void Game_System::OnBgmReady(FileRequestResult* result) {
 	}
 
 	if (Utils::EndsWith(result->file, ".link")) {
-		std::string line;
-#ifdef EASYRPG_SYMBIAN
-		FILE* stream = FileFinder::fopenUTF8(path, "rb");
-		if (!stream) {
-			Output::Warning("Ineluki link read error: %s", path.c_str());
-			return;
-		}
-		char buffer[1024];
-		if (!fgets(buffer, sizeof(buffer), stream)) {
-			fclose(stream);
-			Output::Warning("Ineluki link read error: %s", path.c_str());
-			return;
-		}
-		fclose(stream);
-		line = buffer;
-		while (!line.empty() && (line[line.size() - 1] == '\r' || line[line.size() - 1] == '\n'))
-			line.erase(line.size() - 1);
-#else
+		// Handle Ineluki's MP3 patch
 		std::shared_ptr<std::fstream> stream = FileFinder::openUTF8(path, std::ios_base::in);
 		if (!stream) {
 			Output::Warning("Ineluki link read error: %s", path.c_str());
 			return;
 		}
-		line = Utils::ReadLine(*stream.get());
-#endif
+
+		// The first line contains the path to the actual audio file to play
+		std::string line = Utils::ReadLine(*stream.get());
 		line = ReaderUtil::Recode(line, Player::encoding);
 		
 		Output::Debug("Ineluki link file: %s -> %s", path.c_str(), line.c_str());
@@ -489,8 +390,6 @@ void Game_System::OnSeReady(FileRequestResult* result, int volume, int tempo) {
 	if (item != se_request_ids.end()) {
 		se_request_ids.erase(item);
 	}
-	if (!EasyRpgAudioEnabled())
-		return;
 
 	std::string const path = FileFinder::FindSound(result->file);
 	if (path.empty()) {

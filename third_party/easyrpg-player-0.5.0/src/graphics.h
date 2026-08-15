@@ -124,7 +124,6 @@ namespace Graphics {
 	void RemoveDrawable(Drawable* drawable);
 
 	void UpdateZCallback();
-	void UpdateZCallback(Drawable* drawable);
 
 	void Push(bool draw_background = true);
 	void Pop();

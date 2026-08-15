@@ -515,7 +515,6 @@ namespace Game_Map {
 	std::vector<Game_CommonEvent>& GetCommonEvents();
 
 	void GetEventsXY(std::vector<Game_Event*>& events, int x, int y);
-	void UpdateEventSpatialIndex(Game_Event& event, int old_x, int old_y, int new_x, int new_y);
 
 	bool LoopHorizontal();
 	bool LoopVertical();

@@ -85,9 +85,6 @@ public:
 
 	DrawableType GetType() const override;
 
-protected:
-	void SetFlashEffect(const Color &color);
-
 private:
 	DrawableType type;
 
@@ -138,6 +135,7 @@ private:
 	void BlitScreenIntern(Bitmap const& draw_bitmap,
 							Rect const& src_rect, int opacity_split) const;
 	BitmapRef Refresh(Rect& rect);
+	void SetFlashEffect(const Color &color);
 };
 
 #endif

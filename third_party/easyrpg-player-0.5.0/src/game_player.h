@@ -25,7 +25,6 @@
 #include <vector>
 
 class Game_Vehicle;
-class Game_Event;
 namespace RPG {
 	class SaveTarget;
 }
@@ -128,14 +127,13 @@ private:
 	int last_pan_x = 0, last_pan_y = 0;
 	int last_remaining_move = 0, last_remaining_jump = 0;
 	RPG::Music walking_bgm;
-	std::vector<Game_Event*> nearby_events;
 
 	void UpdateScroll();
 	bool CheckTouchEvent();
 	bool CheckCollisionEvent();
 	bool CheckActionEvent();
-	bool CheckEventTriggerHere(unsigned int triggers, bool triggered_by_decision_key = false);
-	bool CheckEventTriggerThere(unsigned int triggers, bool triggered_by_decision_key = false);
+	bool CheckEventTriggerHere(const std::vector<int>& triggers, bool triggered_by_decision_key = false);
+	bool CheckEventTriggerThere(const std::vector<int>& triggers, bool triggered_by_decision_key = false);
 	bool GetOnVehicle();
 	bool GetOffVehicle();
 	void Unboard();

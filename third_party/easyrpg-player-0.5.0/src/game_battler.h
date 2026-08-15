@@ -404,9 +404,6 @@ public:
 	 */
 	virtual int GetBattleY() const = 0;
 
-	void ShakeOnce(int strength, int speed, int frames);
-	int GetBattleShakeX() const;
-
 	virtual int GetHue() const;
 
 	virtual int GetBattleAnimationId() const = 0;
@@ -539,10 +536,6 @@ public:
 
 	int GetLastBattleAction() const;
 
-	void SetBattleCombo(int command_id, int times);
-	int GetBattleComboCommand() const;
-	int GetBattleComboTimes() const;
-
 	/**
 	 * Initializes battle related data to there default values.
 	 */
@@ -563,12 +556,6 @@ protected:
 	int agi_modifier;
 	int battle_turn;
 	int last_battle_action;
-	int battle_combo_command_id = -1;
-	int battle_combo_times = 1;
-	int shake_strength = 0;
-	int shake_speed = 0;
-	int shake_frames = 0;
-	int shake_start_frame = 0;
 };
 
 #endif

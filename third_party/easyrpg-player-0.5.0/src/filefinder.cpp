@@ -69,13 +69,6 @@
 #include "rtp_table.h"
 #include "main_data.h"
 
-#ifdef EASYRPG_SYMBIAN
-extern "C" int EasyRpgResolveResource(const char* directory,
-                                              const char* file,
-                                              char* path,
-                                              unsigned int path_capacity);
-#endif
-
 // MinGW shlobj.h does not define this
 #ifndef SHGFP_TYPE_CURRENT
 #define SHGFP_TYPE_CURRENT 0
@@ -91,39 +84,12 @@ namespace {
 	search_path_list search_paths;
 	std::string fonts_path;
 
-#ifdef EASYRPG_SYMBIAN
-	std::string ResolveSymbianResource(const std::string& dir, const std::string& name) {
-		char path[1024];
-		path[0] = 0;
-		if (EasyRpgResolveResource(dir.c_str(), name.c_str(), path, sizeof(path)) != 0)
-			return std::string();
-		return std::string(path);
-	}
-#endif
-
 	std::string FindFile(FileFinder::DirectoryTree const& tree,
 										  std::string const& dir,
 										  std::string const& name,
 										  char const* exts[])
 	{
 		using namespace FileFinder;
-
-#ifdef EASYRPG_SYMBIAN
-		if (game_directory_tree && game_directory_tree.get() == &tree) {
-			for (char const** c = exts; *c != NULL; ++c) {
-				std::string resolved = ResolveSymbianResource(dir, name + *c);
-				if (!resolved.empty())
-					return resolved;
-			}
-			return "";
-		}
-		for (char const** c = exts; *c != NULL; ++c) {
-			const std::string candidate = MakePath(MakePath(tree.directory_path, dir), name + *c);
-			if (Exists(candidate))
-				return candidate;
-		}
-		return "";
-#endif
 
 #ifdef EMSCRIPTEN
 		// The php filefinder should have given us an useable path
@@ -251,8 +217,13 @@ const std::shared_ptr<FileFinder::DirectoryTree> FileFinder::CreateSaveDirectory
 	tree->directory_path = save_path;
 
 	Directory mem = GetDirectoryMembers(tree->directory_path, FILES);
-	tree->files.swap(mem.files);
-	tree->directories.swap(mem.directories);
+
+	for (auto& i : mem.files) {
+		tree->files[i.first] = i.second;
+	}
+	for (auto& i : mem.directories) {
+		tree->directories[i.first] = i.second;
+	}
 
 	return tree;
 }
@@ -262,40 +233,23 @@ void FileFinder::SetDirectoryTree(std::shared_ptr<FileFinder::DirectoryTree> dir
 }
 
 std::shared_ptr<FileFinder::DirectoryTree> FileFinder::CreateDirectoryTree(std::string const& p, bool recursive) {
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian directory tree begin: %s", p.c_str());
-#endif
 	if(! (Exists(p) && IsDirectory(p))) { return std::shared_ptr<DirectoryTree>(); }
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian directory tree path ok");
-#endif
 	std::shared_ptr<DirectoryTree> tree = std::make_shared<DirectoryTree>();
 	tree->directory_path = p;
 
 	Directory mem = GetDirectoryMembers(tree->directory_path, ALL);
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian directory tree members files=%u dirs=%u", static_cast<unsigned int>(mem.files.size()), static_cast<unsigned int>(mem.directories.size()));
-#endif
-	tree->files.swap(mem.files);
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian directory tree files adopted");
-#endif
-	tree->directories.swap(mem.directories);
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian directory tree dirs adopted");
-#endif
+	for (auto& i : mem.files) {
+		tree->files[i.first] = i.second;
+	}
+	for (auto& i : mem.directories) {
+		tree->directories[i.first] = i.second;
+	}
 
-#ifndef EASYRPG_SYMBIAN
 	if (recursive) {
-		for (auto& i : tree->directories) {
+		for (auto& i : mem.directories) {
 			GetDirectoryMembers(MakePath(tree->directory_path, i.second), RECURSIVE).files.swap(tree->sub_members[i.first]);
 		}
 	}
-#else
-	(void)recursive;
-	Output::Debug("Symbian directory tree recursive scan skipped");
-	Output::Debug("Symbian directory tree done");
-#endif
 	return tree;
 }
 
@@ -483,11 +437,6 @@ void FileFinder::InitRtpPaths(bool warn_no_rtp_found) {
 	add_rtp_path("usb:/data/rtp/" + version_str + "/");
 #elif defined(PSP2)
 	add_rtp_path("ux0:/data/easyrpg-player/rtp/" + version_str + "/");
-#elif defined(EASYRPG_SYMBIAN)
-	add_rtp_path("C:/Data/EasyRPG/RTP/" + version_str + "/");
-	add_rtp_path("C:/EasyRPG/RTP/" + version_str + "/");
-	add_rtp_path("E:/Data/EasyRPG/RTP/" + version_str + "/");
-	add_rtp_path("E:/EasyRPG/RTP/" + version_str + "/");
 #elif defined(__ANDROID__)
 	// Invoke "String getRtpPath()" in EasyRPG Activity via JNI
 	JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
@@ -587,11 +536,6 @@ std::string FileFinder::FindDefault(const std::string& dir, const std::string& n
 }
 
 std::string FileFinder::FindDefault(std::string const& name) {
-#ifdef EASYRPG_SYMBIAN
-	std::string resolved = ResolveSymbianResource("", name);
-	if (!resolved.empty())
-		return resolved;
-#endif
 	return FindDefault(*GetDirectoryTree(), name);
 }
 
@@ -685,7 +629,7 @@ bool FileFinder::Exists(std::string const& filename) {
 #elif defined(GEKKO)
 	struct stat sb;
 	return ::stat(filename.c_str(), &sb) == 0;
-#elif defined(_3DS) || defined(EASYRPG_SYMBIAN)
+#elif defined(_3DS)
 	FILE* tmp = fopen(filename.c_str(),"r");
 	if (tmp == NULL){ 
 		DIR* tmp2 = opendir(filename.c_str());
@@ -714,7 +658,7 @@ bool FileFinder::Exists(std::string const& filename) {
 }
 
 bool FileFinder::IsDirectory(std::string const& dir) {
-#if defined(_3DS) || defined(EASYRPG_SYMBIAN)
+#ifdef _3DS
 	DIR* d = opendir(dir.c_str());
 	if(d) {
 		closedir(d);
@@ -765,7 +709,7 @@ FileFinder::Directory FileFinder::GetDirectoryMembers(const std::string& path, F
 #  define wpath Utils::ToWideString(path)
 #  define dirent _wdirent
 #  define readdir _wreaddir
-#elif defined(_3DS) || defined(EASYRPG_SYMBIAN)
+#elif _3DS
 	std::string wpath = path + "/";
 #else
 #  define wpath path

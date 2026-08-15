@@ -103,8 +103,6 @@ struct AudioInterface {
 	 * @param volume volume.
 	 * @param pitch pitch.
 	 */
-	virtual void SE_Preload(std::string const&, int) {}
-	virtual void SE_Warm(std::string const& file, int pitch) { SE_Preload(file, pitch); }
 	virtual void SE_Play(std::string const& file, int volume, int pitch) = 0;
 
 	/**
@@ -132,7 +130,5 @@ struct EmptyAudio : public AudioInterface {
 };
 
 AudioInterface& Audio();
-AudioInterface& EasyRpgAudio();
-bool EasyRpgAudioEnabled();
 
 #endif

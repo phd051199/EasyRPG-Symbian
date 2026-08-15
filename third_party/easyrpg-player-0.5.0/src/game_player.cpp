@@ -33,15 +33,8 @@
 #include <algorithm>
 #include <cmath>
 
-namespace {
-	unsigned int TriggerBit(int trigger) {
-		return trigger >= 0 && trigger < 32 ? (1u << trigger) : 0u;
-	}
-}
-
 Game_Player::Game_Player():
 	location(Main_Data::game_data.party_location) {
-	nearby_events.reserve(8);
 	SetDirection(RPG::EventPage::Direction_down);
 	SetMoveSpeed(4);
 }
@@ -448,69 +441,79 @@ bool Game_Player::CheckActionEvent() {
 	if (InAirship())
 		return false;
 
-	return CheckEventTriggerHere(TriggerBit(RPG::EventPage::Trigger_action), true)
-		| CheckEventTriggerThere(TriggerBit(RPG::EventPage::Trigger_action) |
-			TriggerBit(RPG::EventPage::Trigger_touched) |
-			TriggerBit(RPG::EventPage::Trigger_collision), true);
+	// Use | instead of || to avoid short-circuit evaluation
+	return CheckEventTriggerHere({RPG::EventPage::Trigger_action}, true)
+		| CheckEventTriggerThere({RPG::EventPage::Trigger_action,
+		RPG::EventPage::Trigger_touched, RPG::EventPage::Trigger_collision}, true);
 }
 
 bool Game_Player::CheckTouchEvent() {
 	if (InAirship())
 		return false;
-	return CheckEventTriggerHere(TriggerBit(RPG::EventPage::Trigger_touched));
+	return CheckEventTriggerHere({RPG::EventPage::Trigger_touched});
 }
 
 bool Game_Player::CheckCollisionEvent() {
 	if (InAirship())
 		return false;
-	return CheckEventTriggerHere(TriggerBit(RPG::EventPage::Trigger_collision));
+	return CheckEventTriggerHere({RPG::EventPage::Trigger_collision});
 }
 
-bool Game_Player::CheckEventTriggerHere(unsigned int triggers, bool triggered_by_decision_key) {
+bool Game_Player::CheckEventTriggerHere(const std::vector<int>& triggers, bool triggered_by_decision_key) {
 	bool result = false;
-	nearby_events.clear();
-	Game_Map::GetEventsXY(nearby_events, GetX(), GetY());
-	for (Game_Event* ev : nearby_events) {
-		if (ev->GetLayer() != RPG::EventPage::Layers_same &&
-			(triggers & TriggerBit(ev->GetTrigger())) != 0) {
-			ev->Start(triggered_by_decision_key);
-			result = ev->GetStarting();
+
+	std::vector<Game_Event*> events;
+	Game_Map::GetEventsXY(events, GetX(), GetY());
+
+	std::vector<Game_Event*>::iterator i;
+	for (i = events.begin(); i != events.end(); ++i) {
+		if (((*i)->GetLayer() != RPG::EventPage::Layers_same)
+			&& std::find(triggers.begin(), triggers.end(), (*i)->GetTrigger() ) != triggers.end() ) {
+			(*i)->Start(triggered_by_decision_key);
+			result = (*i)->GetStarting();
 		}
 	}
 	return result;
 }
 
-bool Game_Player::CheckEventTriggerThere(unsigned int triggers, bool triggered_by_decision_key) {
-	if (Game_Map::GetInterpreter().IsRunning())
-		return false;
+bool Game_Player::CheckEventTriggerThere(const std::vector<int>& triggers, bool triggered_by_decision_key) {
+	if ( Game_Map::GetInterpreter().IsRunning() ) return false;
 
 	bool result = false;
+
 	int front_x = Game_Map::XwithDirection(GetX(), GetDirection());
 	int front_y = Game_Map::YwithDirection(GetY(), GetDirection());
-	nearby_events.clear();
-	Game_Map::GetEventsXY(nearby_events, front_x, front_y);
 
-	for (Game_Event* ev : nearby_events) {
-		if (ev->GetLayer() == RPG::EventPage::Layers_same &&
-			(triggers & TriggerBit(ev->GetTrigger())) != 0) {
-			if (!ev->GetList().empty())
+	std::vector<Game_Event*> events;
+	Game_Map::GetEventsXY(events, front_x, front_y);
+
+	for (const auto& ev : events) {
+		if ( ev->GetLayer() == RPG::EventPage::Layers_same &&
+			std::find(triggers.begin(), triggers.end(), ev->GetTrigger() ) != triggers.end()
+		)
+		{
+			if (!ev->GetList().empty()) {
 				ev->StartTalkToHero();
+			}
 			ev->Start(triggered_by_decision_key);
 			result = true;
 		}
 	}
 
-	if (!result && Game_Map::IsCounter(front_x, front_y)) {
+	if ( !result && Game_Map::IsCounter(front_x, front_y) ) {
 		front_x = Game_Map::XwithDirection(front_x, GetDirection());
 		front_y = Game_Map::YwithDirection(front_y, GetDirection());
-		const size_t start = nearby_events.size();
-		Game_Map::GetEventsXY(nearby_events, front_x, front_y);
-		for (size_t index = start; index < nearby_events.size(); ++index) {
-			Game_Event* ev = nearby_events[index];
-			if (ev->GetLayer() == RPG::EventPage::Layers_same &&
-				(triggers & TriggerBit(ev->GetTrigger())) != 0) {
-				if (!ev->GetList().empty())
+
+		Game_Map::GetEventsXY(events, front_x, front_y);
+
+		for (const auto& ev : events) {
+			if ( ev->GetLayer() == 1 &&
+				std::find(triggers.begin(), triggers.end(), ev->GetTrigger() ) != triggers.end()
+			)
+			{
+				if (!ev->GetList().empty()) {
 					ev->StartTalkToHero();
+				}
 				ev->Start(triggered_by_decision_key);
 				result = true;
 			}
@@ -523,10 +526,11 @@ bool Game_Player::CheckEventTriggerTouch(int x, int y) {
 	if ( Game_Map::GetInterpreter().IsRunning() ) return false;
 
 	bool result = false;
-	nearby_events.clear();
-	Game_Map::GetEventsXY(nearby_events, x, y);
 
-	for (Game_Event* ev : nearby_events) {
+	std::vector<Game_Event*> events;
+	Game_Map::GetEventsXY(events, x, y);
+
+	for (const auto& ev : events) {
 		if (ev->GetLayer() == RPG::EventPage::Layers_same &&
 			(ev->GetTrigger() == RPG::EventPage::Trigger_touched ||
 			ev->GetTrigger() == RPG::EventPage::Trigger_collision) ) {

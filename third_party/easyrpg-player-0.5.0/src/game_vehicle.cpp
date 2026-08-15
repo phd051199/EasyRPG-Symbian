@@ -270,7 +270,6 @@ RPG::Music& Game_Vehicle::GetBGM() {
 	}
 
 	assert(false);
-	return Game_System::GetSystemBGM(Game_System::BGM_Boat);
 }
 
 void Game_Vehicle::Refresh() {

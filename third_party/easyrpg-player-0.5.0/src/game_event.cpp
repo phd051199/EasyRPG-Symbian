@@ -64,11 +64,7 @@ int Game_Event::GetX() const {
 }
 
 void Game_Event::SetX(int new_x) {
-	const int old_x = data.position_x;
-	if (old_x == new_x)
-		return;
 	data.position_x = new_x;
-	Game_Map::UpdateEventSpatialIndex(*this, old_x, data.position_y, new_x, data.position_y);
 }
 
 int Game_Event::GetY() const {
@@ -76,11 +72,7 @@ int Game_Event::GetY() const {
 }
 
 void Game_Event::SetY(int new_y) {
-	const int old_y = data.position_y;
-	if (old_y == new_y)
-		return;
 	data.position_y = new_y;
-	Game_Map::UpdateEventSpatialIndex(*this, data.position_x, old_y, data.position_x, new_y);
 }
 
 int Game_Event::GetMapId() const {
@@ -280,7 +272,7 @@ void Game_Event::Setup(RPG::EventPage* new_page) {
 	move_type = page->move_type;
 	SetMoveSpeed(page->move_speed);
 	SetMoveFrequency(page->move_frequency);
-	max_stop_count = GetMoveFrequency() > 7 ? 0 : 1 << (8 - GetMoveFrequency());
+	max_stop_count = (GetMoveFrequency() > 7) ? 0 : (int)pow(2.0, 8 - GetMoveFrequency());
 	original_move_frequency = page->move_frequency;
 	original_move_route = page->move_route;
 	SetOriginalMoveRouteIndex(0);
@@ -466,11 +458,6 @@ bool Game_Event::WasStartedByDecisionKey() const {
 
 int Game_Event::GetTrigger() const {
 	return trigger;
-}
-
-bool Game_Event::RequiresParallelUpdate() const {
-	return page != NULL &&
-		(interpreter || move_type != RPG::EventPage::MoveType_stationary);
 }
 
 void Game_Event::SetActive(bool active) {
@@ -704,8 +691,7 @@ void Game_Event::UpdateParallel() {
 		}
 		interpreter->Update();
 	}
-	if (move_type != RPG::EventPage::MoveType_stationary || IsMoveRouteOverwritten())
-		Game_Character::Update();
+	Game_Character::Update();
 	updating = false;
 }
 

@@ -112,7 +112,6 @@ namespace Game_System {
 	 * @param se sound data.
 	 */
 	void SePlay(RPG::Sound const& se);
-	void SeWarm(RPG::Sound const& se);
 
 	/**
 	 * Gets system graphic name.

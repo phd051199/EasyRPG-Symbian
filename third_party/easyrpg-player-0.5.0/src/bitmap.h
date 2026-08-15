@@ -305,7 +305,6 @@ public:
 	 * @param opacity opacity for blending with bitmap.
 	 */
 	void BlitFast(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity const& opacity);
-	void BlitTileFast565(int x, int y, Bitmap const& src, int src_x, int src_y);
 
 	/**
 	 * Blits source bitmap in tiles to this one.
@@ -730,13 +729,6 @@ public:
 	int height() const;
 	int bpp() const;
 	int pitch() const;
-#ifdef EASYRPG_SYMBIAN
-	uint32_t Revision() const;
-	void Touch();
-	void Touch(const Rect& aRect);
-	void SetClipRects(const Rect* aRects, int aCount);
-	void ClearClipRects();
-#endif
 
 protected:
 	/** Bitmap data. */
@@ -772,21 +764,6 @@ protected:
 
 	pixman_op_t GetOperator(pixman_image_t* mask = nullptr) const;
 	bool read_only = false;
-#ifdef EASYRPG_SYMBIAN
-	uint32_t revision_counter = 1;
-	int symbian_width = 0;
-	int symbian_height = 0;
-	int symbian_pitch = 0;
-	int symbian_bpp = 0;
-	void* symbian_pixels = nullptr;
-	mutable uint32_t symbian_span_revision = 0;
-	mutable bool symbian_spans_usable = false;
-	mutable std::vector<int> symbian_span_offsets;
-	mutable std::vector<int> symbian_spans;
-	bool EnsureSymbianOpaqueSpans() const;
-	bool SymbianBlitA1555Spans565(int x, int y, Bitmap const& src,
-		const Rect& src_rect, Rect& written);
-#endif
 };
 
 #endif

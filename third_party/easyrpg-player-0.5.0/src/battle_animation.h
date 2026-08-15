@@ -47,8 +47,6 @@ public:
 
 protected:
 	virtual void SetFlash(Color c) = 0;
-	virtual void ShakeTargets(int strength, int speed, int frames) = 0;
-	virtual void ShakeScreen(int strength, int speed, int frames) = 0;
 	virtual bool ShouldScreenFlash() const = 0;
 	void DrawAt(int x, int y);
 	void RunTimedSfx();
@@ -72,8 +70,6 @@ public:
 	void Draw() override;
 protected:
 	void SetFlash(Color c) override;
-	void ShakeTargets(int strength, int speed, int frames) override;
-	void ShakeScreen(int strength, int speed, int frames) override;
 	bool ShouldScreenFlash() const override;
 	Game_Character& character;
 };
@@ -87,8 +83,6 @@ public:
 	void Draw() override;
 protected:
 	void SetFlash(Color c) override;
-	void ShakeTargets(int strength, int speed, int frames) override;
-	void ShakeScreen(int strength, int speed, int frames) override;
 	bool ShouldScreenFlash() const override;
 	std::vector<Game_Battler*> battlers;
 	bool should_flash;
@@ -102,8 +96,6 @@ public:
 	void Draw() override;
 protected:
 	void SetFlash(Color c) override;
-	void ShakeTargets(int strength, int speed, int frames) override;
-	void ShakeScreen(int strength, int speed, int frames) override;
 	bool ShouldScreenFlash() const override;
 };
 

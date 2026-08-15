@@ -15,6 +15,7 @@
  * along with EasyRPG Player. If not, see <http://www.gnu.org/licenses/>.
  */
 
+// Headers
 #ifdef _MSC_VER
 #  pragma warning(disable: 4003)
 #endif
@@ -30,7 +31,6 @@
 #include "output.h"
 #include "player.h"
 #include "data.h"
-#include "UpstreamPlayerBridge.h"
 
 namespace {
 	typedef std::pair<std::string,std::string> string_pair;
@@ -41,62 +41,55 @@ namespace {
 	};
 
 	typedef std::pair<std::string, int> tile_pair;
+
 	typedef std::map<string_pair, CacheItem> cache_type;
 	cache_type cache;
+
 	typedef std::map<tile_pair, std::weak_ptr<Bitmap> > cache_tiles_type;
 	cache_tiles_type cache_tiles;
-	std::string system_name;
-	uint32_t next_cleanup_tick = 0;
-	int loads_since_cleanup = 0;
-	const int low_memory_bytes = 24 * 1024 * 1024;
-	const int critical_memory_bytes = 12 * 1024 * 1024;
 
-	size_t CleanupBudget(int free_ram) {
-		if (free_ram >= 0 && free_ram < critical_memory_bytes)
-			return cache.size();
-		if (free_ram >= 0 && free_ram < low_memory_bytes)
-			return 12;
-		return 4;
-	}
+	std::string system_name;
 
 	void FreeBitmapMemory() {
-		++loads_since_cleanup;
-		const uint32_t cur_ticks = DisplayUi->GetTicks();
-		const int free_ram = EasyRpgPlatformFreeRamBytes();
-		const bool aggressive = free_ram >= 0 && free_ram < critical_memory_bytes;
-		if (!aggressive && loads_since_cleanup < 8 && static_cast<int32_t>(cur_ticks - next_cleanup_tick) < 0)
-			return;
-		loads_since_cleanup = 0;
-		next_cleanup_tick = cur_ticks + 2000;
-		const size_t budget = CleanupBudget(free_ram);
-		size_t freed = 0;
+		int32_t cur_ticks = DisplayUi->GetTicks();
+
 		for (auto& i : cache) {
-			if (i.second.bitmap.use_count() != 1)
+			if (i.second.bitmap.use_count() != 1) { continue; }
+
+			if (cur_ticks - i.second.last_access < 5000) {
+				// Last access < 5s
 				continue;
-			if (!aggressive && static_cast<int32_t>(cur_ticks - i.second.last_access) < 5000)
-				continue;
+			}
+
+			//Output::Debug("Freeing memory of %s/%s %d %d",
+			//			  i.first.first.c_str(), i.first.second.c_str(), i.second.last_access, cur_ticks);
+
 			i.second.bitmap.reset();
-			++freed;
-			if (freed >= budget)
-				break;
 		}
 	}
 
 	BitmapRef LoadBitmap(std::string const& folder_name, const std::string& filename,
 						 bool transparent, uint32_t const flags) {
 		string_pair const key(folder_name, filename);
+
 		cache_type::iterator const it = cache.find(key);
+
 		if (it == cache.end() || !it->second.bitmap) {
-			FreeBitmapMemory();
 			std::string const path = FileFinder::FindImage(folder_name, filename);
+
 			BitmapRef bmp = BitmapRef();
+
 			if (path.empty()) {
 				Output::Warning("Image not found: %s/%s", folder_name.c_str(), filename.c_str());
 			} else {
 				bmp = Bitmap::Create(path, transparent, flags);
-				if (!bmp)
+				if (!bmp) {
 					Output::Warning("Invalid image: %s/%s", folder_name.c_str(), filename.c_str());
+				}
 			}
+
+			FreeBitmapMemory();
+
 			return (cache[key] = {bmp, DisplayUi->GetTicks()}).bitmap;
 		} else {
 			it->second.last_access = DisplayUi->GetTicks();
@@ -125,7 +118,8 @@ namespace {
 			Frame,
 			END
 		};
-	};
+
+	}; // struct Material
 
 	template<Material::Type T> BitmapRef DrawCheckerboard();
 
@@ -177,50 +171,74 @@ namespace {
 	template<Material::Type T>
 	BitmapRef DrawCheckerboard() {
 		static_assert(Material::REND < T && T < Material::END, "Invalid material.");
+
 		Spec const& s = spec[T];
+
 		BitmapRef bitmap = Bitmap::Create(s.max_width, s.max_height, false);
+
+		// ToDo: Maybe use different renderers depending on material
+		// Will look ugly for some image types
+
+		// Draw chess board
 		Color color[2] = { Color(255, 255, 255, 255), Color(128, 128, 128, 255) };
 		for (int i = 0; i < s.max_width / 16; ++i) {
-			for (int j = 0; j < s.max_height / 16; ++j)
+			for (int j = 0; j < s.max_height / 16; ++j) {
 				bitmap->FillRect(Rect(i * 16, j * 16, 16, 16), color[(i + j) % 2]);
+			}
 		}
+
 		return bitmap;
 	}
 
 	template<Material::Type T>
 	BitmapRef LoadDummyBitmap(std::string const& folder_name, const std::string& filename) {
 		static_assert(Material::REND < T && T < Material::END, "Invalid material.");
+
 		Spec const& s = spec[T];
+
 		string_pair const key(folder_name, filename);
+
 		BitmapRef bitmap = s.dummy_renderer();
+
 		return (cache[key] = {bitmap, DisplayUi->GetTicks()}).bitmap;
 	}
 
 	template<Material::Type T>
 	BitmapRef LoadBitmap(std::string const& f, bool transparent) {
 		static_assert(Material::REND < T && T < Material::END, "Invalid material.");
+
 		Spec const& s = spec[T];
-		if (f == CACHE_DEFAULT_BITMAP)
+
+		if (f == CACHE_DEFAULT_BITMAP) {
 			return LoadDummyBitmap<T>(s.directory, f);
+		}
+
+		// Test if the file was requested asynchronously before.
+		// If not the file can't be expected to exist -> bug.
 		FileRequestAsync* request = AsyncHandler::RequestFile(s.directory, f);
 		if (!request->IsReady()) {
 			Output::Debug("BUG: File Not Requested: %s/%s", s.directory, f.c_str());
 			return BitmapRef();
 		}
+
 		BitmapRef ret = LoadBitmap(s.directory, f, transparent, Bitmap::Flag_ReadOnly | (
 										 T == Material::Chipset? Bitmap::Flag_Chipset:
 										 T == Material::System? Bitmap::Flag_System:
 										 0));
+
 		if (!ret) {
 			Output::Warning("Image not found: %s/%s", s.directory, f.c_str());
+
 			return LoadDummyBitmap<T>(s.directory, f);
 		}
+
 		if(ret->GetWidth() < s.min_width   || s.max_width  < ret->GetWidth() ||
 		   ret->GetHeight() < s.min_height || s.max_height < ret->GetHeight()) {
 			Output::Debug("Image size out of bounds: %s/%s (%dx%d < %dx%d < %dx%d)",
 						  s.directory, f.c_str(), s.min_width, s.min_height,
 						  ret->GetWidth(), ret->GetHeight(), s.max_width, s.max_height);
 		}
+
 		return ret;
 	}
 }
@@ -256,7 +274,9 @@ BitmapRef Cache::Picture(const std::string& f, bool trans) {
 
 BitmapRef Cache::Exfont() {
 	string_pair const hash("ExFont","ExFont");
+
 	cache_type::iterator const it = cache.find(hash);
+
 	if (it == cache.end() || !it->second.bitmap) {
 		return(cache[hash] = {Bitmap::Create(exfont_h, sizeof(exfont_h), true), DisplayUi->GetTicks()}).bitmap;
 	} else {
@@ -268,10 +288,13 @@ BitmapRef Cache::Exfont() {
 BitmapRef Cache::Tile(const std::string& filename, int tile_id) {
 	tile_pair const key(filename, tile_id);
 	cache_tiles_type::const_iterator const it = cache_tiles.find(key);
+
 	if (it == cache_tiles.end() || it->second.expired()) {
 		BitmapRef chipset = Cache::Chipset(filename);
 		Rect rect = Rect(0, 0, 16, 16);
+
 		int sub_tile_id = 0;
+
 		if (tile_id > 0 && tile_id < 48) {
 			sub_tile_id = tile_id;
 			rect.x += 288;
@@ -283,62 +306,28 @@ BitmapRef Cache::Tile(const std::string& filename, int tile_id) {
 			sub_tile_id = tile_id - 96;
 			rect.x += 384;
 			rect.y += 128;
-		} else {
+		} else { // Invalid -> Use empty tile (first one)
 			rect.x = 288;
 			rect.y = 128;
 		}
+
 		rect.x += sub_tile_id % 6 * 16;
 		rect.y += sub_tile_id / 6 * 16;
+
 		return(cache_tiles[key] = Bitmap::Create(*chipset, rect)).lock();
-	} else {
-		return it->second.lock();
-	}
+	} else { return it->second.lock(); }
 }
 
 void Cache::Clear() {
 	cache.clear();
+
 	for (cache_tiles_type::const_iterator i = cache_tiles.begin(); i != cache_tiles.end(); ++i) {
-		if (i->second.expired())
-			continue;
+		if (i->second.expired()) { continue; }
 		Output::Debug("possible leak in cached tilemap %s/%d",
 					  i->first.first.c_str(), i->first.second);
 	}
+
 	cache_tiles.clear();
-	next_cleanup_tick = 0;
-	loads_since_cleanup = 0;
-}
-
-void Cache::TrimUnused() {
-	const int free_ram = EasyRpgPlatformFreeRamBytes();
-	const size_t budget = CleanupBudget(free_ram);
-	const bool aggressive = free_ram >= 0 && free_ram < critical_memory_bytes;
-	size_t freed = 0;
-	cache_type::iterator bitmap_it = cache.begin();
-	while (bitmap_it != cache.end()) {
-		cache_type::iterator current = bitmap_it++;
-		if (!current->second.bitmap) {
-			cache.erase(current);
-			continue;
-		}
-		if (current->second.bitmap.use_count() != 1)
-			continue;
-		cache.erase(current);
-		++freed;
-		if (freed >= budget)
-			break;
-	}
-
-	if (aggressive) {
-		cache_tiles_type::iterator tile_it = cache_tiles.begin();
-		while (tile_it != cache_tiles.end()) {
-			cache_tiles_type::iterator current = tile_it++;
-			if (current->second.expired())
-				cache_tiles.erase(current);
-		}
-	}
-
-	loads_since_cleanup = 0;
-	next_cleanup_tick = DisplayUi->GetTicks() + 2000;
 }
 
 void Cache::SetSystemName(std::string const& filename) {
@@ -349,8 +338,11 @@ BitmapRef Cache::System() {
 	if (!system_name.empty()) {
 		return Cache::System(system_name);
 	} else {
-		if (!Data::system.system_name.empty())
+		if (!Data::system.system_name.empty()) {
+			// Load the system file for the shadow and text color
 			return Cache::System(Data::system.system_name);
-		return Bitmap::Create(160, 80, false);
+		} else {
+			return Bitmap::Create(160, 80, false);
+		}
 	}
 }

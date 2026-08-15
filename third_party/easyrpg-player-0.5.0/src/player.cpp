@@ -73,10 +73,6 @@
 #include "utils.h"
 #include "version.h"
 
-#ifdef EASYRPG_SYMBIAN
-extern "C" int EasyRpgUpstreamPlayerShouldRender(void);
-#endif
-
 namespace Player {
 	bool exit_flag;
 	bool reset_flag;
@@ -198,9 +194,6 @@ void Player::Init(int argc, char *argv[]) {
 	Utils::SeedRandomNumberGenerator(time(NULL));
 
 	ParseCommandLine(argc, argv);
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian init parse done");
-#endif
 
 #ifdef EMSCRIPTEN
 	Output::IgnorePause(true);
@@ -223,9 +216,6 @@ void Player::Init(int argc, char *argv[]) {
 #endif
 
 	Main_Data::Init();
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian init main data done");
-#endif
 
 	DisplayUi.reset();
 
@@ -236,9 +226,6 @@ void Player::Init(int argc, char *argv[]) {
 			 !window_flag,
 			 RUN_ZOOM);
 	}
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian init ui done");
-#endif
 }
 
 void Player::Run() {
@@ -289,16 +276,11 @@ void Player::Resume() {
 }
 
 void Player::Update(bool update_scene) {
-#ifndef EASYRPG_SYMBIAN
 	// available ms per frame, game logic expects 60 fps
 	static const double framerate_interval = 1000.0 / Graphics::GetDefaultFps();
 	next_frame = start_time + framerate_interval;
-#endif
 
-#ifdef EASYRPG_SYMBIAN
-	const bool symbian_render_frame = EasyRpgUpstreamPlayerShouldRender() != 0;
-	Scene* const symbian_scene_before_update = Scene::instance.get();
-#elif defined(EMSCRIPTEN)
+#ifdef EMSCRIPTEN
 	// Ticks in emscripten are unreliable due to how the main loop works:
 	// This function is only called 60 times per second instead of theoretical
 	// 1000s of times.
@@ -320,7 +302,6 @@ void Player::Update(bool update_scene) {
 #endif
 
 	// Normal logic update
-#ifndef EASYRPG_SYMBIAN
 	if (Input::IsTriggered(Input::TOGGLE_FPS)) {
 		fps_flag = !fps_flag;
 	}
@@ -330,11 +311,8 @@ void Player::Update(bool update_scene) {
 	if (Input::IsTriggered(Input::SHOW_LOG)) {
 		Output::ToggleLog();
 	}
-#endif
 
-#ifndef EASYRPG_SYMBIAN
 	DisplayUi->ProcessEvents();
-#endif
 
 	if (exit_flag) {
 		Scene::PopUntil(Scene::Null);
@@ -348,29 +326,17 @@ void Player::Update(bool update_scene) {
 		}
 	}
 
-#ifdef EASYRPG_SYMBIAN
-	Input::Update();
-	if (update_scene)
-		Scene::instance->Update();
-	if (Scene::instance.get() == symbian_scene_before_update) {
-		Graphics::Update(symbian_render_frame);
-		Audio().Update();
-	}
-#else
 	Audio().Update();
 	Input::Update();
-	if (update_scene)
+	if (update_scene) {
 		Scene::instance->Update();
-#endif
+	}
 
-#ifndef EASYRPG_SYMBIAN
 	start_time = next_frame;
-#endif
 	++frames;
 }
 
 void Player::FrameReset() {
-#ifndef EASYRPG_SYMBIAN
 	// When update started
 	start_time = (double)DisplayUi->GetTicks();
 
@@ -379,7 +345,6 @@ void Player::FrameReset() {
 
 	// When next frame is expected
 	next_frame = start_time + framerate_interval;
-#endif
 
 	Graphics::FrameReset();
 }
@@ -419,35 +384,6 @@ void Player::Exit() {
 }
 
 void Player::ParseCommandLine(int argc, char *argv[]) {
-#ifdef EASYRPG_SYMBIAN
-	engine = EngineNone;
-	window_flag = false;
-	fps_flag = false;
-	debug_flag = false;
-	hide_title_flag = false;
-	exit_flag = false;
-	reset_flag = false;
-	battle_test_flag = false;
-	battle_test_troop_id = 0;
-	new_game_flag = false;
-	load_game_id = -1;
-	party_x_position = -1;
-	party_y_position = -1;
-	start_map_id = -1;
-	no_rtp_flag = false;
-	no_audio_flag = false;
-	forced_encoding.clear();
-	party_members.clear();
-	for (int i = 1; i < argc; ++i) {
-		if (strcmp(argv[i], "--project-path") == 0 && i + 1 < argc) {
-			Main_Data::SetProjectPath(argv[++i]);
-		} else if (strcmp(argv[i], "--save-path") == 0 && i + 1 < argc) {
-			Main_Data::SetSavePath(argv[++i]);
-		}
-	}
-	Output::Debug("Symbian paths configured");
-	return;
-#endif
 #ifdef _3DS
 	is_3dsx = argc > 0;
 #endif
@@ -657,13 +593,7 @@ static void OnSystemFileReady(FileRequestResult* result) {
 }
 
 void Player::CreateGameObjects() {
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian create game objects begin");
-#endif
 	GetEncoding();
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian encoding ready: %s", encoding.c_str());
-#endif
 	escape_symbol = ReaderUtil::Recode("\\", encoding);
 	if (escape_symbol.empty()) {
 		Output::Error("Invalid encoding: %s.", encoding.c_str());
@@ -678,13 +608,7 @@ void Player::CreateGameObjects() {
 		Output::Debug("Using %s as Save directory", save_path.c_str());
 	}
 
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian load database begin");
-#endif
 	LoadDatabase();
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian load database done");
-#endif
 
 	std::string ini_file = FileFinder::FindDefault(INI_NAME);
 
@@ -737,13 +661,7 @@ void Player::CreateGameObjects() {
 		FileFinder::InitRtpPaths();
 	}
 
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian reset game objects begin");
-#endif
 	ResetGameObjects();
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian create game objects done");
-#endif
 }
 
 void Player::ResetGameObjects() {
@@ -755,9 +673,6 @@ void Player::ResetGameObjects() {
 	}
 
 	Main_Data::game_data.Setup();
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian save data setup done");
-#endif
 
 	Game_Actors::Init();
 	Game_Map::Init();
@@ -770,14 +685,8 @@ void Player::ResetGameObjects() {
 	Main_Data::game_party.reset(new Game_Party());
 	Main_Data::game_player.reset(new Game_Player());
 	Main_Data::game_screen.reset(new Game_Screen());
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian game object allocation done");
-#endif
 
 	FrameReset();
-#ifdef EASYRPG_SYMBIAN
-	Output::Debug("Symbian reset game objects done");
-#endif
 }
 
 void Player::LoadDatabase() {

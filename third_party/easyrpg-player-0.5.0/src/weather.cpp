@@ -1,3 +1,21 @@
+/*
+ * This file is part of EasyRPG Player.
+ *
+ * EasyRPG Player is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * EasyRPG Player is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with EasyRPG Player. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// Headers
 #include <string>
 #include <vector>
 #include "baseui.h"
@@ -10,6 +28,7 @@
 
 Weather::Weather() :
 	dirty(false) {
+
 	Graphics::RegisterDrawable(this);
 }
 
@@ -29,8 +48,11 @@ void Weather::Update() {
 }
 
 void Weather::Draw() {
-	if (Main_Data::game_screen->GetWeatherType() != Game_Screen::Weather_None && !weather_surface)
-		weather_surface = Bitmap::Create(SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT);
+	if (Main_Data::game_screen->GetWeatherType() != Game_Screen::Weather_None) {
+		if (!weather_surface) {
+			weather_surface = Bitmap::Create(SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT);
+		}
+	}
 
 	if (dirty && weather_surface) {
 		weather_surface->Clear();
@@ -38,20 +60,20 @@ void Weather::Draw() {
 	}
 
 	switch (Main_Data::game_screen->GetWeatherType()) {
-	case Game_Screen::Weather_None:
-		break;
-	case Game_Screen::Weather_Rain:
-		DrawRain();
-		break;
-	case Game_Screen::Weather_Snow:
-		DrawSnow();
-		break;
-	case Game_Screen::Weather_Fog:
-		DrawFog();
-		break;
-	case Game_Screen::Weather_Sandstorm:
-		DrawSandstorm();
-		break;
+		case Game_Screen::Weather_None:
+			break;
+		case Game_Screen::Weather_Rain:
+			DrawRain();
+			break;
+		case Game_Screen::Weather_Snow:
+			DrawSnow();
+			break;
+		case Game_Screen::Weather_Fog:
+			DrawFog();
+			break;
+		case Game_Screen::Weather_Sandstorm:
+			DrawSandstorm();
+			break;
 	}
 
 	if (dirty && weather_surface) {
@@ -100,26 +122,34 @@ static const int snowflake_visible = 150;
 void Weather::DrawRain() {
 	if (!rain_bitmap) {
 		rain_bitmap = Bitmap::Create(rain_image, sizeof(rain_image));
-		if (tone_effect != Tone())
+		if (tone_effect != Tone()) {
 			rain_bitmap->ToneBlit(0, 0, *rain_bitmap, rain_bitmap->GetRect(), tone_effect, Opacity::opaque);
+		}
 	}
 
 	Rect rect = rain_bitmap->GetRect();
+
 	const std::vector<Game_Screen::Snowflake>& snowflakes = Main_Data::game_screen->GetSnowflakes();
-	for (std::vector<Game_Screen::Snowflake>::const_iterator it = snowflakes.begin(); it != snowflakes.end(); ++it) {
+
+	std::vector<Game_Screen::Snowflake>::const_iterator it;
+	for (it = snowflakes.begin(); it != snowflakes.end(); ++it) {
 		const Game_Screen::Snowflake& f = *it;
-		if (f.life <= snowflake_visible)
-			weather_surface->Blit(f.x - f.y / 2, f.y, *rain_bitmap, rect, 96);
+		if (f.life > snowflake_visible)
+			continue;
+		weather_surface->Blit(f.x - f.y/2, f.y, *rain_bitmap, rect, 96);
 	}
+
 	dirty = true;
 }
 
 void Weather::DrawSnow() {
 	if (!snow_bitmap) {
 		snow_bitmap = Bitmap::Create(snow_image, sizeof(snow_image));
-		if (tone_effect != Tone())
+		if (tone_effect != Tone()) {
 			snow_bitmap->ToneBlit(0, 0, *snow_bitmap, snow_bitmap->GetRect(), tone_effect, Opacity::opaque);
+		}
 	}
+
 
 	static const int wobble[2][18] = {
 		{-1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0},
@@ -127,9 +157,10 @@ void Weather::DrawSnow() {
 	};
 
 	Rect rect = snow_bitmap->GetRect();
+
 	const std::vector<Game_Screen::Snowflake>& snowflakes = Main_Data::game_screen->GetSnowflakes();
-	for (std::vector<Game_Screen::Snowflake>::const_iterator it = snowflakes.begin(); it != snowflakes.end(); ++it) {
-		const Game_Screen::Snowflake& f = *it;
+
+	for (const Game_Screen::Snowflake& f : snowflakes) {
 		int x = f.x - f.y / 4;
 		int y = f.y;
 		int i = (y / 2) % 18;
@@ -137,40 +168,27 @@ void Weather::DrawSnow() {
 		y += wobble[1][i];
 		weather_surface->Blit(x, y, *snow_bitmap, rect, f.life);
 	}
+
 	dirty = true;
 }
 
 void Weather::DrawFog() {
 	static const int opacities[3] = {128, 160, 192};
-	int strength = Main_Data::game_screen->GetWeatherStrength();
-	if (strength < 0)
-		strength = 0;
-	else if (strength > 2)
-		strength = 2;
-	weather_surface->Fill(Color(128, 128, 128, opacities[strength]));
+	int opacity = opacities[Main_Data::game_screen->GetWeatherStrength()];
+
+	weather_surface->Fill(Color(128, 128, 128, opacity));
+
 	dirty = true;
 }
 
 void Weather::DrawSandstorm() {
-	static const int opacities[3] = {96, 128, 160};
-	int strength = Main_Data::game_screen->GetWeatherStrength();
-	if (strength < 0)
-		strength = 0;
-	else if (strength > 2)
-		strength = 2;
-	weather_surface->Fill(Color(192, 160, 128, opacities[strength]));
+	static const int opacities[3] = {128, 160, 192};
+	int opacity = opacities[Main_Data::game_screen->GetWeatherStrength()];
 
-	const std::vector<Game_Screen::Snowflake>& particles = Main_Data::game_screen->GetSnowflakes();
-	for (std::vector<Game_Screen::Snowflake>::const_iterator it = particles.begin(); it != particles.end(); ++it) {
-		const Game_Screen::Snowflake& particle = *it;
-		if (particle.life > 192)
-			continue;
-		const int x = (particle.x + particle.y * 2) % (SCREEN_TARGET_WIDTH + 24) - 12;
-		const int y = particle.y % SCREEN_TARGET_HEIGHT;
-		const int length = 3 + strength * 2 + (particle.life & 3);
-		const int alpha = 48 + strength * 24 + (particle.life & 31);
-		weather_surface->FillRect(Rect(x, y, length, 1), Color(240, 208, 152, alpha));
-	}
+	weather_surface->Fill(Color(192, 160, 128, opacity));
+
+	// TODO
+
 	dirty = true;
 }
 

@@ -169,12 +169,8 @@ void Game_Picture::SetWaverEffect(int depth) {
 void Game_Picture::StopEffects() {
 	RPG::SavePicture& data = GetData();
 
-	if (!data.time_left || Player::IsRPG2k3()) {
-		const bool changed = data.effect_mode != 0;
+	if (!data.time_left || Player::IsRPG2k3())
 		data.effect_mode = 0;
-		if (changed)
-			UpdateSprite();
-	}
 }
 
 void Game_Picture::SetTransition(int tenths) {
@@ -207,35 +203,35 @@ void Game_Picture::Update() {
 	if (data.name.empty())
 		return;
 
-	bool changed = false;
 	if (data.fixed_to_map) {
+		// Instead of modifying the Ox/Oy offset the real position is altered
+		// based on map scroll because of savegame compatibility with RPG_RT
+
 		if (old_map_x != Game_Map::GetDisplayX()) {
 			double mx = (old_map_x - Game_Map::GetDisplayX()) / (double)TILE_SIZE;
+
 			data.finish_x += mx;
 			data.current_x += mx;
-			changed = true;
 		}
 		if (old_map_y != Game_Map::GetDisplayY()) {
 			double my = (old_map_y - Game_Map::GetDisplayY()) / (double)TILE_SIZE;
+
 			data.finish_y += my;
 			data.current_y += my;
-			changed = true;
 		}
+
 		old_map_x = Game_Map::GetDisplayX();
 		old_map_y = Game_Map::GetDisplayY();
 	}
 
-	if (data.effect_mode == 1 && data.current_effect != 0.0) {
+	if (data.effect_mode == 1)
 		data.current_rotation += data.current_effect;
-		changed = true;
-	}
-	if (data.effect_mode == 2 && data.current_effect != 0.0) {
+	if (data.effect_mode == 2)
 		data.current_waver += 10;
-		changed = true;
-	}
 
 	if (data.time_left > 0) {
 		double k = data.time_left;
+
 		data.current_x			= interpolate(k, data.current_x,			data.finish_x);
 		data.current_y			= interpolate(k, data.current_y,			data.finish_y);
 		data.current_red		= interpolate(k, data.current_red,			data.finish_red);
@@ -246,12 +242,11 @@ void Game_Picture::Update() {
 		data.current_top_trans	= interpolate(k, data.current_top_trans,	data.finish_top_trans);
 		data.current_bot_trans	= interpolate(k, data.current_bot_trans,	data.finish_bot_trans);
 		data.current_effect		= interpolate(k, data.current_effect,		data.finish_effect);
+
 		data.time_left--;
-		changed = true;
 	}
 
-	if (changed)
-		UpdateSprite();
+	UpdateSprite();
 }
 
 RPG::SavePicture& Game_Picture::GetData() const {

@@ -20,6 +20,8 @@
 #include "RenderDamage.h"
 #include "UpstreamPlayerBridge.h"
 
+bool EasyRpgAudioEnabled();
+
 namespace {
 unsigned int gTicks = 0;
 bool gPlayerStarted = false;
