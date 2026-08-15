@@ -6,6 +6,7 @@
 #include "data.h"
 #include "inireader.h"
 #include "ldb_reader.h"
+#include "lmu_reader.h"
 #include "reader_util.h"
 #include "CoreEncoding.h"
 #include "GohuFont.h"
@@ -167,16 +168,6 @@ bool HasStrongTcvn3Evidence(const Tcvn3Evidence& evidence) {
     return evidence.mapped_bytes >= 2u && HasTcvn3Evidence(evidence);
 }
 
-bool IsMixedVietnameseSample(const std::string& input) {
-    if (input.size() < 64u)
-        return false;
-    const Tcvn3Evidence evidence = InspectTcvn3(input);
-    return evidence.ascii_letters >= 24u &&
-           evidence.mapped_bytes >= 6u &&
-           evidence.score >= 12u &&
-           evidence.ascii_letters * 3u >= input.size();
-}
-
 MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
     const Tcvn3Evidence tcvn3 = InspectTcvn3(input);
     const Cp932Evidence cp932 = InspectCp932(input);
@@ -190,6 +181,31 @@ MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
     if (cp932.multibyte_chars != 0u)
         return MixedLegacyEncoding::Cp932;
     return HasTcvn3Evidence(tcvn3) ? MixedLegacyEncoding::Tcvn3 : MixedLegacyEncoding::Cp932;
+}
+
+unsigned int CountTcvn3Lines(const std::string& input) {
+    unsigned int tcvn3_lines = 0;
+    std::string::size_type start = 0;
+    while (start < input.size()) {
+        std::string::size_type end = input.find('\n', start);
+        if (end == std::string::npos)
+            end = input.size();
+        if (end > start) {
+            const std::string line(input, start, end - start);
+            if (ClassifyMixedLegacyText(line) == MixedLegacyEncoding::Tcvn3)
+                ++tcvn3_lines;
+        }
+        start = end + 1;
+    }
+    return tcvn3_lines;
+}
+
+// Vietnamese patches keep most strings Japanese; count lines the classifier
+// reads as TCVN3 instead of relying on ASCII letter ratios.
+bool IsMixedVietnameseSample(const std::string& input) {
+    if (input.size() < 64u)
+        return false;
+    return CountTcvn3Lines(input) >= 5u;
 }
 
 void AppendUtf8(std::string& output, unsigned int codepoint) {
@@ -433,6 +449,35 @@ void PushEncoding(std::vector<std::string>& encodings, const std::string& encodi
     }
     encodings.push_back(encoding);
 }
+
+// Some patches translate only map dialogue, leaving the database Japanese.
+void AppendMapDetectionSamples(std::string& sample, const std::string& database_file) {
+    if (sample.size() >= 65536u)
+        return;
+    std::string directory;
+    const std::string::size_type slash = database_file.find_last_of("/\\");
+    if (slash != std::string::npos)
+        directory = database_file.substr(0, slash + 1);
+
+    for (unsigned int index = 1u; index <= 12u; ++index) {
+        char digits[16];
+        snprintf(digits, sizeof(digits), "%04u", index);
+        std::unique_ptr<RPG::Map> map = LMU_Reader::Load(directory + "Map" + digits + ".lmu", std::string());
+        if (!map)
+            continue;
+        for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
+             event != map->events.end(); ++event) {
+            for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
+                 page != event->pages.end(); ++page) {
+                for (std::vector<RPG::EventCommand>::const_iterator command = page->event_commands.begin();
+                     command != page->event_commands.end(); ++command)
+                    AppendDetectionSample(sample, command->string);
+            }
+        }
+        if (sample.size() >= 65536u)
+            break;
+    }
+}
 }
 
 std::string ReaderUtil::CodepageToEncoding(int codepage) {
@@ -463,8 +508,16 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
     if (sample.empty())
         return encodings;
 
-    if (IsMixedVietnameseSample(sample))
+    std::string detection_sample = sample;
+    AppendMapDetectionSamples(detection_sample, database_file);
+
+    if (IsMixedVietnameseSample(detection_sample)) {
         PushEncoding(encodings, "EASYRPG_VI_CP932");
+    }
+    if (getenv("EASYRPG_ENCODING_DEBUG")) {
+        fprintf(stderr, "[encdbg] ldb_sample=%zu full_sample=%zu tcvn3_lines=%u\n",
+                sample.size(), detection_sample.size(), CountTcvn3Lines(detection_sample));
+    }
 
     unsigned int codepage = 0;
     int confidence = 0;

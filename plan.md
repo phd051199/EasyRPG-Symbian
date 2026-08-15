@@ -540,8 +540,8 @@ Bring-up sequence:
 - [x] Ruby Marshal load, one-pass zlib inflate, ordered script evaluation
 - [x] upstream RPG data modules selected per game generation
 - [x] GCCE ARMv5 UREL compile and link for the new executable
-- [ ] packed `Game.rgssad`, `Game.rgss2a`, and `Game.rgss3a` readers
-- [ ] native Color/Tone/Rect/Table value types and serialization parity
+- [x] packed `Game.rgssad`, `Game.rgss2a`, and `Game.rgss3a` readers
+- [x] native Color/Tone/Rect/Table value types and serialization parity
 - [ ] E72 Graphics/Bitmap/Sprite/Viewport/Plane/Tilemap renderer
 - [ ] E72 key mapping and generation-specific Input behavior
 - [ ] E72 BGM/BGS/ME/SE bridge and resource lookup
@@ -552,3 +552,65 @@ Ruby 3 can host both old and newer scripts, but it does not make Ruby 1.8-era
 syntax and removed APIs automatically compatible. Compatibility shims must be
 small, test-driven, and shared in this one VM; a second Ruby version or a
 per-game executable is not permitted.
+
+### 13.1 Rewrite of the RGSS lane (M-R milestones)
+
+The lane is being reimplemented as portable code in `src/rgss/` (host-tested
+on macOS with SDL2 harness under gitignored `host/`, then ported to E72 via
+`inc/RgssHost.h` vtable), referencing mkxp-z 2.4.2 binding architecture only.
+XP first, one Ruby 3.0.7 build for all generations. Harness:
+`host/build-ruby.sh` (one-time) then `host/build.sh && host/rgss_host <dir>`.
+
+- [x] M-R1 data plane on host: Table/Color/Tone/Rect marshal bindings
+  (`src/rgss/binding/`), portable rgssad v1/v3 reader, RgssVfs, load_data /
+  save_data with UTF-8 fix, Zlib module over libz, Ruby-1.8 bootstrap,
+  module_rpg eval, Scripts inflate+eval. Verified against
+  "Littleroot Researchers" (XP): `$data_actors[1].name == "Player"` after the
+  game's own boot code ran hundreds of load_data calls. Host tests:
+  `tests/rgss_types_test.cpp`, `tests/rgss_rgssad_test.cpp`.
+  Note: `games/WitchsHeart203.store.zip` is RPG Maker 2000 (RPG_RT.ldb), not
+  XP; Littleroot is the only XP game in games/.
+- [x] M-R2 pixels on host: native Bitmap/Scene/Sprite/Viewport/Graphics
+  bindings over the RGB565 pixman core, transparent A8 bitmap semantics,
+  PNG/BMP/XYZ decode through the existing EasyRPG decoder, 640x480 ->
+  320x240 SDL present and frame pacing. Golden bitmap/compositor tests pass;
+  XP smoke probe decodes `Graphics/Maps/Blank` as 262x48 and presents a
+  native Sprite frame.
+- [x] M-R3 interactive: native Input binding over the portable repeat/dir
+  state machine, Audio binding over `RgssHostVtable` with extension/resource
+  lookup, per-frame AudioUpdate, and yielding `rgss_main`. XP host smoke
+  verifies Input queries, Audio SE dispatch, and rgss_main block execution;
+  actual E72 playback remains part of M-R5.
+- [x] M-R4 walkable-map renderer on host: native Plane/Window/Tilemap
+  bindings and cores, XP regular tiles, canonical 48-pattern autotiles plus
+  compact animated strips, priority-row scene slices interleaved with Sprite,
+  Window contents/cursor clipping, and existing Graphics transitions. Added
+  Gohu + Shinonome RGSS text rendering so Window contents are visible instead
+  of draw_text no-ops. Golden tests cover Plane scroll, Window clipping,
+  regular/autotile rendering, tile-priority/Sprite ordering, Latin/Japanese
+  text, alignment and malformed UTF-8. XP smoke constructs all three native
+  drawables and presents them; the bundled fixture itself cannot enter a map
+  because its data has no player starting position.
+- [ ] M-R5 Symbian backend: portable RGSS now builds as `EasyRpgRgss.lib`
+  through Clang ARM -> CSL assembler (`tools/build_rgss.sh`); a minimal
+  `EasyRpgRgssSupport.lib` reuses only Image/MidiLite/Gohu/Shinonome/pixman
+  objects instead of linking the full 2k/2k3 Player. `CRgssEngine` +
+  `RgssHostSymbian` provide ZIP/save overlay VFS, 320x240 RGB565 Window Server
+  present, E72 input, frame/scheduler pumping and the existing AudioBridge
+  virtual-file path. `EasyRPGScript.mmp` is rewired to the new engine and the
+  full GCCE/elf2e32/SIS build passes. Remains unchecked until a real game is
+  booted and exercised on E72 (including native audio/save/soak validation).
+- [ ] M-R6 VX/VXAce + rgssad mount in launcher + JP font atlas
+  - M-R6 progress (host-verified): encrypted `.rgssad/.rgss2a/.rgss3a`
+    generation detection is shared by launcher/host; encrypted VXA fixture mounts
+    and executes real Ruby scripts. Added inert Win32API compatibility, VFS-backed
+    `File.open/read/write/binread/binwrite/foreach/delete/rename/truncate` over the
+    read-only archive plus writable save overlay, and script-index/name/backtrace
+    diagnostics.
+  - RGSS2/3 renderer compatibility now includes Font defaults/outline/out_color,
+    VX/Ace Window padding/openness/nine-slice layout, Tilemap bitmaps/flags/passages,
+    B-E/A5 sheets, star priority, and A1-A4 floor/wall/waterfall quarter tables
+    extracted from the vendored mkxp-z reference. Golden tests cover A2 mapping and
+    A1 animation. Sprite exposes bush_opacity/wave_* plus width/height/update state.
+  - Still pending before M-R6 can be checked: actual Sprite wave/bush rendering,
+    remaining RGSS2/3 API blockers found by fixture smoke, and physical E72 validation.

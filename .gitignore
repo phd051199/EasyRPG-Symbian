@@ -76,3 +76,7 @@ Temporary Items
 /group/ABLD.BAT
 /sis/stage/
 /sis/*.sis
+
+# RGSS host (SDL2) harness - local dev only, portable runtime in src/rgss is tracked
+/host/*
+!/host/README.md

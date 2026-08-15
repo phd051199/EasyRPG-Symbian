@@ -2,8 +2,9 @@
 #include <apgcli.h>
 #include <e32base.h>
 #include <f32file.h>
+#include <fbs.h>
 
-#include "ScriptRuntime.h"
+#include "RgssEngine.h"
 
 namespace
 {
@@ -22,13 +23,23 @@ void SignalRendezvous(TInt aResult)
     }
 }
 
+void DisconnectFbs(TAny*)
+{
+    RFbsSession::Disconnect();
+}
+
 void WriteLog(RFs& aFs, const TDesC8& aMessage)
 {
     TRAP_IGNORE(
         aFs.MkDirAll(KLogDirectory);
         RFile file;
-        if (file.Replace(aFs, KLogPath, EFileWrite | EFileShareAny) == KErrNone)
+        TInt error = file.Open(aFs, KLogPath, EFileWrite | EFileShareAny);
+        if (error == KErrNotFound || error == KErrPathNotFound)
+            error = file.Replace(aFs, KLogPath, EFileWrite | EFileShareAny);
+        if (error == KErrNone)
         {
+            TInt position = 0;
+            file.Seek(ESeekEnd, position);
             file.Write(aMessage);
             file.Write(_L8("\r\n"));
             file.Close();
@@ -55,31 +66,40 @@ void LaunchMainL()
 
 void RunScriptRuntimeL()
 {
+    CActiveScheduler* scheduler = new (ELeave) CActiveScheduler;
+    CleanupStack::PushL(scheduler);
+    CActiveScheduler::Install(scheduler);
+
+    User::LeaveIfError(RFbsSession::Connect());
+    CleanupStack::PushL(TCleanupItem(DisconnectFbs, NULL));
+
     RFs fs;
     User::LeaveIfError(fs.Connect());
     CleanupClosePushL(fs);
 
     TFileName archivePath;
-    User::LeaveIfError(User::GetDesParameter(
-        KGamePathParameterSlot, archivePath));
+    User::LeaveIfError(User::GetDesParameter(KGamePathParameterSlot, archivePath));
 
-    CScriptRuntime* runtime = CScriptRuntime::NewL(fs, archivePath);
-    CleanupStack::PushL(runtime);
-    TBuf8<64> ready;
-    ready.Format(_L8("Ruby 3 ready; script generation %d"), runtime->Generation());
+    CRgssEngine* engine = CRgssEngine::NewL(fs, archivePath);
+    CleanupStack::PushL(engine);
+    TBuf8<80> ready;
+    ready.Format(_L8("RGSS host ready; generation %d"), engine->Generation());
     WriteLog(fs, ready);
     SignalRendezvous(KErrNone);
 
-    TRAPD(executeError, runtime->ExecuteL());
+    TRAPD(executeError, engine->RunL());
     if (executeError != KErrNone)
     {
-        if (runtime->LastError().Length() > 0)
-            WriteLog(fs, runtime->LastError());
+        if (engine->LastError().Length() > 0)
+            WriteLog(fs, engine->LastError());
         User::Leave(executeError);
     }
 
-    CleanupStack::PopAndDestroy(runtime);
+    CleanupStack::PopAndDestroy(engine);
     CleanupStack::PopAndDestroy(&fs);
+    CleanupStack::PopAndDestroy();
+    CActiveScheduler::Install(NULL);
+    CleanupStack::PopAndDestroy(scheduler);
     TRAP_IGNORE(LaunchMainL());
 }
 }

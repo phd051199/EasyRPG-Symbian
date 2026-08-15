@@ -116,7 +116,7 @@ int EvaluateModule(int aGeneration, char* aError, int aErrorCapacity)
         source = module_rpg3;
         length = module_rpg3_len;
     }
-    if (length == 0 || source[length - 1] != 0)
+    if (length == 0 || source[length] != 0)
         return EScriptVmCorrupt;
 
     int state = 0;
