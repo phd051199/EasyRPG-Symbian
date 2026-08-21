@@ -7,9 +7,6 @@
 enum TGameEngineVersion
 {
     EGameEngineUnknown = 0,
-    EGameEngineRpgXp = 1,
-    EGameEngineRpgVx = 2,
-    EGameEngineRpgVxAce = 3,
     EGameEngineRpg2000 = 2000,
     EGameEngineRpg2003 = 2003
 };

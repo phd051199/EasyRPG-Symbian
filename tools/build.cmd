@@ -28,7 +28,6 @@ set "PACKAGE_DEF=%SIS_DIR%\EasyRPG.pkg"
 set "STAGE_DIR=%SIS_DIR%\stage"
 set "DEVICE_EXE=EasyRPG.exe"
 set "RUNTIME_EXE=EasyRPGGame.exe"
-set "SCRIPT_RUNTIME_EXE=EasyRPGScript.exe"
 set "ICON_SOURCE=%PROJECT_DIR%\platform\symbian\resources\EasyRPG.svg"
 set "ICON_TARGET=%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.mif"
 set "ICON_TEMP=%PROJECT_DIR%\build\mif-temp"
@@ -73,13 +72,10 @@ echo Target: GCCE %EASYRPG_BUILD_TARGET%
 
 set "GCCE_EXE=%SDK_ROOT%\epoc32\release\gcce\%EASYRPG_BUILD_TARGET%\%DEVICE_EXE%"
 set "GCCE_RUNTIME_EXE=%SDK_ROOT%\epoc32\release\gcce\%EASYRPG_BUILD_TARGET%\%RUNTIME_EXE%"
-set "GCCE_SCRIPT_RUNTIME_EXE=%SDK_ROOT%\epoc32\release\gcce\%EASYRPG_BUILD_TARGET%\%SCRIPT_RUNTIME_EXE%"
 if exist "%GCCE_EXE%" del /q "%GCCE_EXE%" >nul 2>&1
 if exist "%GCCE_RUNTIME_EXE%" del /q "%GCCE_RUNTIME_EXE%" >nul 2>&1
-if exist "%GCCE_SCRIPT_RUNTIME_EXE%" del /q "%GCCE_SCRIPT_RUNTIME_EXE%" >nul 2>&1
 if exist "%GCCE_EXE%" goto stale_output_error
 if exist "%GCCE_RUNTIME_EXE%" goto stale_output_error
-if exist "%GCCE_SCRIPT_RUNTIME_EXE%" goto stale_output_error
 if exist "%SIS_OUTPUT%" del /q "%SIS_OUTPUT%" >nul 2>&1
 
 pushd "%GROUP_DIR%" >nul 2>&1
@@ -92,7 +88,6 @@ if not "%RESULT%"=="0" goto build_error
 
 if not exist "%GCCE_EXE%" goto exe_error
 if not exist "%GCCE_RUNTIME_EXE%" goto exe_error
-if not exist "%GCCE_SCRIPT_RUNTIME_EXE%" goto exe_error
 if not exist "%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.rsc" goto resource_error
 if not exist "%ICON_TARGET%" goto icon_output_error
 if not exist "%SDK_ROOT%\epoc32\data\z\private\10003a3f\apps\EasyRPG_reg.rsc" goto registration_error
@@ -104,8 +99,6 @@ if errorlevel 1 goto stage_error
 copy /b /y "%GCCE_EXE%" "%STAGE_DIR%\%DEVICE_EXE%" >nul
 if errorlevel 1 goto stage_error
 copy /b /y "%GCCE_RUNTIME_EXE%" "%STAGE_DIR%\%RUNTIME_EXE%" >nul
-if errorlevel 1 goto stage_error
-copy /b /y "%GCCE_SCRIPT_RUNTIME_EXE%" "%STAGE_DIR%\%SCRIPT_RUNTIME_EXE%" >nul
 if errorlevel 1 goto stage_error
 copy /b /y "%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.rsc" "%STAGE_DIR%\EasyRPG.rsc" >nul
 if errorlevel 1 goto stage_error

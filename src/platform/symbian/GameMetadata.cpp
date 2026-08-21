@@ -10,23 +10,6 @@ TInt DetectEngine(CZipVfs& aResources)
 {
     const TBool hasLdb = aResources.Exists(_L("RPG_RT.ldb"));
     const TBool hasLmt = aResources.Exists(_L("RPG_RT.lmt"));
-    const TBool hasXp = aResources.Exists(_L("Data/Scripts.rxdata")) ||
-                        aResources.Exists(_L("Game.rgssad"));
-    const TBool hasVx = aResources.Exists(_L("Data/Scripts.rvdata")) ||
-                        aResources.Exists(_L("Game.rgss2a"));
-    const TBool hasVxa = aResources.Exists(_L("Data/Scripts.rvdata2")) ||
-                         aResources.Exists(_L("Game.rgss3a"));
-    const TInt scriptMatches = static_cast<TInt>(hasXp) +
-                               static_cast<TInt>(hasVx) +
-                               static_cast<TInt>(hasVxa);
-    if (scriptMatches > 1 || (hasLdb && hasLmt && scriptMatches != 0))
-        return EGameEngineUnknown;
-    if (hasXp)
-        return EGameEngineRpgXp;
-    if (hasVx)
-        return EGameEngineRpgVx;
-    if (hasVxa)
-        return EGameEngineRpgVxAce;
     return hasLdb && hasLmt ? EGameEngineRpg2000 : EGameEngineUnknown;
 }
 
@@ -161,15 +144,8 @@ void ReadIniTitleL(CZipVfs& aResources,
 
 void ReadGameTitleL(CZipVfs& aResources, TInt aVersion, TDes& aTitle)
 {
-    if (aVersion == EGameEngineRpgXp ||
-        aVersion == EGameEngineRpgVx ||
-        aVersion == EGameEngineRpgVxAce)
-    {
-        _LIT8(KTitleKey, "Title=");
-        ReadIniTitleL(aResources, _L("Game.ini"), KTitleKey, aTitle);
+    if (aVersion != EGameEngineRpg2000 && aVersion != EGameEngineRpg2003)
         return;
-    }
-
     _LIT8(KGameTitleKey, "GameTitle=");
     ReadIniTitleL(aResources, _L("RPG_RT.ini"), KGameTitleKey, aTitle);
 }
@@ -204,12 +180,6 @@ void FormatGameSubtitle(RFs& aFs,
     const TInt fraction = static_cast<TInt>(tenths % 10);
     if (aVersion == EGameEngineRpg2000 || aVersion == EGameEngineRpg2003)
         aSubtitle.Format(_L("%d.%d MB (RPG Maker %d)"), whole, fraction, aVersion);
-    else if (aVersion == EGameEngineRpgXp)
-        aSubtitle.Format(_L("%d.%d MB (RPG Maker XP)"), whole, fraction);
-    else if (aVersion == EGameEngineRpgVx)
-        aSubtitle.Format(_L("%d.%d MB (RPG Maker VX)"), whole, fraction);
-    else if (aVersion == EGameEngineRpgVxAce)
-        aSubtitle.Format(_L("%d.%d MB (RPG Maker VX Ace)"), whole, fraction);
     else
-        aSubtitle.Format(_L("%d.%d MB (Unknown RPG Maker)"), whole, fraction);
+        aSubtitle.Format(_L("%d.%d MB (Unsupported)"), whole, fraction);
 }

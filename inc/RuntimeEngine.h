@@ -6,6 +6,7 @@
 #include <w32std.h>
 
 #include "FrameTimer.h"
+#include "GameMenu.h"
 
 class CRawDirectScreenAccess;
 class CDisplaySurface;
@@ -17,7 +18,8 @@ class CWsScreenDevice;
 class CZipVfs;
 
 class CRuntimeEngine : public CBase,
-                       public MFrameTimerObserver
+                       public MFrameTimerObserver,
+                       public MGameMenuHost
 {
 public:
     static CRuntimeEngine* NewL();
@@ -42,17 +44,14 @@ private:
     void ForgetDynamicScanKey(TInt aScanCode);
     void SetPlayerKeyMask(TUint32 aMask, TBool aPressed);
     void ClearPlayerInput();
-    void OpenMenu();
-    void CloseMenu();
-    void MoveMenuSelection(TInt aDelta);
-    void ActivateMenuItemL();
-    void ToggleSound();
-    void AdjustVolume(TInt aDelta);
-    void ToggleFrameSkip();
-    void TogglePerfOverlay();
-    void PersistSettings();
-    void DrawMenuOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen);
-    void DrawKeyMapOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen);
+    TUint32 GameMenuFeatures() const;
+    void GameMenuSetSoundEnabledL(TBool aEnabled);
+    void GameMenuSetVolumeL(TInt aVolume);
+    void GameMenuSetFrameSkipEnabledL(TBool aEnabled);
+    void GameMenuSetFpsEnabledL(TBool aEnabled);
+    void GameMenuPauseL(TBool aPaused);
+    void GameMenuExitL();
+    void GameMenuRequestRedraw();
     void FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame);
     void FrameError(TInt aError);
 
@@ -69,14 +68,12 @@ private:
     CWindowEventPump* iEventPump;
     CRawDirectScreenAccess* iDirectScreen;
     CPerfOverlay* iPerfOverlay;
+    CGameMenu* iGameMenu;
     TFileName iGamePath;
     TBool iDirectScreenActive;
     TBool iNeedsFullRedraw;
     TBool iForeground;
     TBool iPaused;
-    TBool iKeyMapVisible;
-    TInt iMenuSelection;
-    TBool iLeftSoftHeld;
     TBool iRightSoftHeld;
     TUint32 iHeldPlayerKeys;
     TUint32 iPendingPlayerPulses;
@@ -84,10 +81,6 @@ private:
     TUint32 iDynamicPlayerScanKeys[16];
     TInt iDynamicPlayerScanCount;
     TUint32 iDirectScreenRetryFrame;
-    TInt iMasterVolume;
-    TInt iAudibleVolume;
-    TInt iVolumeOverlayTicks;
-    TBool iVolumeOverlayErasePending;
     TBool iGameplayPriorityRaised;
     TThreadPriority iPreviousThreadPriority;
     TInt iFrameError;

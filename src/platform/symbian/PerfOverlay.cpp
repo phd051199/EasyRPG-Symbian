@@ -254,6 +254,24 @@ void CPerfOverlay::Compose(const CFbsBitmap& aFrameBitmap,
     iBitmap->UnlockHeap();
 }
 
+void CPerfOverlay::DrawInPlace(CFbsBitmap& aFrameBitmap,
+                               TInt aX,
+                               TInt aY)
+{
+    const TSize frameSize = aFrameBitmap.SizeInPixels();
+    if (aX < 0 || aY < 0 ||
+        aX + KOverlayWidth > frameSize.iWidth ||
+        aY + KOverlayHeight > frameSize.iHeight)
+        return;
+
+    aFrameBitmap.LockHeap();
+    TUint8* framePixels = reinterpret_cast<TUint8*>(aFrameBitmap.DataAddress());
+    const TInt frameStride = aFrameBitmap.DataStride();
+    if (framePixels && frameStride > 0)
+        DrawMetricsTo(framePixels, frameStride, aX, aY);
+    aFrameBitmap.UnlockHeap();
+}
+
 const CFbsBitmap& CPerfOverlay::Bitmap() const
 {
     return *iBitmap;
@@ -289,15 +307,23 @@ void CPerfOverlay::DrawMetrics()
 {
     if (!iPixels)
         return;
+    DrawMetricsTo(const_cast<TUint8*>(iPixels->Ptr()), KOverlayWidth * 2, 0, 0);
+}
 
-    TUint8* pixels = const_cast<TUint8*>(iPixels->Ptr());
-    const TInt stride = KOverlayWidth * 2;
+void CPerfOverlay::DrawMetricsTo(TUint8* aPixels,
+                                 TInt aStride,
+                                 TInt aX,
+                                 TInt aY)
+{
+    if (!aPixels || aStride <= 0)
+        return;
+
     TBuf8<32> line;
     if (iCpuPercent >= 0)
         line.Format(_L8("FPS %d CPU %d%%"), iFps, iCpuPercent);
     else
         line.Format(_L8("FPS %d CPU --%%"), iFps);
-    DrawText(pixels, stride, 2, 2, line);
+    DrawText(aPixels, aStride, aX + 2, aY + 2, line);
 
     line.Zero();
     if (iRamUsedTenthsMb >= 0 && iRamTotalTenthsMb >= 0)
@@ -312,7 +338,7 @@ void CPerfOverlay::DrawMetrics()
     {
         line.Copy(_L8("RAM --.-/--.-M"));
     }
-    DrawText(pixels, stride, 2, 10, line);
+    DrawText(aPixels, aStride, aX + 2, aY + 10, line);
 }
 
 TUint8 CPerfOverlay::GlyphRow(TUint8 aCharacter, TInt aRow)

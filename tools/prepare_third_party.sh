@@ -31,8 +31,6 @@ components=(
     pixman-0.34.0
     liblcf-0.5.0
     libcxx-4.0.1
-    ruby-3.0.7
-    mkxp-z-2.4.2
 )
 for component in "${components[@]}"; do
     prepare_component "$component"
@@ -44,7 +42,5 @@ apply_component_patch pixman-0.34.0 \
     "$PROJECT_DIR/patches/pixman-0.34.0-symbian.patch"
 apply_component_patch libcxx-4.0.1 \
     "$PROJECT_DIR/patches/libcxx-4.0.1-symbian.patch"
-apply_component_patch ruby-3.0.7 \
-    "$PROJECT_DIR/patches/ruby-3.0.7-symbian.patch"
 
 echo "Prepared patched build-only dependency trees under $WORK_DIR"

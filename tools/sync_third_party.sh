@@ -85,21 +85,11 @@ fetch_archive \
     "https://releases.llvm.org/4.0.1/libcxx-4.0.1.src.tar.xz" \
     "libcxx-4.0.1.src.tar.xz" \
     "520a1171f272c9ff82f324d5d89accadcec9bc9f3c78de11f5575cdb99accc4c"
-fetch_archive \
-    "https://cache.ruby-lang.org/pub/ruby/3.0/ruby-3.0.7.tar.gz" \
-    "ruby-3.0.7.tar.gz" \
-    "2a3411977f2850431136b0fab8ad53af09fb74df2ee2f4fb7f11b378fe034388"
-fetch_archive \
-    "https://codeload.github.com/mkxp-z/mkxp-z/tar.gz/refs/tags/v2.4.2" \
-    "mkxp-z-2.4.2.tar.gz" \
-    "4c2df25e30139678307a8d072c325dc94c01ebc024c47d51eee17dd6f2ee1aac"
 
 extract_tgz "easyrpg-player-0.5.0.tar.gz" "easyrpg-player-0.5.0"
 extract_tgz "pixman-0.34.0.tar.gz" "pixman-0.34.0"
 extract_tgz "liblcf-0.5.0.tar.gz" "liblcf-0.5.0"
 extract_txz "libcxx-4.0.1.src.tar.xz" "libcxx-4.0.1.src"
-extract_tgz "ruby-3.0.7.tar.gz" "ruby-3.0.7"
-extract_tgz "mkxp-z-2.4.2.tar.gz" "mkxp-z-2.4.2"
 
 replace_component "$IMPORT_DIR/easyrpg-player-0.5.0" \
     "easyrpg-player-0.5.0" "$MANIFEST_DIR/easyrpg-player-0.5.0.files"
@@ -109,9 +99,5 @@ replace_component "$IMPORT_DIR/liblcf-0.5.0" \
     "liblcf-0.5.0" "$MANIFEST_DIR/liblcf-0.5.0.files"
 replace_component "$IMPORT_DIR/libcxx-4.0.1.src" \
     "libcxx-4.0.1" "$MANIFEST_DIR/libcxx-4.0.1.files"
-replace_component "$IMPORT_DIR/ruby-3.0.7" \
-    "ruby-3.0.7" "$MANIFEST_DIR/ruby-3.0.7.files"
-replace_component "$IMPORT_DIR/mkxp-z-2.4.2" \
-    "mkxp-z-2.4.2" "$MANIFEST_DIR/mkxp-z-2.4.2.files"
 
 "$PROJECT_DIR/tools/verify_third_party.sh"

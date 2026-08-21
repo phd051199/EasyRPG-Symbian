@@ -70,7 +70,6 @@ void TGameLocator::AppendGameArchivesL(RFs& aFs,
 
         TBuf<KMaxFileName> displayName;
         displayName.Copy(title.Left(displayName.MaxLength()));
-
         aDisplayNames.AppendL(displayName);
         aArchivePaths.AppendL(archivePath);
     }

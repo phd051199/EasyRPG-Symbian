@@ -9,7 +9,6 @@
 
 "stage\EasyRPG.exe" - "!:\sys\bin\EasyRPG.exe"
 "stage\EasyRPGGame.exe" - "!:\sys\bin\EasyRPGGame.exe"
-"stage\EasyRPGScript.exe" - "!:\sys\bin\EasyRPGScript.exe"
 "stage\EasyRPG.rsc" - "!:\resource\apps\EasyRPG.rsc"
 "stage\EasyRPG.mif" - "!:\resource\apps\EasyRPG.mif"
 "stage\EasyRPG_reg.rsc" - "!:\private\10003a3f\import\apps\EasyRPG_reg.rsc"

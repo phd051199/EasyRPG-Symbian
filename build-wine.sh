@@ -111,9 +111,6 @@ if [[ $PROFILE != clean ]]; then
     EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
     EASYRPG_WINE_BIN="$WINE_BIN" \
         bash "$PROJECT_DIR/tools/build_player.sh" "$PROFILE"
-    EASYRPG_SYMBIAN_SDK_ROOT="$SDK_HOST_ROOT" \
-    EASYRPG_WINE_BIN="$WINE_BIN" \
-        bash "$PROJECT_DIR/tools/build_ruby3.sh" "$PROFILE"
 fi
 
 exec "$WINE_BIN" cmd.exe /d /s /c \

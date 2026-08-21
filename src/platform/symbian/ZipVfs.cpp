@@ -299,13 +299,6 @@ void CZipVfs::ResolveProjectRootL()
 {
     _LIT(KDatabaseName, "RPG_RT.ldb");
     _LIT(KTreeName, "RPG_RT.lmt");
-    _LIT(KGameIniName, "Game.ini");
-    _LIT(KXpScriptsName, "Data/Scripts.rxdata");
-    _LIT(KVxScriptsName, "Data/Scripts.rvdata");
-    _LIT(KVxaScriptsName, "Data/Scripts.rvdata2");
-    _LIT(KXpArchiveName, "Game.rgssad");
-    _LIT(KVxArchiveName, "Game.rgss2a");
-    _LIT(KVxaArchiveName, "Game.rgss3a");
 
     TInt index = 0;
     for (index = 0; index < iEntries.Count(); ++index)
@@ -330,68 +323,6 @@ void CZipVfs::ResolveProjectRootL()
         treePath.Append(KTreeName);
 
         if (FindFullPath(treePath))
-        {
-            iProjectPrefix = prefix;
-            CleanupStack::Pop(prefix);
-            return;
-        }
-        CleanupStack::PopAndDestroy(prefix);
-    }
-
-    for (index = 0; index < iEntries.Count(); ++index)
-    {
-        TFileName path;
-        DecodeEntryPathL(iEntries[index], path);
-        if (!PathEndsWith(path, KGameIniName))
-            continue;
-
-        const TInt prefixLength = path.Length() - KGameIniName().Length();
-        if (prefixLength > 0 && path[prefixLength - 1] != '/')
-            continue;
-
-        HBufC* prefix = path.Left(prefixLength).AllocLC();
-        TFileName scriptsPath;
-        if (prefix->Length() + KVxaScriptsName().Length() > scriptsPath.MaxLength())
-        {
-            CleanupStack::PopAndDestroy(prefix);
-            continue;
-        }
-
-        scriptsPath.Copy(*prefix);
-        scriptsPath.Append(KXpScriptsName);
-        TBool found = FindFullPath(scriptsPath) != NULL;
-        if (!found)
-        {
-            scriptsPath.Copy(*prefix);
-            scriptsPath.Append(KVxScriptsName);
-            found = FindFullPath(scriptsPath) != NULL;
-        }
-        if (!found)
-        {
-            scriptsPath.Copy(*prefix);
-            scriptsPath.Append(KVxaScriptsName);
-            found = FindFullPath(scriptsPath) != NULL;
-        }
-        if (!found)
-        {
-            scriptsPath.Copy(*prefix);
-            scriptsPath.Append(KXpArchiveName);
-            found = FindFullPath(scriptsPath) != NULL;
-        }
-        if (!found)
-        {
-            scriptsPath.Copy(*prefix);
-            scriptsPath.Append(KVxArchiveName);
-            found = FindFullPath(scriptsPath) != NULL;
-        }
-        if (!found)
-        {
-            scriptsPath.Copy(*prefix);
-            scriptsPath.Append(KVxaArchiveName);
-            found = FindFullPath(scriptsPath) != NULL;
-        }
-
-        if (found)
         {
             iProjectPrefix = prefix;
             CleanupStack::Pop(prefix);

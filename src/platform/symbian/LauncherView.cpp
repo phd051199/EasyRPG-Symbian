@@ -241,26 +241,29 @@ void CLauncherView::BuildGameListL()
 
     CDesCArrayFlat* displayNames = new (ELeave) CDesCArrayFlat(16);
     CleanupStack::PushL(displayNames);
-    TGameLocator::ListGameArchivesL(iFs, *displayNames, *iArchivePaths);
+    CDesCArrayFlat* sourcePaths = new (ELeave) CDesCArrayFlat(16);
+    CleanupStack::PushL(sourcePaths);
 
+    TGameLocator::ListGameArchivesL(iFs, *displayNames, *sourcePaths);
     for (TInt index = 0; index < displayNames->Count(); ++index)
     {
         TBuf<KMaxFileName> title;
         CopyListText((*displayNames)[index], title);
-
         TInt version = EGameEngineUnknown;
         TRAP_IGNORE(ReadGameMetadataL(iFs,
-                                      (*iArchivePaths)[index],
+                                      (*sourcePaths)[index],
                                       title,
                                       version));
-        User::LeaveIfError(iEngineVersions.Append(version));
+        if (version != EGameEngineRpg2000 && version != EGameEngineRpg2003)
+            continue;
 
         TBuf<64> subtitle;
-        FormatGameSubtitle(iFs, (*iArchivePaths)[index], version, subtitle);
-
+        FormatGameSubtitle(iFs, (*sourcePaths)[index], version, subtitle);
         TBuf<KMaxFileName + 80> item;
         item.Format(KDoubleListItemFormat, &title, &subtitle);
         iListItems->AppendL(item);
+        iArchivePaths->AppendL((*sourcePaths)[index]);
+        User::LeaveIfError(iEngineVersions.Append(version));
     }
 
     if (iListItems->Count() == 0)
@@ -270,9 +273,11 @@ void CLauncherView::BuildGameListL()
         iListItems->AppendL(item);
     }
 
+    CleanupStack::PopAndDestroy(sourcePaths);
     CleanupStack::PopAndDestroy(displayNames);
     iListBox->HandleItemAdditionL();
-    iListBox->SetCurrentItemIndex(0);
+    if (iArchivePaths->Count() > 0)
+        iListBox->SetCurrentItemIndex(0);
 }
 
 void CLauncherView::ShowLoadingDialogL()
@@ -308,28 +313,20 @@ void CLauncherView::DismissLoadingDialog()
     iLoadingDialog = NULL;
 }
 
-void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion)
+void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath)
 {
     _LIT(KEasyRpgRuntime, "EasyRPGGame.exe");
-    _LIT(KEasyRpgScriptRuntime, "EasyRPGScript.exe");
-    const TDesC* executable = NULL;
-    if (aVersion == EGameEngineRpg2000 ||
-        aVersion == EGameEngineRpg2003)
-        executable = &KEasyRpgRuntime;
-    else if (aVersion == EGameEngineRpgXp ||
-             aVersion == EGameEngineRpgVx ||
-             aVersion == EGameEngineRpgVxAce)
-        executable = &KEasyRpgScriptRuntime;
-    else
-        User::Leave(KErrNotSupported);
 
     const TFileName currentExecutable = RProcess().FileName();
     const TParsePtrC currentParse(currentExecutable);
     TFileName executablePath(currentParse.DriveAndPath());
-    executablePath.Append(*executable);
+    if (executablePath.Length() + KEasyRpgRuntime().Length() > executablePath.MaxLength())
+        User::Leave(KErrTooBig);
+    executablePath.Append(KEasyRpgRuntime);
 
     if (!iLaunchWatcher)
         User::Leave(KErrNotReady);
+
     iLaunchWatcher->StartL(executablePath, aArchivePath);
 }
 
@@ -341,10 +338,14 @@ void CLauncherView::PlaySelectedGameL()
     if (index < 0 || index >= iArchivePaths->Count() ||
         index >= iEngineVersions.Count())
         return;
+    if (iEngineVersions[index] != EGameEngineRpg2000 &&
+        iEngineVersions[index] != EGameEngineRpg2003)
+        User::Leave(KErrCorrupt);
+
     iLaunching = ETrue;
     TRAPD(error,
         ShowLoadingDialogL();
-        LaunchArchiveL((*iArchivePaths)[index], iEngineVersions[index]);
+        LaunchArchiveL((*iArchivePaths)[index]);
     );
     if (error != KErrNone)
     {

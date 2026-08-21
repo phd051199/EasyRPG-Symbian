@@ -17,126 +17,6 @@ namespace
 {
 const TInt KGameWidth = 320;
 const TInt KGameHeight = 240;
-const TInt KDefaultMasterVolume = 50;
-const TInt KVolumeStep = 10;
-_LIT(KSettingsDirectory, "C:\\Data\\EasyRPG\\");
-_LIT(KSettingsPath, "C:\\Data\\EasyRPG\\settings.ini");
-_LIT8(KMasterVolumeSetting, "master_volume=");
-_LIT8(KSoundSetting, "sound_enabled=");
-_LIT8(KFrameSkipSetting, "frameskip_enabled=");
-_LIT8(KFpsSetting, "fps_enabled=");
-
-enum TGameMenuItem
-{
-    EGameMenuSound = 0,
-    EGameMenuVolume,
-    EGameMenuFrameSkip,
-    EGameMenuFps,
-    EGameMenuKeys,
-    EGameMenuExit,
-    EGameMenuItemCount
-};
-
-TInt ClampVolume(TInt aVolume)
-{
-    if (aVolume < 0)
-        return 0;
-    if (aVolume > 100)
-        return 100;
-    return aVolume;
-}
-
-struct TRuntimeSettings
-{
-    TInt iVolume;
-    TBool iSoundEnabled;
-    TBool iFrameSkipEnabled;
-    TBool iFpsEnabled;
-};
-
-TBool ReadSettingInt(const TDesC8& aData, const TDesC8& aKey, TInt& aValue)
-{
-    const TInt keyPosition = aData.Find(aKey);
-    if (keyPosition < 0)
-        return EFalse;
-
-    TInt position = keyPosition + aKey.Length();
-    TInt value = 0;
-    TBool hasDigit = EFalse;
-    while (position < aData.Length())
-    {
-        const TUint8 character = aData[position++];
-        if (character < '0' || character > '9')
-            break;
-        hasDigit = ETrue;
-        value = value * 10 + character - '0';
-    }
-    if (!hasDigit)
-        return EFalse;
-    aValue = value;
-    return ETrue;
-}
-
-TRuntimeSettings LoadSettings(RFs& aFs)
-{
-    TRuntimeSettings settings;
-    settings.iVolume = KDefaultMasterVolume;
-    settings.iSoundEnabled = ETrue;
-    settings.iFrameSkipEnabled = ETrue;
-    settings.iFpsEnabled = ETrue;
-
-    RFile file;
-    if (file.Open(aFs, KSettingsPath, EFileRead | EFileShareReadersOnly) != KErrNone)
-        return settings;
-
-    TBuf8<256> data;
-    const TInt error = file.Read(data);
-    file.Close();
-    if (error != KErrNone)
-        return settings;
-
-    TInt value = 0;
-    const TBool hasVolume = ReadSettingInt(data, KMasterVolumeSetting, value);
-    if (hasVolume)
-        settings.iVolume = ClampVolume(value);
-
-    if (ReadSettingInt(data, KSoundSetting, value))
-        settings.iSoundEnabled = value != 0;
-    else if (hasVolume)
-        settings.iSoundEnabled = settings.iVolume > 0;
-
-    if (ReadSettingInt(data, KFrameSkipSetting, value))
-        settings.iFrameSkipEnabled = value != 0;
-    if (ReadSettingInt(data, KFpsSetting, value))
-        settings.iFpsEnabled = value != 0;
-
-    if (settings.iVolume <= 0)
-        settings.iVolume = KDefaultMasterVolume;
-    return settings;
-}
-
-void SaveSettings(RFs& aFs,
-                  TInt aVolume,
-                  TBool aSoundEnabled,
-                  TBool aFrameSkipEnabled,
-                  TBool aFpsEnabled)
-{
-    const TInt directoryError = aFs.MkDirAll(KSettingsDirectory);
-    if (directoryError != KErrNone && directoryError != KErrAlreadyExists)
-        return;
-
-    RFile file;
-    if (file.Replace(aFs, KSettingsPath, EFileWrite | EFileShareExclusive) != KErrNone)
-        return;
-    TBuf8<128> data;
-    data.Format(_L8("master_volume=%d\nsound_enabled=%d\nframeskip_enabled=%d\nfps_enabled=%d\n"),
-                ClampVolume(aVolume),
-                aSoundEnabled ? 1 : 0,
-                aFrameSkipEnabled ? 1 : 0,
-                aFpsEnabled ? 1 : 0);
-    file.Write(data);
-    file.Close();
-}
 
 TBool RectsOverlap(const TRect& aFirst, const TRect& aSecond)
 {
@@ -144,101 +24,6 @@ TBool RectsOverlap(const TRect& aFirst, const TRect& aSecond)
         aSecond.iTl.iX < aFirst.iBr.iX &&
         aFirst.iTl.iY < aSecond.iBr.iY &&
         aSecond.iTl.iY < aFirst.iBr.iY;
-}
-
-const TUint8 KSmallDigits[10][7] =
-{
-    {14, 17, 19, 21, 25, 17, 14},
-    {4, 12, 4, 4, 4, 4, 14},
-    {14, 17, 1, 2, 4, 8, 31},
-    {30, 1, 1, 14, 1, 1, 30},
-    {2, 6, 10, 18, 31, 2, 2},
-    {31, 16, 16, 30, 1, 1, 30},
-    {14, 16, 16, 30, 17, 17, 14},
-    {31, 1, 2, 4, 8, 8, 8},
-    {14, 17, 17, 14, 17, 17, 14},
-    {14, 17, 17, 15, 1, 1, 14}
-};
-
-const TUint8 KSmallLetters[26][7] =
-{
-    {14, 17, 17, 31, 17, 17, 17},
-    {30, 17, 17, 30, 17, 17, 30},
-    {14, 17, 16, 16, 16, 17, 14},
-    {30, 17, 17, 17, 17, 17, 30},
-    {31, 16, 16, 30, 16, 16, 31},
-    {31, 16, 16, 30, 16, 16, 16},
-    {14, 17, 16, 23, 17, 17, 15},
-    {17, 17, 17, 31, 17, 17, 17},
-    {14, 4, 4, 4, 4, 4, 14},
-    {7, 2, 2, 2, 18, 18, 12},
-    {17, 18, 20, 24, 20, 18, 17},
-    {16, 16, 16, 16, 16, 16, 31},
-    {17, 27, 21, 21, 17, 17, 17},
-    {17, 25, 21, 19, 17, 17, 17},
-    {14, 17, 17, 17, 17, 17, 14},
-    {30, 17, 17, 30, 16, 16, 16},
-    {14, 17, 17, 17, 21, 18, 13},
-    {30, 17, 17, 30, 20, 18, 17},
-    {15, 16, 16, 14, 1, 1, 30},
-    {31, 4, 4, 4, 4, 4, 4},
-    {17, 17, 17, 17, 17, 17, 14},
-    {17, 17, 17, 17, 17, 10, 4},
-    {17, 17, 17, 21, 21, 21, 10},
-    {17, 17, 10, 4, 10, 17, 17},
-    {17, 17, 10, 4, 4, 4, 4},
-    {31, 1, 2, 4, 8, 16, 31}
-};
-
-TUint8 SmallGlyphRow(TUint8 aCharacter, TInt aRow)
-{
-    if (aRow < 0 || aRow >= 7)
-        return 0;
-    if (aCharacter >= 'a' && aCharacter <= 'z')
-        aCharacter = static_cast<TUint8>(aCharacter - 'a' + 'A');
-    if (aCharacter >= '0' && aCharacter <= '9')
-        return KSmallDigits[aCharacter - '0'][aRow];
-    if (aCharacter >= 'A' && aCharacter <= 'Z')
-        return KSmallLetters[aCharacter - 'A'][aRow];
-
-    static const TUint8 slash[7] = {1, 2, 2, 4, 8, 8, 16};
-    static const TUint8 plus[7] = {0, 4, 4, 31, 4, 4, 0};
-    static const TUint8 minus[7] = {0, 0, 0, 31, 0, 0, 0};
-    static const TUint8 multiply[7] = {0, 17, 10, 4, 10, 17, 0};
-    static const TUint8 period[7] = {0, 0, 0, 0, 0, 12, 12};
-    static const TUint8 colon[7] = {0, 12, 12, 0, 12, 12, 0};
-    static const TUint8 percent[7] = {17, 2, 4, 4, 8, 16, 17};
-
-    switch (aCharacter)
-    {
-    case '/': return slash[aRow];
-    case '+': return plus[aRow];
-    case '-': return minus[aRow];
-    case '*': return multiply[aRow];
-    case '.': return period[aRow];
-    case ':': return colon[aRow];
-    case '%': return percent[aRow];
-    default: return 0;
-    }
-}
-
-void DrawSmallBitmapText(CFbsBitGc& aGc,
-                         TInt aX,
-                         TInt aY,
-                         const TDesC8& aText)
-{
-    for (TInt index = 0; index < aText.Length(); ++index)
-    {
-        for (TInt row = 0; row < 7; ++row)
-        {
-            const TUint8 bits = SmallGlyphRow(aText[index], row);
-            for (TInt column = 0; column < 5; ++column)
-            {
-                if ((bits & (1u << (4 - column))) != 0)
-                    aGc.DrawRect(TRect(TPoint(aX + index * 6 + column, aY + row), TSize(1, 1)));
-            }
-        }
-    }
 }
 
 }
@@ -410,22 +195,16 @@ CRuntimeEngine::CRuntimeEngine()
       iEventPump(NULL),
       iDirectScreen(NULL),
       iPerfOverlay(NULL),
+      iGameMenu(NULL),
       iDirectScreenActive(EFalse),
       iNeedsFullRedraw(ETrue),
       iForeground(ETrue),
       iPaused(EFalse),
-      iKeyMapVisible(EFalse),
-      iMenuSelection(EGameMenuSound),
-      iLeftSoftHeld(EFalse),
       iRightSoftHeld(EFalse),
       iHeldPlayerKeys(0),
       iPendingPlayerPulses(0),
       iDynamicPlayerScanCount(0),
       iDirectScreenRetryFrame(0),
-      iMasterVolume(KDefaultMasterVolume),
-      iAudibleVolume(KDefaultMasterVolume),
-      iVolumeOverlayTicks(0),
-      iVolumeOverlayErasePending(EFalse),
       iGameplayPriorityRaised(EFalse),
       iPreviousThreadPriority(EPriorityNormal),
       iFrameError(KErrNone)
@@ -440,11 +219,6 @@ void CRuntimeEngine::ConstructL()
         User::CommandLine(iGamePath);
     if (iGamePath.Length() <= 0)
         User::Leave(KErrArgument);
-    const TRuntimeSettings settings = LoadSettings(iFs);
-    iAudibleVolume = settings.iVolume;
-    iMasterVolume = settings.iSoundEnabled ? settings.iVolume : 0;
-    EasyRpgAudioSetEnabled(settings.iSoundEnabled ? 1 : 0);
-    EasyRpgAudioSetMasterVolume(iMasterVolume);
 
     User::LeaveIfError(iWs.Connect(iFs));
     iScreenDevice = new (ELeave) CWsScreenDevice(iWs);
@@ -469,11 +243,9 @@ void CRuntimeEngine::ConstructL()
     iDisplaySurface = CDisplaySurface::NewL(TSize(KGameWidth, KGameHeight));
     iResources = CZipVfs::OpenL(iFs, iGamePath);
     iRuntime = CPlayerRuntime::NewL(iResources, iGamePath, *iDisplaySurface);
-    if (settings.iFpsEnabled)
-        iPerfOverlay = CPerfOverlay::NewL();
     iEventPump = CWindowEventPump::NewL(iWs, *this);
     iFrameTimer = CFrameTimer::NewL(*this);
-    iFrameTimer->SetFrameSkipEnabled(settings.iFrameSkipEnabled);
+    iGameMenu = CGameMenu::NewL(*this, iFs);
     RaisePriority();
 }
 
@@ -494,6 +266,8 @@ CRuntimeEngine::~CRuntimeEngine()
     iResources = NULL;
     delete iPerfOverlay;
     iPerfOverlay = NULL;
+    delete iGameMenu;
+    iGameMenu = NULL;
     delete iDisplaySurface;
     iDisplaySurface = NULL;
     if (iWindow)
@@ -647,13 +421,8 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
         iPerfOverlay->ClearDirty();
     }
 
-    if (iPaused)
-    {
-        if (iKeyMapVisible)
-            DrawKeyMapOverlayL(*gc, *screen);
-        else
-            DrawMenuOverlayL(*gc, *screen);
-    }
+    if (iGameMenu && iGameMenu->IsOpen())
+        iGameMenu->DrawL(*gc, *screen);
 
     screen->Update();
 }
@@ -684,282 +453,74 @@ void CRuntimeEngine::RestorePriority()
     iGameplayPriorityRaised = EFalse;
 }
 
-void CRuntimeEngine::OpenMenu()
+TUint32 CRuntimeEngine::GameMenuFeatures() const
 {
-    if (iPaused || !iRuntime)
-        return;
-    const TBool leftSoftHeld = iLeftSoftHeld;
-    ClearPlayerInput();
-    iLeftSoftHeld = leftSoftHeld;
-    iPaused = ETrue;
-    iKeyMapVisible = EFalse;
-    iRuntime->Suspend();
-    iNeedsFullRedraw = ETrue;
-    if (!iDirectScreenActive)
-        TRAP_IGNORE(StartDirectScreenL());
-    if (iDirectScreenActive)
-        TRAP_IGNORE(PresentDirectL(ETrue));
+    return EGameMenuFeatureSound |
+           EGameMenuFeatureVolume |
+           EGameMenuFeatureFrameSkip |
+           EGameMenuFeatureFps |
+           EGameMenuFeatureKeys;
 }
 
-void CRuntimeEngine::CloseMenu()
+void CRuntimeEngine::GameMenuSetSoundEnabledL(TBool aEnabled)
 {
-    if (!iPaused || !iRuntime)
-        return;
-    const TBool rightSoftHeld = iRightSoftHeld;
-    iKeyMapVisible = EFalse;
-    iPaused = EFalse;
-    ClearPlayerInput();
-    iRightSoftHeld = rightSoftHeld;
-    iRuntime->Resume();
-    iNeedsFullRedraw = ETrue;
-    if (!iDirectScreenActive)
-        TRAP_IGNORE(StartDirectScreenL());
-    if (iDirectScreenActive)
-        TRAP_IGNORE(PresentDirectL(ETrue));
-}
-
-void CRuntimeEngine::MoveMenuSelection(TInt aDelta)
-{
-    if (!iPaused || iKeyMapVisible)
-        return;
-    iMenuSelection += aDelta;
-    while (iMenuSelection < 0)
-        iMenuSelection += EGameMenuItemCount;
-    while (iMenuSelection >= EGameMenuItemCount)
-        iMenuSelection -= EGameMenuItemCount;
-    if (iDirectScreenActive)
-        TRAP_IGNORE(PresentDirectL(ETrue));
-}
-
-void CRuntimeEngine::ActivateMenuItemL()
-{
-    if (!iPaused || iKeyMapVisible)
-        return;
-    switch (iMenuSelection)
-    {
-    case EGameMenuSound:
-        ToggleSound();
-        break;
-    case EGameMenuVolume:
-        AdjustVolume(KVolumeStep);
-        break;
-    case EGameMenuFrameSkip:
-        ToggleFrameSkip();
-        break;
-    case EGameMenuFps:
-        TogglePerfOverlay();
-        break;
-    case EGameMenuKeys:
-        iKeyMapVisible = ETrue;
-        break;
-    case EGameMenuExit:
-        if (iFrameTimer)
-            iFrameTimer->Stop();
-        return;
-    default:
-        break;
-    }
-    if (iDirectScreenActive)
-        PresentDirectL(ETrue);
-}
-
-void CRuntimeEngine::ToggleSound()
-{
-    if (iMasterVolume > 0)
-    {
-        iAudibleVolume = iMasterVolume;
-        iMasterVolume = 0;
-        EasyRpgAudioSetMasterVolume(0);
-        EasyRpgAudioSetEnabled(0);
-    }
-    else
-    {
-        if (iAudibleVolume <= 0)
-            iAudibleVolume = KDefaultMasterVolume;
-        iMasterVolume = iAudibleVolume;
-        EasyRpgAudioSetEnabled(1);
-        EasyRpgAudioSetMasterVolume(iMasterVolume);
+    EasyRpgAudioSetEnabled(aEnabled ? 1 : 0);
+    if (aEnabled)
         EasyRpgUpstreamPlayerRefreshAudio();
-    }
-    PersistSettings();
 }
 
-void CRuntimeEngine::AdjustVolume(TInt aDelta)
+void CRuntimeEngine::GameMenuSetVolumeL(TInt aVolume)
 {
-    if (iMasterVolume > 0)
+    EasyRpgAudioSetMasterVolume(aVolume);
+}
+
+void CRuntimeEngine::GameMenuSetFrameSkipEnabledL(TBool aEnabled)
+{
+    if (iFrameTimer)
+        iFrameTimer->SetFrameSkipEnabled(aEnabled);
+}
+
+void CRuntimeEngine::GameMenuSetFpsEnabledL(TBool aEnabled)
+{
+    if (aEnabled)
     {
-        iMasterVolume = ClampVolume(iMasterVolume + aDelta);
-        iAudibleVolume = iMasterVolume;
-        EasyRpgAudioSetMasterVolume(iMasterVolume);
+        if (!iPerfOverlay)
+            iPerfOverlay = CPerfOverlay::NewL();
     }
     else
-    {
-        iAudibleVolume = ClampVolume(iAudibleVolume + aDelta);
-    }
-    PersistSettings();
-}
-
-void CRuntimeEngine::ToggleFrameSkip()
-{
-    if (!iFrameTimer)
-        return;
-    iFrameTimer->SetFrameSkipEnabled(!iFrameTimer->FrameSkipEnabled());
-    PersistSettings();
-}
-
-void CRuntimeEngine::TogglePerfOverlay()
-{
-    if (iPerfOverlay)
     {
         delete iPerfOverlay;
         iPerfOverlay = NULL;
     }
-    else
-    {
-        TRAP_IGNORE(iPerfOverlay = CPerfOverlay::NewL());
-    }
     iNeedsFullRedraw = ETrue;
-    PersistSettings();
 }
 
-void CRuntimeEngine::PersistSettings()
+void CRuntimeEngine::GameMenuPauseL(TBool aPaused)
 {
-    const TInt volume = iAudibleVolume > 0 ? iAudibleVolume : KDefaultMasterVolume;
-    const TBool frameSkipEnabled = iFrameTimer ? iFrameTimer->FrameSkipEnabled() : ETrue;
-    SaveSettings(iFs,
-                 volume,
-                 iMasterVolume > 0,
-                 frameSkipEnabled,
-                 iPerfOverlay != NULL);
+    if (!iRuntime || iPaused == aPaused)
+        return;
+    ClearPlayerInput();
+    iPaused = aPaused;
+    if (aPaused)
+        iRuntime->Suspend();
+    else
+        iRuntime->Resume();
+    iNeedsFullRedraw = ETrue;
+    if (!iDirectScreenActive)
+        TRAP_IGNORE(StartDirectScreenL());
 }
 
-void CRuntimeEngine::DrawMenuOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen)
+void CRuntimeEngine::GameMenuExitL()
 {
-    const TSize screenSize = aScreen.SizeInPixels();
-    const TInt panelWidth = Min(156, Max(1, screenSize.iWidth - 12));
-    const TInt panelHeight = Min(116, Max(1, screenSize.iHeight - 12));
-    const TPoint origin(0, screenSize.iHeight - panelHeight);
-    const TRect panel(origin, TSize(panelWidth, panelHeight));
-
-    aGc.SetPenStyle(CGraphicsContext::ESolidPen);
-    aGc.SetPenColor(TRgb(255, 255, 255));
-    aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
-    aGc.SetBrushColor(TRgb(0, 0, 0));
-    aGc.DrawRect(panel);
-
-    aGc.SetPenStyle(CGraphicsContext::ENullPen);
-    aGc.SetBrushColor(TRgb(255, 255, 255));
-    DrawSmallBitmapText(aGc, panel.iTl.iX + 7, panel.iTl.iY + 6, _L8("MENU"));
-
-    const TInt rowX = panel.iTl.iX + 5;
-    const TInt rowWidth = panelWidth - 10;
-    const TInt firstY = panel.iTl.iY + 19;
-    const TInt rowStep = 11;
-    for (TInt item = 0; item < EGameMenuItemCount; ++item)
-    {
-        TBuf8<28> text;
-        switch (item)
-        {
-        case EGameMenuSound:
-            text.Copy(iMasterVolume > 0 ? _L8("SOUND ON") : _L8("SOUND OFF"));
-            break;
-        case EGameMenuVolume:
-            text.Format(_L8("VOLUME %d%%"), iMasterVolume);
-            break;
-        case EGameMenuFrameSkip:
-            text.Copy(iFrameTimer && iFrameTimer->FrameSkipEnabled()
-                ? _L8("FRAMESKIP AUTO")
-                : _L8("FRAMESKIP OFF"));
-            break;
-        case EGameMenuFps:
-            text.Copy(iPerfOverlay ? _L8("FPS ON") : _L8("FPS OFF"));
-            break;
-        case EGameMenuKeys:
-            text.Copy(_L8("KEYS"));
-            break;
-        case EGameMenuExit:
-            text.Copy(_L8("EXIT"));
-            break;
-        default:
-            text.Zero();
-            break;
-        }
-
-        const TInt y = firstY + item * rowStep;
-        if (item == iMenuSelection)
-        {
-            aGc.SetBrushColor(TRgb(255, 255, 255));
-            aGc.DrawRect(TRect(TPoint(rowX, y - 2), TSize(rowWidth, 10)));
-            aGc.SetBrushColor(TRgb(0, 0, 0));
-            DrawSmallBitmapText(aGc, rowX + 4, y, text);
-            aGc.SetBrushColor(TRgb(255, 255, 255));
-        }
-        else
-        {
-            DrawSmallBitmapText(aGc, rowX + 4, y, text);
-        }
-    }
-
-    DrawSmallBitmapText(aGc,
-                        panel.iTl.iX + 7,
-                        panel.iBr.iY - 10,
-                        _L8("SELECT"));
-    DrawSmallBitmapText(aGc,
-                        panel.iBr.iX - 31,
-                        panel.iBr.iY - 10,
-                        _L8("BACK"));
+    if (iFrameTimer)
+        iFrameTimer->Stop();
 }
 
-void CRuntimeEngine::DrawKeyMapOverlayL(CFbsBitGc& aGc, CFbsScreenDevice& aScreen)
+void CRuntimeEngine::GameMenuRequestRedraw()
 {
-    CFont* font = NULL;
-    User::LeaveIfError(aScreen.GetNearestFontInPixels(font, TFontSpec(_L("Series 60 Sans"), 11)));
-    if (!font)
-        User::Leave(KErrNotFound);
-
-    const TSize screenSize = aScreen.SizeInPixels();
-    const TInt panelWidth = Min(304, Max(1, screenSize.iWidth - 12));
-    const TInt panelHeight = Min(156, Max(1, screenSize.iHeight - 12));
-    const TPoint origin((screenSize.iWidth - panelWidth) / 2,
-                        (screenSize.iHeight - panelHeight) / 2);
-    const TRect panel(origin, TSize(panelWidth, panelHeight));
-
-    aGc.SetPenStyle(CGraphicsContext::ESolidPen);
-    aGc.SetPenColor(TRgb(255, 255, 255));
-    aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
-    aGc.SetBrushColor(TRgb(0, 0, 0));
-    aGc.DrawRect(panel);
-    aGc.UseFont(font);
-    aGc.SetBrushStyle(CGraphicsContext::ENullBrush);
-    aGc.SetPenColor(TRgb(255, 255, 255));
-
-    const TInt leftX = panel.iTl.iX + 8;
-    const TInt rightX = panel.iTl.iX + panelWidth / 2 + 4;
-    TInt leftY = panel.iTl.iY + 16;
-    TInt rightY = leftY;
-    const TInt step = 18;
-    aGc.DrawText(_L("UP/W -> UP"), TPoint(leftX, leftY));
-    leftY += step;
-    aGc.DrawText(_L("DOWN/S -> DOWN"), TPoint(leftX, leftY));
-    leftY += step;
-    aGc.DrawText(_L("LEFT/A -> LEFT"), TPoint(leftX, leftY));
-    leftY += step;
-    aGc.DrawText(_L("RIGHT/D -> RIGHT"), TPoint(leftX, leftY));
-    leftY += step;
-    aGc.DrawText(_L("CENTER/Z -> OK"), TPoint(leftX, leftY));
-
-    aGc.DrawText(_L("R SOFT -> BACK"), TPoint(rightX, rightY));
-    rightY += step;
-    aGc.DrawText(_L("SHIFT -> SHIFT"), TPoint(rightX, rightY));
-    rightY += step;
-    aGc.DrawText(_L("0-9 -> NUMBER"), TPoint(rightX, rightY));
-    rightY += step;
-    aGc.DrawText(_L("+-*/. -> OPERATOR"), TPoint(rightX, rightY));
-
-    aGc.DrawText(_L("CENTER/BACK -> MENU"),
-                 TPoint(panel.iTl.iX + 8, panel.iBr.iY - 8));
-    aGc.DiscardFont();
-    aScreen.ReleaseFont(font);
+    iNeedsFullRedraw = ETrue;
+    if (iDirectScreenActive)
+        TRAP_IGNORE(PresentDirectL(ETrue));
 }
 
 TUint32 CRuntimeEngine::MapScanKey(const TKeyEvent& aKey) const
@@ -1096,7 +657,6 @@ void CRuntimeEngine::ClearPlayerInput()
     iHeldPlayerKeys = 0;
     iPendingPlayerPulses = 0;
     iDynamicPlayerScanCount = 0;
-    iLeftSoftHeld = EFalse;
     iRightSoftHeld = EFalse;
     if (iRuntime)
         iRuntime->ReleaseAllKeys();
@@ -1104,71 +664,23 @@ void CRuntimeEngine::ClearPlayerInput()
 
 void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 {
-    const TBool leftSoft = aKey.iScanCode == EStdKeyDevice0 || aKey.iCode == EKeyDevice0;
     const TBool rightSoft = aKey.iScanCode == EStdKeyDevice1 || aKey.iCode == EKeyDevice1;
 
-    if (leftSoft)
+    TBool menuConsumed = EFalse;
+    if (iGameMenu)
     {
-        TBool trigger = EFalse;
-        if (aType == EEventKeyDown)
+        TRAPD(menuError, menuConsumed = iGameMenu->HandleKeyEventL(aType, aKey));
+        if (menuError != KErrNone)
         {
-            trigger = !iLeftSoftHeld;
-            iLeftSoftHeld = ETrue;
+            FrameError(menuError);
+            return;
         }
-        else if (aType == EEventKey)
-        {
-            trigger = !iLeftSoftHeld && aKey.iRepeats == 0;
-            iLeftSoftHeld = EFalse;
-        }
-        else if (aType == EEventKeyUp)
-        {
-            iLeftSoftHeld = EFalse;
-        }
-        if (trigger)
-        {
-            if (!iPaused)
-                OpenMenu();
-            else if (!iKeyMapVisible)
-                TRAP_IGNORE(ActivateMenuItemL());
-        }
-        return;
     }
+    if (menuConsumed)
+        return;
 
     if (rightSoft)
     {
-        if (iPaused)
-        {
-            TBool trigger = EFalse;
-            if (aType == EEventKeyDown)
-            {
-                trigger = !iRightSoftHeld;
-                iRightSoftHeld = ETrue;
-            }
-            else if (aType == EEventKey)
-            {
-                trigger = !iRightSoftHeld && aKey.iRepeats == 0;
-                iRightSoftHeld = EFalse;
-            }
-            else if (aType == EEventKeyUp)
-            {
-                iRightSoftHeld = EFalse;
-            }
-            if (trigger)
-            {
-                if (iKeyMapVisible)
-                {
-                    iKeyMapVisible = EFalse;
-                    if (iDirectScreenActive)
-                        TRAP_IGNORE(PresentDirectL(ETrue));
-                }
-                else
-                {
-                    CloseMenu();
-                }
-            }
-            return;
-        }
-
         if (aType == EEventKeyDown)
         {
             iHeldPlayerKeys |= CPlayerRuntime::EKeyCancel;
@@ -1186,79 +698,6 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
                  (iHeldPlayerKeys & CPlayerRuntime::EKeyCancel) == 0)
         {
             iPendingPlayerPulses |= CPlayerRuntime::EKeyCancel;
-        }
-        return;
-    }
-
-    if (iPaused)
-    {
-        TUint32 menuKey = MapScanKey(aKey);
-        if (menuKey == 0)
-            menuKey = MapCharacterKey(aKey.iCode);
-        const TBool menuNavigationKey =
-            menuKey == CPlayerRuntime::EKeyUp ||
-            menuKey == CPlayerRuntime::EKeyDown ||
-            menuKey == CPlayerRuntime::EKeyLeft ||
-            menuKey == CPlayerRuntime::EKeyRight ||
-            menuKey == CPlayerRuntime::EKeyDecision ||
-            menuKey == CPlayerRuntime::EKeyCancel;
-        if (!menuNavigationKey)
-            return;
-
-        TBool trigger = EFalse;
-        if (aType == EEventKeyDown)
-        {
-            trigger = (iHeldPlayerKeys & menuKey) == 0;
-            iHeldPlayerKeys |= menuKey;
-        }
-        else if (aType == EEventKeyUp)
-        {
-            iHeldPlayerKeys &= ~menuKey;
-        }
-        else if (aType == EEventKey)
-        {
-            trigger = (iHeldPlayerKeys & menuKey) == 0 || aKey.iRepeats > 0;
-        }
-        if (!trigger)
-            return;
-
-        if (iKeyMapVisible)
-        {
-            if (menuKey == CPlayerRuntime::EKeyDecision ||
-                menuKey == CPlayerRuntime::EKeyCancel)
-            {
-                iKeyMapVisible = EFalse;
-                if (iDirectScreenActive)
-                    TRAP_IGNORE(PresentDirectL(ETrue));
-            }
-            return;
-        }
-
-        if (menuKey == CPlayerRuntime::EKeyUp)
-            MoveMenuSelection(-1);
-        else if (menuKey == CPlayerRuntime::EKeyDown)
-            MoveMenuSelection(1);
-        else if (menuKey == CPlayerRuntime::EKeyLeft &&
-                 iMenuSelection == EGameMenuVolume)
-        {
-            AdjustVolume(-KVolumeStep);
-            if (iDirectScreenActive)
-                TRAP_IGNORE(PresentDirectL(ETrue));
-        }
-        else if (menuKey == CPlayerRuntime::EKeyRight &&
-                 iMenuSelection == EGameMenuVolume)
-        {
-            AdjustVolume(KVolumeStep);
-            if (iDirectScreenActive)
-                TRAP_IGNORE(PresentDirectL(ETrue));
-        }
-        else if (menuKey == CPlayerRuntime::EKeyDecision)
-        {
-            TRAP_IGNORE(ActivateMenuItemL());
-        }
-        else if (menuKey == CPlayerRuntime::EKeyCancel)
-        {
-            CloseMenu();
         }
         return;
     }
@@ -1301,6 +740,8 @@ void CRuntimeEngine::HandleWindowEvent(const TWsEvent& aEvent)
     {
     case EEventFocusLost:
         iForeground = EFalse;
+        if (iGameMenu)
+            iGameMenu->ResetInputState();
         ClearPlayerInput();
         iRuntime->Suspend();
         EasyRpgMovieSetForeground(EFalse);

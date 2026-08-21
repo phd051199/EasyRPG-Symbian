@@ -27,7 +27,7 @@ private:
     CLauncherView();
     void ConstructL(const TRect& aRect);
     void BuildGameListL();
-    void LaunchArchiveL(const TDesC& aArchivePath, TInt aVersion);
+    void LaunchArchiveL(const TDesC& aArchivePath);
     void ShowLoadingDialogL();
     void UpdateLoadingProgress(TInt aValue);
     void DismissLoadingDialog();

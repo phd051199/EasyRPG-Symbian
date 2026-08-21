@@ -17,6 +17,9 @@ public:
     void Compose(const CFbsBitmap& aFrameBitmap,
                  TInt aX,
                  TInt aY);
+    void DrawInPlace(CFbsBitmap& aFrameBitmap,
+                     TInt aX,
+                     TInt aY);
     const CFbsBitmap& Bitmap() const;
 
 private:
@@ -25,6 +28,10 @@ private:
     TUint32 ReadCounter() const;
     void ReadRam();
     void DrawMetrics();
+    void DrawMetricsTo(TUint8* aPixels,
+                       TInt aStride,
+                       TInt aX,
+                       TInt aY);
     static TUint8 GlyphRow(TUint8 aCharacter, TInt aRow);
     static void DrawText(TUint8* aPixels,
                          TInt aStride,

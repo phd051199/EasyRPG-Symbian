@@ -434,7 +434,6 @@ bool ReadPNGBytes(const uint8_t* data,
         return false;
     if (h > 0xffffffffu / w)
         return false;
-
     const unsigned channels = ChannelCount(color_type);
     const unsigned bits_per_pixel = channels * bit_depth;
     if (!channels || !bits_per_pixel)

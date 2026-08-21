@@ -9,6 +9,7 @@ OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti -mtune=arm1136jf-s
 SOURCEPATH        ..\src\platform\symbian
 SOURCE            RuntimeMain.cpp
 SOURCE            RuntimeEngine.cpp
+SOURCE            GameMenu.cpp
 SOURCE            FrameTimer.cpp
 SOURCE            DisplaySurface.cpp
 SOURCE            PerfOverlay.cpp

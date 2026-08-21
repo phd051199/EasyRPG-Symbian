@@ -63,20 +63,12 @@ verify_component "liblcf-0.5.0" \
 verify_component "libcxx-4.0.1" \
     "libcxx-4.0.1.src.tar.xz" "libcxx-4.0.1.src" txz \
     "520a1171f272c9ff82f324d5d89accadcec9bc9f3c78de11f5575cdb99accc4c"
-verify_component "ruby-3.0.7" \
-    "ruby-3.0.7.tar.gz" "ruby-3.0.7" tgz \
-    "2a3411977f2850431136b0fab8ad53af09fb74df2ee2f4fb7f11b378fe034388"
-verify_component "mkxp-z-2.4.2" \
-    "mkxp-z-2.4.2.tar.gz" "mkxp-z-2.4.2" tgz \
-    "4c2df25e30139678307a8d072c325dc94c01ebc024c47d51eee17dd6f2ee1aac"
 
 unexpected=$(find "$PROJECT_DIR/third_party" -mindepth 1 -maxdepth 1 -type d \
     ! -name easyrpg-player-0.5.0 \
     ! -name pixman-0.34.0 \
     ! -name liblcf-0.5.0 \
-    ! -name libcxx-4.0.1 \
-    ! -name ruby-3.0.7 \
-    ! -name mkxp-z-2.4.2 -print)
+    ! -name libcxx-4.0.1 -print)
 if [[ -n $unexpected ]]; then
     echo "Unexpected third_party component(s):" >&2
     printf '%s\n' "$unexpected" >&2
