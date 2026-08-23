@@ -216,6 +216,15 @@ void TestRecode() {
           "Ambiguous short Vietnamese term does not become Shift-JIS: Ma lực");
     Check(ReaderUtil::Recode("H\xD6 th\xE8ng", "EASYRPG_VI_CP932") == "Hệ thống",
           "Ambiguous Vietnamese term does not become Shift-JIS: Hệ thống");
+    Check(ReaderUtil::Recode(" Tr\xAD\xEA" "ng h\xE4" "c...", "EASYRPG_VI_CP932") ==
+              " Trường học...",
+          "Vietnamese map text with consecutive CP932-looking bytes: Trường học");
+    Check(ReaderUtil::Recode(" s\xE8ng s\xE3t...\\|", "EASYRPG_VI_CP932") ==
+              " sống sót...\\|",
+          "Vietnamese map text with message control suffix: sống sót");
+    Check(ReaderUtil::Recode("\\>\\C[4]H\xD6 th\xE8ng\\C[0]\\<", "EASYRPG_VI_CP932") ==
+              "\\>\\C[4]Hệ thống\\C[0]\\<",
+          "Vietnamese map text with color controls: Hệ thống");
     Check(ReaderUtil::Recode("\\>Ch\xE4n \xAE\xE9 kho !\\<", "EASYRPG_VI_CP932") ==
               "\\>Chọn độ kho !\\<",
           "Mixed fallback never leaks raw TCVN3 bytes");
@@ -225,6 +234,19 @@ void TestRecode() {
           "Vietnamese font contains glyph: ố");
     Check(ReaderUtil::Recode("HP\x8B\x5A", "EASYRPG_VI_CP932") == "HP技",
           "Single Japanese glyph beside ASCII remains Shift-JIS");
+    Check(ReaderUtil::Recode("Nhân vật", "EASYRPG_VI_CP932") == "Nhân vật",
+          "Mixed Vietnamese preserves UTF-8 resource names from older saves");
+    Check(ReaderUtil::Recode("Kỹ năng", "UTF-8", "EASYRPG_VI_CP932") == std::string("K\xFC n\xA8ng", 7),
+          "Mixed Vietnamese reverse conversion writes TCVN3 for save strings");
+    Check(ReaderUtil::Recode("Kỹ năng", "UTF-8", "EASYRPG_VI_CP932") != "Kỹ năng",
+          "Mixed Vietnamese save writer does not leak UTF-8 when TCVN3 is available");
+    const std::string saved_vietnamese = ReaderUtil::Recode("Nhân vật", "UTF-8", "EASYRPG_VI_CP932");
+    Check(ReaderUtil::Recode(saved_vietnamese, "EASYRPG_VI_CP932", "UTF-8") == "Nhân vật",
+          "Mixed Vietnamese resource name roundtrips through save encoding");
+    const std::string saved_japanese = ReaderUtil::Recode(recoded_jp, "UTF-8", "EASYRPG_VI_CP932");
+    Check(saved_japanese == japanese &&
+              ReaderUtil::Recode(saved_japanese, "EASYRPG_VI_CP932", "UTF-8") == recoded_jp,
+          "Mixed Vietnamese save encoding preserves CP932 Japanese strings");
     Check(ReaderUtil::Recode("\xB0\xB2\xD0\xDB", "GBK") == "安雄",
           "GBK Chinese decodes without Symbian charconv plug-in");
     Check(ReaderUtil::Recode("\xA5\xB7\xA5\xB9\xA5\xC6\xA5\xE0", "GBK") == "システム",
@@ -244,6 +266,31 @@ void TestRecode() {
     if (g_failures && !recoded_vn.empty()) {
         std::printf("    VN recode bytes: %s\n", HexDump(recoded_vn).c_str());
     }
+}
+
+void TestMixedVietnameseSaveRoundTrip() {
+    const char* path = "/tmp/easyrpg_symbian_mixed_vietnamese_save_test.lsd";
+    std::remove(path);
+
+    RPG::Save save;
+    save.party_location.map_id = 7;
+    save.map_info.events.resize(1);
+    save.map_info.events[0].ID = 3;
+    save.map_info.events[0].sprite_name = "Nhân vật";
+    save.map_info.events[0].sprite_id = 2;
+
+    const bool wrote = LSD_Reader::Save(path, save, "EASYRPG_VI_CP932");
+    Check(wrote, "Mixed Vietnamese LSD save writes successfully");
+
+    std::unique_ptr<RPG::Save> loaded = LSD_Reader::Load(path, "EASYRPG_VI_CP932");
+    Check(loaded.get() != 0 && loaded->party_location.map_id == 7,
+          "Mixed Vietnamese LSD save restores map state");
+    Check(loaded.get() != 0 && loaded->map_info.events.size() == 1u &&
+              loaded->map_info.events[0].sprite_name == "Nhân vật" &&
+              loaded->map_info.events[0].sprite_id == 2,
+          "Mixed Vietnamese LSD save restores map event sprite resource");
+
+    std::remove(path);
 }
 
 int TestDetection(const char* game_dir, const char* expected_first, bool expect_mixed) {
@@ -302,6 +349,7 @@ int main(int argc, char** argv) {
     }
     std::printf("Recode unit tests:\n");
     TestRecode();
+    TestMixedVietnameseSaveRoundTrip();
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];

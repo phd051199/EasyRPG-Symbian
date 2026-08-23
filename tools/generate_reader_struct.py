@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Generate a lightweight build copy of liblcf reader_struct.cpp.
+"""Generate a lightweight build copy of patched liblcf reader_struct.cpp.
 
-The vendored upstream source remains byte-for-byte unchanged. The generated
-copy only replaces two iostream diagnostics in writer-side code with stdio so
-that the read path does not pull libc++ iostream/locale into the E72 binary.
+The prepared dependency tree contains the ordered liblcf backports. The
+generated copy keeps those fixes and only replaces two iostream diagnostics
+in writer-side code with stdio so the read path does not pull libc++
+iostream/locale into the E72 binary.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import sys
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SOURCE = PROJECT_ROOT / "third_party" / "liblcf-0.5.0" / "src" / "reader_struct.cpp"
+SOURCE = PROJECT_ROOT / "build" / "work" / "third-party" / "liblcf-0.5.0" / "src" / "reader_struct.cpp"
 
 INCLUDE_BLOCK = "#include <iostream>\n#include <iomanip>\n"
 INCLUDE_REPLACEMENT = "#include <stdio.h>\n"

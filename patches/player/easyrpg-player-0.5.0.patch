@@ -9489,6 +9489,218 @@ index 1cb377a..f922d79 100644
 +		return;
 +#endif
 +
- 	if (windowskin) {
- 		if (width > 4 && height > 4 && (back_opacity * opacity / 255 > 0)) {
- 			if (background_needs_refresh) RefreshBackground();
+	if (windowskin) {
+		if (width > 4 && height > 4 && (back_opacity * opacity / 255 > 0)) {
+			if (background_needs_refresh) RefreshBackground();
+diff --git a/src/game_character.cpp b/src/game_character.cpp
+index e267242..58d44ae 100644
+--- a/src/game_character.cpp
++++ b/src/game_character.cpp
+@@ -363,12 +363,16 @@ void Game_Character::MoveTypeCustom() {
+ 				SetMoveFrequency(max(GetMoveFrequency() - 1, 1));
+ 				break;
+ 			case RPG::MoveCommand::Code::switch_on: // Parameter A: Switch to turn on
+-				Game_Switches[move_command.parameter_a] = true;
+-				Game_Map::SetNeedRefresh(Game_Map::Refresh_All);
++				if (!Game_Switches[move_command.parameter_a]) {
++					Game_Switches[move_command.parameter_a] = true;
++					Game_Map::SetNeedSwitchRefresh(move_command.parameter_a);
++				}
+ 				break;
+ 			case RPG::MoveCommand::Code::switch_off: // Parameter A: Switch to turn off
+-				Game_Switches[move_command.parameter_a] = false;
+-				Game_Map::SetNeedRefresh(Game_Map::Refresh_All);
++				if (Game_Switches[move_command.parameter_a]) {
++					Game_Switches[move_command.parameter_a] = false;
++					Game_Map::SetNeedSwitchRefresh(move_command.parameter_a);
++				}
+ 				break;
+ 			case RPG::MoveCommand::Code::change_graphic: // String: File, Parameter A: index
+ 				SetGraphic(move_command.parameter_string, move_command.parameter_a);
+diff --git a/src/game_map.cpp b/src/game_map.cpp
+index ec5e6bc..68ba817 100644
+--- a/src/game_map.cpp
++++ b/src/game_map.cpp
+@@ -69,7 +69,7 @@ namespace {
+ 	std::vector<Game_Event*> event_parallel_updates;
+ 	std::vector<Game_Event*> event_parallel_interpreters;
+ 	std::vector<Game_Event*> event_regular_updates;
+-	std::vector<Game_Event*> event_trigger_checks;
++	std::vector<int> event_auto_trigger_indices;
+ #ifdef EASYRPG_SYMBIAN
+ 	size_t symbian_parallel_event_cursor = 0;
+ 	size_t symbian_parallel_common_cursor = 0;
+@@ -80,10 +80,11 @@ namespace {
+ 	std::vector<int> event_index_by_id;
+ 	std::map<int, std::vector<int> > switch_refresh_dependencies;
+ 	std::map<int, std::vector<int> > variable_refresh_dependencies;
+-	std::map<int, bool> common_switch_refresh_dependencies;
++	std::map<int, std::vector<int> > common_switch_refresh_dependencies;
+ 	std::vector<unsigned char> targeted_refresh_flags;
+ 	std::vector<int> targeted_refresh_events;
+-	bool targeted_refresh_common = false;
++	std::vector<unsigned char> targeted_refresh_common_flags;
++	std::vector<int> targeted_refresh_common_events;
+ 	bool event_update_lists_dirty = false;
+ 	const int event_query_stack_capacity = 64;
+ 
+@@ -156,12 +157,13 @@ namespace {
+ 		event_parallel_updates.clear();
+ 		event_parallel_interpreters.clear();
+ 		event_regular_updates.clear();
+-		event_trigger_checks.clear();
++		event_auto_trigger_indices.clear();
+ 		event_parallel_updates.reserve(events.size());
+ 		event_parallel_interpreters.reserve(events.size());
+ 		event_regular_updates.reserve(events.size());
+-		event_trigger_checks.reserve(events.size());
+-		for (Game_Event& event : events) {
++		event_auto_trigger_indices.reserve(events.size());
++		for (size_t event_index = 0; event_index < events.size(); ++event_index) {
++			Game_Event& event = events[event_index];
+ 			if (event.RequiresParallelUpdate())
+ 				event_parallel_updates.push_back(&event);
+ 			if (event.RequiresParallelInterpreter())
+@@ -169,9 +171,8 @@ namespace {
+ 			if (event.RequiresRegularUpdate())
+ 				event_regular_updates.push_back(&event);
+ 			const int trigger = event.GetTrigger();
+-			if (trigger == RPG::EventPage::Trigger_auto_start ||
+-				trigger == RPG::EventPage::Trigger_collision)
+-				event_trigger_checks.push_back(&event);
++			if (trigger == RPG::EventPage::Trigger_auto_start)
++				event_auto_trigger_indices.push_back(static_cast<int>(event_index));
+ 		}
+ #ifdef EASYRPG_SYMBIAN
+ 		if (symbian_parallel_event_cursor >= event_parallel_interpreters.size())
+@@ -197,7 +198,8 @@ namespace {
+ 		common_switch_refresh_dependencies.clear();
+ 		targeted_refresh_flags.assign(events.size(), 0);
+ 		targeted_refresh_events.clear();
+-		targeted_refresh_common = false;
++		targeted_refresh_common_flags.assign(common_events.size(), 0);
++		targeted_refresh_common_events.clear();
+ 		if (!map)
+ 			return;
+ 
+@@ -216,9 +218,11 @@ namespace {
+ 			}
+ 		}
+ 
+-		for (const RPG::CommonEvent& event : Data::commonevents) {
++		for (size_t common_index = 0; common_index < Data::commonevents.size(); ++common_index) {
++			const RPG::CommonEvent& event = Data::commonevents[common_index];
+ 			if (event.switch_flag && event.switch_id > 0)
+-				common_switch_refresh_dependencies[event.switch_id] = true;
++				AddRefreshDependency(common_switch_refresh_dependencies,
++					event.switch_id, static_cast<int>(common_index));
+ 		}
+ 	}
+ 
+@@ -237,13 +241,32 @@ namespace {
+ 		}
+ 	}
+ 
++	void QueueTargetedCommonRefresh(int switch_id) {
++		const std::map<int, std::vector<int> >::const_iterator found =
++			common_switch_refresh_dependencies.find(switch_id);
++		if (found == common_switch_refresh_dependencies.end())
++			return;
++		for (int common_index : found->second) {
++			if (common_index < 0 || common_index >= static_cast<int>(common_events.size()))
++				continue;
++			if (targeted_refresh_common_flags[common_index])
++				continue;
++			targeted_refresh_common_flags[common_index] = 1;
++			targeted_refresh_common_events.push_back(common_index);
++		}
++	}
++
+ 	void ClearTargetedRefresh() {
+ 		for (int event_index : targeted_refresh_events) {
+ 			if (event_index >= 0 && event_index < static_cast<int>(targeted_refresh_flags.size()))
+ 				targeted_refresh_flags[event_index] = 0;
+ 		}
+ 		targeted_refresh_events.clear();
+-		targeted_refresh_common = false;
++		for (int common_index : targeted_refresh_common_events) {
++			if (common_index >= 0 && common_index < static_cast<int>(targeted_refresh_common_flags.size()))
++				targeted_refresh_common_flags[common_index] = 0;
++		}
++		targeted_refresh_common_events.clear();
+ 	}
+ 
+ 	void RebuildEventSpatialIndex() {
+@@ -347,13 +370,14 @@ void Game_Map::Dispose() {
+ 	event_index_by_id.clear();
+ 	event_parallel_updates.clear();
+ 	event_parallel_interpreters.clear();
+-	event_trigger_checks.clear();
++	event_auto_trigger_indices.clear();
+ 	switch_refresh_dependencies.clear();
+ 	variable_refresh_dependencies.clear();
+ 	common_switch_refresh_dependencies.clear();
+ 	targeted_refresh_flags.clear();
+ 	targeted_refresh_events.clear();
+-	targeted_refresh_common = false;
++	targeted_refresh_common_flags.clear();
++	targeted_refresh_common_events.clear();
+ 	events.clear();
+ 	pending.clear();
+ 
+@@ -578,9 +602,9 @@ void Game_Map::Refresh() {
+ 				if (event_index >= 0 && event_index < static_cast<int>(events.size()))
+ 					events[event_index].Refresh();
+ 			}
+-			if (targeted_refresh_common) {
+-				for (Game_CommonEvent& ev : common_events)
+-					ev.Refresh();
++			for (int common_index : targeted_refresh_common_events) {
++				if (common_index >= 0 && common_index < static_cast<int>(common_events.size()))
++					common_events[common_index].Refresh();
+ 			}
+ 			if (!targeted_refresh_events.empty())
+ 				RebuildEventUpdateLists();
+@@ -1273,8 +1297,28 @@ void Game_Map::Update(bool only_parallel) {
+ 	if (only_parallel)
+ 		return;
+ 
+-	for (Game_Event* ev : event_trigger_checks)
+-		ev->CheckEventTriggers();
++	// Auto-start events can live anywhere on the map. Collision-triggered
++	// events only matter in the player's current cell, so merge that spatial
++	// cell with the cached auto-start indices to preserve map-order semantics
++	// without scanning every collision event each logic frame.
++	const int player_cell = EventCellIndex(Main_Data::game_player->GetX(), Main_Data::game_player->GetY());
++	int collision_index = player_cell >= 0 ? event_cell_heads[player_cell] : -1;
++	size_t auto_index = 0;
++	while (auto_index < event_auto_trigger_indices.size() || collision_index >= 0) {
++		while (collision_index >= 0 &&
++			events[collision_index].GetTrigger() != RPG::EventPage::Trigger_collision)
++			collision_index = event_next[collision_index];
++
++		const int auto_event_index = auto_index < event_auto_trigger_indices.size()
++			? event_auto_trigger_indices[auto_index] : static_cast<int>(events.size());
++		if (collision_index < 0 || auto_event_index < collision_index) {
++			events[auto_event_index].CheckEventTriggers();
++			++auto_index;
++		} else {
++			events[collision_index].CheckEventTriggers();
++			collision_index = event_next[collision_index];
++		}
++	}
+ 
+ 	Main_Data::game_player->Update();
+ 	GetInterpreter().Update();
+@@ -1523,9 +1567,8 @@ void Game_Map::SetNeedSwitchRefresh(int switch_id) {
+ 	if (switch_id <= 0 || refresh_type == Refresh_All || refresh_type == Refresh_Map)
+ 		return;
+ 	QueueTargetedRefresh(switch_refresh_dependencies, switch_id);
+-	if (common_switch_refresh_dependencies.find(switch_id) != common_switch_refresh_dependencies.end())
+-		targeted_refresh_common = true;
+-	if (!targeted_refresh_events.empty() || targeted_refresh_common)
++	QueueTargetedCommonRefresh(switch_id);
++	if (!targeted_refresh_events.empty() || !targeted_refresh_common_events.empty())
+ 		refresh_type = Refresh_Targeted;
+ }
+ 

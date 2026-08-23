@@ -1,0 +1,714 @@
+--- a/src/color.h
++++ b/src/color.h
+@@ -30,7 +30,7 @@
+ 	 * Constructor. All components are set to 0, but alpha
+ 	 * that is set to 255.
+ 	 */
+-	Color();
++	inline Color();
+ 
+ 	/**
+ 	 * Constructor.
+@@ -40,7 +40,7 @@
+ 	 * @param blue blue component.
+ 	 * @param alpha alpha component.
+ 	 */
+-	Color(unsigned red, unsigned green, unsigned blue, unsigned alpha);
++	inline Color(unsigned red, unsigned green, unsigned blue, unsigned alpha);
+ 
+ 	/**
+ 	 * Constructor.
+@@ -50,17 +50,17 @@
+ 	 * @param blue blue component.
+ 	 * @param alpha alpha component.
+ 	 */
+-	Color(int red, int green, int blue, int alpha);
++	inline Color(int red, int green, int blue, int alpha);
+ 
+ 	/**
+ 	 * Equality operator.
+ 	 */
+-	bool operator==(const Color &other) const;
++	inline bool operator==(const Color &other) const;
+ 
+ 	/**
+ 	 * Inequality operator.
+ 	 */
+-	bool operator!=(const Color &other) const;
++	inline bool operator!=(const Color &other) const;
+ 
+ 	/**
+ 	 * Sets all color properties.
+@@ -70,7 +70,7 @@
+ 	 * @param blue blue component.
+ 	 * @param alpha alpha component.
+ 	 */
+-	void Set(unsigned red, unsigned green, unsigned blue, unsigned alpha);
++	inline void Set(unsigned red, unsigned green, unsigned blue, unsigned alpha);
+ 
+ 	/** Red component. */
+ 	uint8_t red;
+@@ -85,4 +85,37 @@
+ 	uint8_t alpha;
+ };
+ 
++inline Color::Color() :
++	red(0), green(0), blue(0), alpha(0) {
++}
++
++inline Color::Color(unsigned red, unsigned green, unsigned blue, unsigned alpha) :
++	red(static_cast<uint8_t>(red)),
++	green(static_cast<uint8_t>(green)),
++	blue(static_cast<uint8_t>(blue)),
++	alpha(static_cast<uint8_t>(alpha)) {
++}
++
++inline Color::Color(int red, int green, int blue, int alpha) :
++	red(static_cast<uint8_t>(red)),
++	green(static_cast<uint8_t>(green)),
++	blue(static_cast<uint8_t>(blue)),
++	alpha(static_cast<uint8_t>(alpha)) {
++}
++
++inline bool Color::operator==(const Color &other) const {
++	return red == other.red && green == other.green && blue == other.blue && alpha == other.alpha;
++}
++
++inline bool Color::operator!=(const Color &other) const {
++	return !(*this == other);
++}
++
++inline void Color::Set(unsigned nred, unsigned ngreen, unsigned nblue, unsigned nalpha) {
++	red = static_cast<uint8_t>(nred);
++	green = static_cast<uint8_t>(ngreen);
++	blue = static_cast<uint8_t>(nblue);
++	alpha = static_cast<uint8_t>(nalpha);
++}
++
+ #endif
+--- a/src/color.cpp
++++ b/src/color.cpp
+@@ -15,41 +15,4 @@
+  * along with EasyRPG Player. If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+-// Headers
+ #include "color.h"
+-
+-Color::Color() :
+-	red(0),
+-	green(0),
+-	blue(0),
+-	alpha(0) {
+-}
+-
+-Color::Color(unsigned red, unsigned green, unsigned blue, unsigned alpha) :
+-	red((uint8_t)red),
+-	green((uint8_t)green),
+-	blue((uint8_t)blue),
+-	alpha((uint8_t)alpha) {
+-}
+-
+-Color::Color(int red, int green, int blue, int alpha) :
+-	red((uint8_t)red),
+-	green((uint8_t)green),
+-	blue((uint8_t)blue),
+-	alpha((uint8_t)alpha) {
+-}
+-
+-bool Color::operator==(const Color &other) const {
+-	return red == other.red && green == other.green && blue == other.blue && alpha == other.alpha;
+-}
+-
+-bool Color::operator!=(const Color &other) const {
+-	return red != other.red || green != other.green || blue != other.blue || alpha != other.alpha;
+-}
+-
+-void Color::Set(unsigned nred, unsigned ngreen, unsigned nblue, unsigned nalpha) {
+-	red = (uint8_t)nred;
+-	green = (uint8_t)ngreen;
+-	blue = (uint8_t)nblue;
+-	alpha = (uint8_t)nalpha;
+-}
+--- a/src/tone.h
++++ b/src/tone.h
+@@ -26,7 +26,7 @@
+ 	/**
+ 	 * Constructor. All values are set to 0.
+ 	 */
+-	Tone();
++	inline Tone();
+ 
+ 	/**
+ 	 * Constructor.
+@@ -36,17 +36,17 @@
+ 	 * @param blue blue component.
+ 	 * @param gray gray component.
+ 	 */
+-	Tone(int red, int green, int blue, int gray);
++	inline Tone(int red, int green, int blue, int gray);
+ 
+ 	/**
+ 	 * Equality operator.
+ 	 */
+-	bool operator==(const Tone &other) const;
++	inline bool operator==(const Tone &other) const;
+ 
+ 	/**
+ 	 * Inequality operator.
+ 	 */
+-	bool operator!=(const Tone &other) const;
++	inline bool operator!=(const Tone &other) const;
+ 
+ 	/**
+ 	 * Set all color properties.
+@@ -56,7 +56,7 @@
+ 	 * @param blue blue component.
+ 	 * @param gray gray component.
+ 	 */
+-	void Set(int red, int green, int blue, int gray);
++	inline void Set(int red, int green, int blue, int gray);
+ 
+ 	/** Red component. */
+ 	int red;
+@@ -71,4 +71,34 @@
+ 	int gray;
+ };
+ 
++inline int EasyRpgToneClamp(int value) {
++	return value < 0 ? 0 : (value > 255 ? 255 : value);
++}
++
++inline Tone::Tone() :
++	red(128), green(128), blue(128), gray(128) {
++}
++
++inline Tone::Tone(int red, int green, int blue, int gray) :
++	red(EasyRpgToneClamp(red)),
++	green(EasyRpgToneClamp(green)),
++	blue(EasyRpgToneClamp(blue)),
++	gray(EasyRpgToneClamp(gray)) {
++}
++
++inline bool Tone::operator==(const Tone &other) const {
++	return red == other.red && green == other.green && blue == other.blue && gray == other.gray;
++}
++
++inline bool Tone::operator!=(const Tone &other) const {
++	return !(*this == other);
++}
++
++inline void Tone::Set(int nred, int ngreen, int nblue, int ngray) {
++	red = EasyRpgToneClamp(nred);
++	green = EasyRpgToneClamp(ngreen);
++	blue = EasyRpgToneClamp(nblue);
++	gray = EasyRpgToneClamp(ngray);
++}
++
+ #endif
+--- a/src/tone.cpp
++++ b/src/tone.cpp
+@@ -15,35 +15,4 @@
+  * along with EasyRPG Player. If not, see <http://www.gnu.org/licenses/>.
+  */
+ 
+-// Headers
+ #include "tone.h"
+-#include "util_macro.h"
+-
+-Tone::Tone()  :
+-	red(128),
+-	green(128),
+-	blue(128),
+-	gray(128) {
+-}
+-
+-Tone::Tone(int red, int green, int blue, int gray) :
+-	red(min(255, max(0, red))),
+-	green(min(255, max(0, green))),
+-	blue(min(255, max(0, blue))),
+-	gray(min(255, max(0, gray))) {
+-}
+-
+-bool Tone::operator==(const Tone &other) const {
+-	return red == other.red && green == other.green && blue == other.blue && gray == other.gray;
+-}
+-
+-bool Tone::operator!=(const Tone &other) const {
+-	return red != other.red || green != other.green || blue != other.blue || gray != other.gray;
+-}
+-
+-void Tone::Set(int nred, int ngreen, int nblue, int ngray) {
+-	red = min(255, max(0, nred));
+-	green = min(255, max(0, ngreen));
+-	blue = min(255, max(0, nblue));
+-	gray = min(255, max(0, ngray));
+-}
+--- a/src/game_switches.h
++++ b/src/game_switches.h
+@@ -21,6 +21,7 @@
+ // Headers
+ #include <vector>
+ #include <string>
++#include "main_data.h"
+ 
+ /**
+  * Game_Switches class
+@@ -29,20 +30,37 @@
+ public:
+ 	Game_Switches_Class();
+ 
+-	std::vector<bool>::reference operator[](int switch_id);
++	inline std::vector<bool>::reference operator[](int switch_id);
+ 	
+ 	std::string GetName(int _id) const;
+ 
+-	bool IsValid(int switch_id) const;
++	inline bool IsValid(int switch_id) const;
+ 
+-	int GetSize() const;
++	inline int GetSize() const;
+ 
+ 	void Reset();
+ 
+ private:
++	std::vector<bool>::reference AccessSlow(int switch_id);
+ 	std::vector<bool> dummy;
+ };
+ 
++inline std::vector<bool>::reference Game_Switches_Class::operator[](int switch_id) {
++	std::vector<bool>& values = Main_Data::game_data.system.switches;
++	if (switch_id > 0 && static_cast<size_t>(switch_id) <= values.size())
++		return values[static_cast<size_t>(switch_id - 1)];
++	return AccessSlow(switch_id);
++}
++
++inline bool Game_Switches_Class::IsValid(int switch_id) const {
++	return switch_id > 0 &&
++		static_cast<size_t>(switch_id) <= Main_Data::game_data.system.switches.size();
++}
++
++inline int Game_Switches_Class::GetSize() const {
++	return static_cast<int>(Main_Data::game_data.system.switches.size());
++}
++
+ // Global variable
+ extern Game_Switches_Class Game_Switches;
+ 
+--- a/src/game_switches.cpp
++++ b/src/game_switches.cpp
+@@ -28,20 +28,17 @@
+ 	return Main_Data::game_data.system.switches;
+ }
+ 
+-std::vector<bool>::reference Game_Switches_Class::operator[](int switch_id) {
+-	if (!IsValid(switch_id)) {
+-		if (switch_id > 0 && switch_id <= PLAYER_VAR_LIMIT) {
+-			Output::Debug("Resizing switch array to %d elements.", switch_id);
+-			switches().resize(switch_id);
+-			Main_Data::game_data.system.switches_size = switches().size();
+-		} else {
+-			Output::Debug("Switch index %d is invalid.", switch_id);
+-			dummy.resize(1);
+-			return dummy[0];
+-		}
++std::vector<bool>::reference Game_Switches_Class::AccessSlow(int switch_id) {
++	if (switch_id > 0 && switch_id <= PLAYER_VAR_LIMIT) {
++		Output::Debug("Resizing switch array to %d elements.", switch_id);
++		switches().resize(switch_id);
++		Main_Data::game_data.system.switches_size = switches().size();
++		return switches()[switch_id - 1];
+ 	}
+ 
+-	return switches()[switch_id - 1];
++	Output::Debug("Switch index %d is invalid.", switch_id);
++	dummy.resize(1);
++	return dummy[0];
+ }
+ 
+ std::string Game_Switches_Class::GetName(int _id) const {
+@@ -52,14 +49,6 @@
+ 	}
+ }
+ 
+-bool Game_Switches_Class::IsValid(int switch_id) const {
+-	return (switch_id > 0 && switch_id <= (int)switches().size());
+-}
+-
+-int Game_Switches_Class::GetSize() const {
+-	return (int)switches().size();
+-}
+-
+ void Game_Switches_Class::Reset() {
+ 	switches().assign(Data::switches.size(), false);
+ }
+--- a/src/game_variables.h
++++ b/src/game_variables.h
+@@ -20,6 +20,7 @@
+ 
+ // Headers
+ #include "data.h"
++#include "main_data.h"
+ #include <string>
+ 
+ /**
+@@ -29,20 +30,37 @@
+ public:
+ 	Game_Variables_Class();
+ 
+-	int& operator[] (int variable_id);
++	inline int& operator[] (int variable_id);
+ 
+ 	std::string GetName(int _id) const;
+ 
+-	bool IsValid(int variable_id) const;
++	inline bool IsValid(int variable_id) const;
+ 
+-	int GetSize() const;
++	inline int GetSize() const;
+ 
+ 	void Reset();
+ 
+ private:
++	int& AccessSlow(int variable_id);
+ 	int dummy = 0;
+ };
+ 
++inline int& Game_Variables_Class::operator[] (int variable_id) {
++	std::vector<uint32_t>& values = Main_Data::game_data.system.variables;
++	if (variable_id > 0 && static_cast<size_t>(variable_id) <= values.size())
++		return reinterpret_cast<int&>(values[static_cast<size_t>(variable_id - 1)]);
++	return AccessSlow(variable_id);
++}
++
++inline bool Game_Variables_Class::IsValid(int variable_id) const {
++	return variable_id > 0 &&
++		static_cast<size_t>(variable_id) <= Main_Data::game_data.system.variables.size();
++}
++
++inline int Game_Variables_Class::GetSize() const {
++	return static_cast<int>(Main_Data::game_data.system.variables.size());
++}
++
+ // Global variable
+ extern Game_Variables_Class Game_Variables;
+ 
+--- a/src/game_variables.cpp
++++ b/src/game_variables.cpp
+@@ -28,21 +28,17 @@
+ 	return Main_Data::game_data.system.variables;
+ }
+ 
+-int& Game_Variables_Class::operator[] (int variable_id) {
+-	if (!IsValid(variable_id)) {
+-		if (variable_id > 0 && variable_id <= PLAYER_VAR_LIMIT) {
+-			Output::Debug("Resizing variable array to %d elements.", variable_id);
+-			variables().resize(variable_id);
+-			Main_Data::game_data.system.variables_size = variables().size();
+-		} else {
+-			Output::Debug("Variable index %d is invalid.",
+-				variable_id);
+-			dummy = 0;
+-			return dummy;
+-		}
++int& Game_Variables_Class::AccessSlow(int variable_id) {
++	if (variable_id > 0 && variable_id <= PLAYER_VAR_LIMIT) {
++		Output::Debug("Resizing variable array to %d elements.", variable_id);
++		variables().resize(variable_id);
++		Main_Data::game_data.system.variables_size = variables().size();
++		return reinterpret_cast<int&>(variables()[variable_id - 1]);
+ 	}
+ 
+-	return (int&)variables()[variable_id - 1];
++	Output::Debug("Variable index %d is invalid.", variable_id);
++	dummy = 0;
++	return dummy;
+ }
+ 
+ std::string Game_Variables_Class::GetName(int _id) const {
+@@ -53,14 +49,6 @@
+ 	}
+ }
+ 
+-bool Game_Variables_Class::IsValid(int variable_id) const {
+-	return (variable_id > 0 && variable_id <= (int)variables().size());
+-}
+-
+-int Game_Variables_Class::GetSize() const {
+-	return (int)variables().size();
+-}
+-
+ void Game_Variables_Class::Reset() {
+ 	variables().assign(Data::variables.size(), 0);
+ }
+--- a/src/weather.h
++++ b/src/weather.h
+@@ -41,21 +41,18 @@
+ 	void SetTone(Tone tone);
+ 
+ private:
+-	void DrawRain();
+-	void DrawSnow();
+-	void DrawFog();
+-	void DrawSandstorm();
++	void DrawRain(Bitmap& destination);
++	void DrawSnow(Bitmap& destination);
++	void DrawFog(Bitmap& destination);
++	void DrawSandstorm(Bitmap& destination);
+ 
+ 	static const int z = 1001;
+ 	static const DrawableType type = TypeWeather;
+ 
+-	BitmapRef weather_surface;
+ 	BitmapRef snow_bitmap;
+ 	BitmapRef rain_bitmap;
+ 
+ 	Tone tone_effect;
+-
+-	bool dirty;
+ };
+ 
+ #endif
+--- a/src/weather.cpp
++++ b/src/weather.cpp
+@@ -7,9 +7,11 @@
+ #include "graphics.h"
+ #include "main_data.h"
+ #include "weather.h"
++#ifdef EASYRPG_SYMBIAN
++#include "RenderDamage.h"
++#endif
+ 
+-Weather::Weather() :
+-	dirty(false) {
++Weather::Weather() {
+ 	Graphics::RegisterDrawable(this);
+ }
+ 
+@@ -29,35 +31,48 @@
+ }
+ 
+ void Weather::Draw() {
+-	if (Main_Data::game_screen->GetWeatherType() != Game_Screen::Weather_None && !weather_surface)
+-		weather_surface = Bitmap::Create(SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT);
++	BitmapRef destination = DisplayUi->GetDisplaySurface();
++	if (!destination)
++		return;
+ 
+-	if (dirty && weather_surface) {
+-		weather_surface->Clear();
+-		dirty = false;
++	const int weather_type = Main_Data::game_screen->GetWeatherType();
++#ifdef EASYRPG_SYMBIAN
++	const bool recording = SymbianRenderDamage::IsRecording();
++	const bool full_paint_recording = SymbianRenderDamage::IsFullPaintRecording();
++	if (recording || full_paint_recording) {
++		unsigned int signature = SymbianRenderDamage::HashSeed(0x57454154u);
++		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(weather_type));
++		signature = SymbianRenderDamage::HashValue(signature,
++			static_cast<unsigned int>(Main_Data::game_screen->GetWeatherStrength()));
++		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.red));
++		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.green));
++		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.blue));
++		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.gray));
++		if (weather_type != Game_Screen::Weather_None)
++			signature = SymbianRenderDamage::HashValue(signature, DisplayUi->GetTicks());
++		SymbianRenderDamage::Record(signature, Rect(0, 0, SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT));
+ 	}
++	if (recording)
++		return;
++	SymbianRenderDamage::ScopedRecordSuppression suppress_nested(full_paint_recording);
++#endif
+ 
+-	switch (Main_Data::game_screen->GetWeatherType()) {
++	switch (weather_type) {
+ 	case Game_Screen::Weather_None:
+ 		break;
+ 	case Game_Screen::Weather_Rain:
+-		DrawRain();
++		DrawRain(*destination);
+ 		break;
+ 	case Game_Screen::Weather_Snow:
+-		DrawSnow();
++		DrawSnow(*destination);
+ 		break;
+ 	case Game_Screen::Weather_Fog:
+-		DrawFog();
++		DrawFog(*destination);
+ 		break;
+ 	case Game_Screen::Weather_Sandstorm:
+-		DrawSandstorm();
++		DrawSandstorm(*destination);
+ 		break;
+ 	}
+-
+-	if (dirty && weather_surface) {
+-		BitmapRef dst = DisplayUi->GetDisplaySurface();
+-		dst->Blit(0, 0, *weather_surface, weather_surface->GetRect(), 255);
+-	}
+ }
+ 
+ static const uint8_t snow_image[] =
+@@ -97,7 +112,7 @@
+ 
+ static const int snowflake_visible = 150;
+ 
+-void Weather::DrawRain() {
++void Weather::DrawRain(Bitmap& destination) {
+ 	if (!rain_bitmap) {
+ 		rain_bitmap = Bitmap::Create(rain_image, sizeof(rain_image));
+ 		if (tone_effect != Tone())
+@@ -109,12 +124,11 @@
+ 	for (std::vector<Game_Screen::Snowflake>::const_iterator it = snowflakes.begin(); it != snowflakes.end(); ++it) {
+ 		const Game_Screen::Snowflake& f = *it;
+ 		if (f.life <= snowflake_visible)
+-			weather_surface->Blit(f.x - f.y / 2, f.y, *rain_bitmap, rect, 96);
++			destination.Blit(f.x - f.y / 2, f.y, *rain_bitmap, rect, 96);
+ 	}
+-	dirty = true;
+ }
+ 
+-void Weather::DrawSnow() {
++void Weather::DrawSnow(Bitmap& destination) {
+ 	if (!snow_bitmap) {
+ 		snow_bitmap = Bitmap::Create(snow_image, sizeof(snow_image));
+ 		if (tone_effect != Tone())
+@@ -135,30 +149,30 @@
+ 		int i = (y / 2) % 18;
+ 		x += wobble[0][i];
+ 		y += wobble[1][i];
+-		weather_surface->Blit(x, y, *snow_bitmap, rect, f.life);
++		destination.Blit(x, y, *snow_bitmap, rect, f.life);
+ 	}
+-	dirty = true;
+ }
+ 
+-void Weather::DrawFog() {
++void Weather::DrawFog(Bitmap& destination) {
+ 	static const int opacities[3] = {128, 160, 192};
+ 	int strength = Main_Data::game_screen->GetWeatherStrength();
+ 	if (strength < 0)
+ 		strength = 0;
+ 	else if (strength > 2)
+ 		strength = 2;
+-	weather_surface->Fill(Color(128, 128, 128, opacities[strength]));
+-	dirty = true;
++	destination.FillRect(Rect(0, 0, SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT),
++		Color(128, 128, 128, opacities[strength]));
+ }
+ 
+-void Weather::DrawSandstorm() {
++void Weather::DrawSandstorm(Bitmap& destination) {
+ 	static const int opacities[3] = {96, 128, 160};
+ 	int strength = Main_Data::game_screen->GetWeatherStrength();
+ 	if (strength < 0)
+ 		strength = 0;
+ 	else if (strength > 2)
+ 		strength = 2;
+-	weather_surface->Fill(Color(192, 160, 128, opacities[strength]));
++	destination.FillRect(Rect(0, 0, SCREEN_TARGET_WIDTH, SCREEN_TARGET_HEIGHT),
++		Color(192, 160, 128, opacities[strength]));
+ 
+ 	const std::vector<Game_Screen::Snowflake>& particles = Main_Data::game_screen->GetSnowflakes();
+ 	for (std::vector<Game_Screen::Snowflake>::const_iterator it = particles.begin(); it != particles.end(); ++it) {
+@@ -169,9 +183,8 @@
+ 		const int y = particle.y % SCREEN_TARGET_HEIGHT;
+ 		const int length = 3 + strength * 2 + (particle.life & 3);
+ 		const int alpha = 48 + strength * 24 + (particle.life & 31);
+-		weather_surface->FillRect(Rect(x, y, length, 1), Color(240, 208, 152, alpha));
++		destination.FillRect(Rect(x, y, length, 1), Color(240, 208, 152, alpha));
+ 	}
+-	dirty = true;
+ }
+ 
+ Tone Weather::GetTone() const {
+--- a/src/cache.cpp
++++ b/src/cache.cpp
+@@ -19,7 +19,7 @@
+ #  pragma warning(disable: 4003)
+ #endif
+ 
+-#include <map>
++#include <unordered_map>
+ 
+ #include "async_handler.h"
+ #include "cache.h"
+@@ -35,15 +35,39 @@
+ namespace {
+ 	typedef std::pair<std::string,std::string> string_pair;
+ 
++	size_t HashString(const std::string& value) {
++		size_t hash = static_cast<size_t>(2166136261u);
++		for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
++			hash ^= static_cast<unsigned char>(*it);
++			hash *= static_cast<size_t>(16777619u);
++		}
++		return hash;
++	}
++
++	struct StringPairHash {
++		size_t operator()(const string_pair& value) const {
++			size_t hash = HashString(value.first);
++			hash ^= HashString(value.second) + static_cast<size_t>(0x9e3779b9u) + (hash << 6) + (hash >> 2);
++			return hash;
++		}
++	};
++
+ 	struct CacheItem {
+ 		BitmapRef bitmap;
+ 		uint32_t last_access;
+ 	};
+ 
+ 	typedef std::pair<std::string, int> tile_pair;
+-	typedef std::map<string_pair, CacheItem> cache_type;
++	struct TilePairHash {
++		size_t operator()(const tile_pair& value) const {
++			size_t hash = HashString(value.first);
++			hash ^= static_cast<size_t>(value.second) + static_cast<size_t>(0x9e3779b9u) + (hash << 6) + (hash >> 2);
++			return hash;
++		}
++	};
++	typedef std::unordered_map<string_pair, CacheItem, StringPairHash> cache_type;
+ 	cache_type cache;
+-	typedef std::map<tile_pair, std::weak_ptr<Bitmap> > cache_tiles_type;
++	typedef std::unordered_map<tile_pair, std::weak_ptr<Bitmap>, TilePairHash> cache_tiles_type;
+ 	cache_tiles_type cache_tiles;
+ 	std::string system_name;
+ 	cache_type::iterator bitmap_sweep = cache.end();
+@@ -94,8 +118,13 @@
+ 			cached_bitmap_bytes -= BitmapBytes(current->second.bitmap);
+ 			if (cached_bitmap_bytes < 0)
+ 				cached_bitmap_bytes = 0;
++			current->second.bitmap = bitmap;
++			current->second.last_access = ticks;
++		} else {
++			// unordered_map may rehash on insertion, invalidating the sweep cursor.
++			bitmap_sweep = cache.end();
++			cache.insert(std::make_pair(key, CacheItem{bitmap, ticks}));
+ 		}
+-		cache[key] = {bitmap, ticks};
+ 		const int bytes = BitmapBytes(bitmap);
+ 		if (bytes > 0x7fffffff - cached_bitmap_bytes)
+ 			cached_bitmap_bytes = 0x7fffffff;
+@@ -305,11 +334,13 @@
+ 		Spec const& s = spec[T];
+ 		if (f == CACHE_DEFAULT_BITMAP)
+ 			return LoadDummyBitmap<T>(s.directory, f);
++#ifndef NDEBUG
+ 		FileRequestAsync* request = AsyncHandler::RequestFile(s.directory, f);
+ 		if (!request->IsReady()) {
+ 			Output::Debug("BUG: File Not Requested: %s/%s", s.directory, f.c_str());
+ 			return BitmapRef();
+ 		}
++#endif
+ 		BitmapRef ret = LoadBitmap(s.directory, f, transparent, Bitmap::Flag_ReadOnly | (
+ 										 T == Material::Chipset? Bitmap::Flag_Chipset:
+ 										 T == Material::System? Bitmap::Flag_System:
+@@ -392,6 +423,7 @@
+ 		}
+ 		rect.x += sub_tile_id % 6 * 16;
+ 		rect.y += sub_tile_id / 6 * 16;
++		tile_sweep = cache_tiles.end();
+ 		return(cache_tiles[key] = Bitmap::Create(*chipset, rect)).lock();
+ 	} else {
+ 		return it->second.lock();

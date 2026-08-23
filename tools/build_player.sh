@@ -118,9 +118,7 @@ SOURCES=(
     "$PIXMAN_ROOT/pixman-fast-path.c"
     "$PIXMAN_ROOT/pixman.c"
     "$PROJECT_DIR/src/core/PixmanCompat.c"
-    "$PLAYER_ROOT/color.cpp"
     "$PLAYER_ROOT/rect.cpp"
-    "$PLAYER_ROOT/tone.cpp"
     "$PLAYER_ROOT/bitmap.cpp"
     "$PLAYER_ROOT/effects.cpp"
     "$PLAYER_ROOT/tilemap_layer.cpp"
@@ -375,6 +373,7 @@ for source in "${SOURCES[@]}"; do
         $language_flag \
         $standard_flag \
         "${PLAYER_OPT_FLAGS[@]}" \
+        -fno-math-errno \
         -fomit-frame-pointer \
         -ffreestanding \
         -fno-exceptions \

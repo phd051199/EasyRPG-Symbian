@@ -248,10 +248,21 @@ void _pixman_bits_image_setup_accessors(bits_image_t* image) {
     image->store_scanline_float = StoreScanlineFloat;
 }
 
+static force_inline uint32_t SymbianAddBytesSaturate(uint32_t lhs, uint32_t rhs) {
+#if defined(__arm__) && defined(__ARM_ARCH) && (__ARM_ARCH >= 6)
+    uint32_t result;
+    __asm__ volatile ("uqadd8 %0, %1, %2" : "=r"(result) : "r"(lhs), "r"(rhs));
+    return result;
+#else
+    UN8x4_ADD_UN8x4(lhs, rhs);
+    return lhs;
+#endif
+}
+
 static force_inline uint32_t SymbianOver(uint32_t src, uint32_t dest) {
     uint32_t a = ~src >> 24;
-    UN8x4_MUL_UN8_ADD_UN8x4(dest, a, src);
-    return dest;
+    UN8x4_MUL_UN8(dest, a);
+    return SymbianAddBytesSaturate(dest, src);
 }
 
 static force_inline uint32_t SymbianIn(uint32_t value, uint8_t alpha) {
@@ -955,6 +966,8 @@ pixman_bool_t pixman_region32_union_rect(pixman_region32_t* dest, pixman_region3
 }
 
 void pixman_region32_translate(pixman_region32_t* region, int x, int y) {
+    if (x == 0 && y == 0)
+        return;
     region->extents.x1 += x; region->extents.x2 += x;
     region->extents.y1 += y; region->extents.y2 += y;
 }
@@ -1039,7 +1052,12 @@ pixman_bool_t pixman_region_union_rect(pixman_region16_t* dest, pixman_region16_
     return pixman_region_union(dest, source, &rect);
 }
 
-void pixman_region_translate(pixman_region16_t* region, int x, int y) { region->extents.x1 += x; region->extents.x2 += x; region->extents.y1 += y; region->extents.y2 += y; }
+void pixman_region_translate(pixman_region16_t* region, int x, int y) {
+    if (x == 0 && y == 0)
+        return;
+    region->extents.x1 += x; region->extents.x2 += x;
+    region->extents.y1 += y; region->extents.y2 += y;
+}
 pixman_bool_t pixman_region_not_empty(pixman_region16_t* region) { return !BoxEmpty16(&region->extents); }
 pixman_box16_t* pixman_region_extents(pixman_region16_t* region) { return &region->extents; }
 int pixman_region_n_rects(pixman_region16_t* region) { return BoxEmpty16(&region->extents) ? 0 : 1; }

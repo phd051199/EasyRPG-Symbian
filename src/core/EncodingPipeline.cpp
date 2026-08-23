@@ -89,10 +89,12 @@ bool IsAsciiLetter(unsigned char value) {
 struct Tcvn3Evidence {
     unsigned int ascii_letters = 0;
     unsigned int mapped_bytes = 0;
+    unsigned int ascii_anchored_bytes = 0;
     unsigned int score = 0;
 };
 
-Tcvn3Evidence InspectTcvn3(const std::string& input) {
+Tcvn3Evidence InspectTcvn3(const std::string& input,
+                           bool preserve_ascii_anchored_high_bytes) {
     Tcvn3Evidence result;
     for (std::string::size_type index = 0; index < input.size(); ++index) {
         if (IsAsciiLetter(static_cast<unsigned char>(input[index])))
@@ -112,17 +114,25 @@ Tcvn3Evidence InspectTcvn3(const std::string& input) {
         }
         if (value < 0xa1u)
             continue;
-        if (value >= 0xe0u && result.ascii_letters * 2u <= input.size())
-            continue;
-
-        ++result.mapped_bytes;
         const bool left_letter = index > 0 &&
             IsAsciiLetter(static_cast<unsigned char>(input[index - 1]));
         const bool right_letter = index + 1 < input.size() &&
             IsAsciiLetter(static_cast<unsigned char>(input[index + 1]));
-        if (left_letter || right_letter)
+        // CP932 lead bytes in Japanese text frequently overlap the high half
+        // of TCVN3. Ignore those when the string has little ASCII context,
+        // except when the byte is embedded in an ASCII word. RPG Maker
+        // control sequences (\C[n], \|, ...) otherwise dilute the global
+        // ASCII ratio and made valid Vietnamese words such as "trường học",
+        // "sống sót" and "hệ thống" look like Shift-JIS.
+        if (value >= 0xe0u && result.ascii_letters * 2u <= input.size() &&
+            (!preserve_ascii_anchored_high_bytes || (!left_letter && !right_letter)))
+            continue;
+
+        ++result.mapped_bytes;
+        if (left_letter || right_letter) {
+            ++result.ascii_anchored_bytes;
             result.score += 2;
-        else if ((index > 0 && input[index - 1] == ' ') ||
+        } else if ((index > 0 && input[index - 1] == ' ') ||
                  (index + 1 < input.size() && input[index + 1] == ' '))
             ++result.score;
     }
@@ -268,6 +278,147 @@ bool HasStrongTcvn3Evidence(const Tcvn3Evidence& evidence) {
     return evidence.mapped_bytes >= 2u && HasTcvn3Evidence(evidence);
 }
 
+bool HasAsciiAnchoredTcvn3Evidence(const Tcvn3Evidence& evidence) {
+    return evidence.mapped_bytes >= 2u &&
+           evidence.ascii_anchored_bytes >= 2u &&
+           evidence.ascii_letters >= 3u &&
+           evidence.ascii_letters >= evidence.mapped_bytes * 2u;
+}
+
+char VietnameseBaseLetter(unsigned int codepoint) {
+    if (codepoint >= 0x1ea0u && codepoint <= 0x1eb7u) return 'a';
+    if (codepoint >= 0x1eb8u && codepoint <= 0x1ec7u) return 'e';
+    if (codepoint >= 0x1ec8u && codepoint <= 0x1ecbu) return 'i';
+    if (codepoint >= 0x1eccu && codepoint <= 0x1ee3u) return 'o';
+    if (codepoint >= 0x1ee4u && codepoint <= 0x1ef1u) return 'u';
+    if (codepoint >= 0x1ef2u && codepoint <= 0x1ef9u) return 'y';
+    switch (codepoint) {
+    case 0x00c0u: case 0x00c1u: case 0x00c2u: case 0x00c3u:
+    case 0x00e0u: case 0x00e1u: case 0x00e2u: case 0x00e3u:
+    case 0x0102u: case 0x0103u: return 'a';
+    case 0x00c8u: case 0x00c9u: case 0x00cau:
+    case 0x00e8u: case 0x00e9u: case 0x00eau: return 'e';
+    case 0x00ccu: case 0x00cdu: case 0x00ecu: case 0x00edu:
+    case 0x0128u: case 0x0129u: return 'i';
+    case 0x00d2u: case 0x00d3u: case 0x00d4u: case 0x00d5u:
+    case 0x00f2u: case 0x00f3u: case 0x00f4u: case 0x00f5u:
+    case 0x01a0u: case 0x01a1u: return 'o';
+    case 0x00d9u: case 0x00dau: case 0x00f9u: case 0x00fau:
+    case 0x0168u: case 0x0169u: case 0x01afu: case 0x01b0u: return 'u';
+    case 0x00ddu: case 0x00fdu: return 'y';
+    case 0x0110u: case 0x0111u: return 'd';
+    default: return 0;
+    }
+}
+
+bool IsVietnameseVowel(char value) {
+    return value == 'a' || value == 'e' || value == 'i' ||
+           value == 'o' || value == 'u' || value == 'y';
+}
+
+bool MatchesAny(const std::string& value, const char* const* values,
+                unsigned int count) {
+    for (unsigned int index = 0; index < count; ++index) {
+        if (value == values[index])
+            return true;
+    }
+    return false;
+}
+
+bool IsPlausibleVietnameseSyllable(const std::string& normalized,
+                                   unsigned int mapped_letters,
+                                   unsigned int ascii_letters) {
+    if (mapped_letters == 0u || ascii_letters == 0u ||
+        normalized.empty() || normalized.size() > 9u)
+        return false;
+
+    std::string::size_type vowel_begin = std::string::npos;
+    std::string::size_type vowel_end = std::string::npos;
+    for (std::string::size_type index = 0; index < normalized.size(); ++index) {
+        if (!IsVietnameseVowel(normalized[index]))
+            continue;
+        if (vowel_begin == std::string::npos) {
+            vowel_begin = index;
+            vowel_end = index + 1u;
+        } else if (index == vowel_end) {
+            vowel_end = index + 1u;
+        } else {
+            return false;
+        }
+    }
+    if (vowel_begin == std::string::npos)
+        return false;
+
+    static const char* const KOnsets[] = {
+        "", "b", "c", "ch", "d", "g", "gh", "gi", "h", "k", "kh",
+        "l", "m", "n", "ng", "ngh", "nh", "p", "ph", "q", "qu", "r",
+        "s", "t", "th", "tr", "v", "x"
+    };
+    static const char* const KFinals[] = {
+        "", "c", "ch", "m", "n", "ng", "nh", "p", "t"
+    };
+    const std::string onset = normalized.substr(0, vowel_begin);
+    const std::string final = normalized.substr(vowel_end);
+    return MatchesAny(onset, KOnsets, sizeof(KOnsets) / sizeof(KOnsets[0])) &&
+           MatchesAny(final, KFinals, sizeof(KFinals) / sizeof(KFinals[0]));
+}
+
+bool ContainsCp932PunctuationPair(const std::string& input) {
+    for (std::string::size_type index = 0; index + 1u < input.size(); ++index) {
+        if (static_cast<unsigned char>(input[index]) == 0x81u &&
+            IsCp932TrailByte(static_cast<unsigned char>(input[index + 1u])))
+            return true;
+    }
+    return false;
+}
+
+bool LooksLikeVietnameseSyllables(const std::string& input) {
+    if (ContainsCp932PunctuationPair(input))
+        return false;
+
+    unsigned int good_words = 0;
+    unsigned int bad_words = 0;
+    unsigned int good_mapped_letters = 0;
+    std::string normalized;
+    unsigned int mapped_letters = 0;
+    unsigned int ascii_letters = 0;
+
+    for (std::string::size_type index = 0; index <= input.size(); ++index) {
+        char base = 0;
+        bool mapped = false;
+        if (index < input.size()) {
+            const unsigned char value = static_cast<unsigned char>(input[index]);
+            if (IsAsciiLetter(value)) {
+                base = value >= 'A' && value <= 'Z' ?
+                    static_cast<char>(value - 'A' + 'a') : static_cast<char>(value);
+            } else {
+                base = VietnameseBaseLetter(EasyRpgTcvn3DecodeByte(value));
+                mapped = base != 0;
+            }
+        }
+
+        if (base != 0) {
+            normalized.push_back(base);
+            if (mapped) ++mapped_letters;
+            else ++ascii_letters;
+            continue;
+        }
+
+        if (mapped_letters != 0u) {
+            if (IsPlausibleVietnameseSyllable(normalized, mapped_letters, ascii_letters)) {
+                ++good_words;
+                good_mapped_letters += mapped_letters;
+            } else {
+                ++bad_words;
+            }
+        }
+        normalized.clear();
+        mapped_letters = 0;
+        ascii_letters = 0;
+    }
+    return good_words != 0u && bad_words == 0u && good_mapped_letters >= 2u;
+}
+
 bool IsVietnameseLetter(unsigned int codepoint) {
     return (codepoint >= 0x00c0u && codepoint <= 0x00c3u) ||
            (codepoint >= 0x00c8u && codepoint <= 0x00cau) ||
@@ -325,12 +476,19 @@ bool LooksLikeVietnameseLatinText(const std::string& input,
            (spaces != 0u || evidence.mapped_bytes >= 2u);
 }
 
-MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
-    const Tcvn3Evidence tcvn3 = InspectTcvn3(input);
+MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input,
+                                            bool prefer_ascii_anchored_tcvn3) {
+    const Tcvn3Evidence tcvn3 = InspectTcvn3(input, false);
     const Cp932Evidence cp932 = InspectCp932(input);
 
     if (!cp932.valid)
         return HasTcvn3Evidence(tcvn3) ? MixedLegacyEncoding::Tcvn3 : MixedLegacyEncoding::Unknown;
+    if (prefer_ascii_anchored_tcvn3) {
+        const Tcvn3Evidence relaxed_tcvn3 = InspectTcvn3(input, true);
+        if (HasAsciiAnchoredTcvn3Evidence(relaxed_tcvn3) &&
+            LooksLikeVietnameseSyllables(input))
+            return MixedLegacyEncoding::Tcvn3;
+    }
     if (cp932.longest_multibyte_run >= 2u)
         return MixedLegacyEncoding::Cp932;
     if (HasStrongTcvn3Evidence(tcvn3))
@@ -342,6 +500,10 @@ MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
     return HasTcvn3Evidence(tcvn3) ? MixedLegacyEncoding::Tcvn3 : MixedLegacyEncoding::Cp932;
 }
 
+MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
+    return ClassifyMixedLegacyText(input, true);
+}
+
 unsigned int CountTcvn3Lines(const std::string& input) {
     unsigned int tcvn3_lines = 0;
     std::string::size_type start = 0;
@@ -351,7 +513,10 @@ unsigned int CountTcvn3Lines(const std::string& input) {
             end = input.size();
         if (end > start) {
             const std::string line(input, start, end - start);
-            if (ClassifyMixedLegacyText(line) == MixedLegacyEncoding::Tcvn3)
+            // Keep game-level detection conservative. The relaxed per-string
+            // rule is only needed after a game is already known to be mixed;
+            // using it here can make Japanese resource names look Vietnamese.
+            if (ClassifyMixedLegacyText(line, false) == MixedLegacyEncoding::Tcvn3)
                 ++tcvn3_lines;
         }
         start = end + 1;
@@ -503,6 +668,13 @@ std::string PlatformLegacyToUtf8(const std::string& input, unsigned int codepage
 }
 
 std::string DecodeMixedLegacyText(const std::string& input) {
+    // Savegames written by older Symbian builds stored UTF-8 bytes even when
+    // the project encoding was EASYRPG_VI_CP932. Preserve valid UTF-8 here so
+    // those saves keep resource names (especially CharSet sprite names)
+    // intact instead of reinterpreting them as TCVN3/CP932.
+    if (IsValidUtf8(input))
+        return input;
+
     switch (ClassifyMixedLegacyText(input)) {
     case MixedLegacyEncoding::Cp932: {
         const std::string decoded = Cp932ToUtf8(input);
@@ -551,6 +723,39 @@ std::string Utf8ToCp932(const std::string& input) {
     const int status = EasyRpgCoreUtf16ToCp932(&utf16[0], static_cast<unsigned int>(utf16.size()), &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length);
     if (status != 0) return std::string();
     return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+}
+
+std::string Utf8ToTcvn3(const std::string& input) {
+    std::vector<unsigned short> utf16;
+    if (!Utf8ToUtf16(input, utf16) || utf16.empty())
+        return std::string();
+
+    std::string encoded;
+    encoded.reserve(utf16.size());
+    for (std::vector<unsigned short>::const_iterator it = utf16.begin(); it != utf16.end(); ++it) {
+        const int value = EasyRpgTcvn3EncodeCodepoint(*it);
+        if (value < 0)
+            return std::string();
+        encoded.push_back(static_cast<char>(value));
+    }
+    return encoded;
+}
+
+std::string Utf8ToMixedVietnamese(const std::string& input) {
+    // Mixed Vietnamese projects contain per-string TCVN3 and CP932 data.
+    // Prefer TCVN3 when every codepoint is representable there (Vietnamese
+    // text and ASCII), otherwise use CP932 for Japanese resource/text names.
+    // If neither legacy encoding can represent the string, keep UTF-8; the
+    // matching decoder deliberately preserves valid UTF-8 for compatibility.
+    const std::string tcvn3 = Utf8ToTcvn3(input);
+    if (!tcvn3.empty())
+        return tcvn3;
+
+    const std::string cp932 = Utf8ToCp932(input);
+    if (!cp932.empty())
+        return cp932;
+
+    return input;
 }
 
 std::string Utf8ToGbk(const std::string& input) {
@@ -894,6 +1099,7 @@ std::string ReaderUtil::Recode(const std::string& str_to_encode, const std::stri
     else if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc)) result = Cp932ToUtf8(str_to_encode);
     else if (IsGbkEncoding(src_enc) && IsUtf8Encoding(dst_enc)) result = GbkToUtf8(str_to_encode);
     else if (IsBig5Encoding(src_enc) && IsUtf8Encoding(dst_enc)) result = PlatformLegacyToUtf8(str_to_encode, 950);
+    else if (IsUtf8Encoding(src_enc) && IsMixedVietnameseEncoding(dst_enc)) result = Utf8ToMixedVietnamese(str_to_encode);
     else if (IsUtf8Encoding(src_enc) && IsCp932Encoding(dst_enc)) result = Utf8ToCp932(str_to_encode);
     else if (IsUtf8Encoding(src_enc) && IsGbkEncoding(dst_enc)) result = Utf8ToGbk(str_to_encode);
     else if (IsUtf8Encoding(src_enc) && IsMixedGbkCp932Encoding(dst_enc)) result = Utf8ToMixedGbkCp932(str_to_encode);

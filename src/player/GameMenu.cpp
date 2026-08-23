@@ -15,8 +15,8 @@ const TInt KDefaultVolume = 50;
 const TInt KVolumeStep = 10;
 const TInt KGohuGlyphWidth = 6;
 const TInt KGohuGlyphHeight = 11;
-const TInt KMenuFontScale = 2;
-const TInt KMenuTextHeight = KGohuGlyphHeight * KMenuFontScale;
+const TInt KMenuFontScale = 1;
+const TInt KMenuTextHeight = 12;
 const TInt KMenuTextAdvance = KGohuGlyphWidth * KMenuFontScale;
 _LIT8(KMasterVolumeSetting, "master_volume=");
 _LIT8(KSoundSetting, "sound_enabled=");
@@ -68,10 +68,10 @@ TInt GohuTextWidth(const TDesC8& aText)
     return aText.Length() * KMenuTextAdvance;
 }
 
-void DrawGohuText(CGraphicsContext& aGc,
-                  const TDesC8& aText,
-                  const TPoint& aOrigin,
-                  const TRgb& aColor)
+void DrawGohuTextPass(CGraphicsContext& aGc,
+                      const TDesC8& aText,
+                      const TPoint& aOrigin,
+                      const TRgb& aColor)
 {
     aGc.SetPenStyle(CGraphicsContext::ENullPen);
     aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
@@ -109,6 +109,14 @@ void DrawGohuText(CGraphicsContext& aGc,
         }
         cursorX += KMenuTextAdvance;
     }
+}
+
+void DrawGohuText(CGraphicsContext& aGc,
+                  const TDesC8& aText,
+                  const TPoint& aOrigin,
+                  const TRgb& aColor)
+{
+    DrawGohuTextPass(aGc, aText, aOrigin, aColor);
 }
 }
 
@@ -606,10 +614,10 @@ void CGameMenu::DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
     NormalizeSelection();
 
     const TSize screenSize = aDevice.SizeInPixels();
-    const TInt rowHeight = KMenuTextHeight + 5;
-    const TInt footerHeight = KMenuTextHeight + 8;
-    const TInt panelWidth = Min(190, Max(1, screenSize.iWidth - 12));
-    const TInt wantedHeight = itemCount * rowHeight + footerHeight + 8;
+    const TInt rowHeight = KMenuTextHeight + 4;
+    const TInt footerHeight = KMenuTextHeight + 7;
+    const TInt panelWidth = Min(148, Max(1, screenSize.iWidth - 12));
+    const TInt wantedHeight = itemCount * rowHeight + footerHeight + 7;
     const TInt panelHeight = Min(wantedHeight, Max(1, screenSize.iHeight - 12));
     const TPoint origin(0, screenSize.iHeight - panelHeight);
     const TRect panel(origin, TSize(panelWidth, panelHeight));
@@ -622,8 +630,8 @@ void CGameMenu::DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
 
     const TInt rowX = panel.iTl.iX + 5;
     const TInt rowWidth = panelWidth - 10;
-    const TInt firstY = panel.iTl.iY + 5;
-    const TInt visibleRows = Max(1, (panelHeight - footerHeight - 8) / rowHeight);
+    const TInt firstY = panel.iTl.iY + 4;
+    const TInt visibleRows = Max(1, (panelHeight - footerHeight - 7) / rowHeight);
     TInt firstItem = 0;
     if (iSelection >= visibleRows)
         firstItem = iSelection - visibleRows + 1;

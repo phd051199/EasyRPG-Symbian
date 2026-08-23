@@ -1,0 +1,276 @@
+--- a/src/reader_lcf.h
++++ b/src/reader_lcf.h
+@@ -231,6 +231,8 @@
+ 	std::string encoding;
+ 	/** File-stream managed by this Reader. */
+ 	FILE* stream;
++	/** Cached stream position. Avoids repeated ftell() calls while parsing. */
++	uint32_t stream_pos;
+ 	/** Contains the last set error. */
+ 	static std::string error_str;
+ 
+--- a/src/reader_lcf.cpp
++++ b/src/reader_lcf.cpp
+@@ -18,14 +18,16 @@
+ LcfReader::LcfReader(const char* filename, std::string encoding) :
+ 	filename(filename),
+ 	encoding(encoding),
+-	stream(fopen(filename, "rb"))
++	stream(fopen(filename, "rb")),
++	stream_pos(0)
+ {
+ }
+ 
+ LcfReader::LcfReader(const std::string& filename, std::string encoding) :
+ 	filename(filename),
+ 	encoding(encoding),
+-	stream(fopen(filename.c_str(), "rb"))
++	stream(fopen(filename.c_str(), "rb")),
++	stream_pos(0)
+ {
+ }
+ 
+@@ -41,6 +43,7 @@
+ 
+ size_t LcfReader::Read0(void *ptr, size_t size, size_t nmemb) {
+ 	size_t result = fread(ptr, size, nmemb, stream);
++	stream_pos += static_cast<uint32_t>(result * size);
+ #ifdef NDEBUG
+ 	if (result != nmemb && !Eof()) {
+ 		perror("Reading error: ");
+@@ -160,11 +163,11 @@
+ }
+ 
+ void LcfReader::ReadString(std::string& ref, size_t size) {
+-	char* chars = new char[size + 1];
+-	chars[size] = '\0';
+-	Read(chars, 1, size);
+-	ref = Encode(std::string(chars));
+-	delete[] chars;
++	std::string raw;
++	raw.resize(size);
++	if (size != 0)
++		Read(&raw[0], 1, size);
++	ref = Encode(raw);
+ }
+ 
+ bool LcfReader::IsOk() const {
+@@ -176,15 +179,25 @@
+ }
+ 
+ void LcfReader::Seek(size_t pos, SeekMode mode) {
++	int result = -1;
+ 	switch (mode) {
+ 	case LcfReader::FromStart:
+-		fseek(stream, pos, SEEK_SET);
++		result = fseek(stream, pos, SEEK_SET);
++		if (result == 0)
++			stream_pos = static_cast<uint32_t>(pos);
+ 		break;
+ 	case LcfReader::FromCurrent:
+-		fseek(stream, pos, SEEK_CUR);
++		result = fseek(stream, pos, SEEK_CUR);
++		if (result == 0)
++			stream_pos += static_cast<uint32_t>(pos);
+ 		break;
+ 	case LcfReader::FromEnd:
+-		fseek(stream, pos, SEEK_END);
++		result = fseek(stream, pos, SEEK_END);
++		if (result == 0) {
++			long current = ftell(stream);
++			if (current >= 0)
++				stream_pos = static_cast<uint32_t>(current);
++		}
+ 		break;
+ 	default:
+ 		assert(false && "Invalid SeekMode");
+@@ -192,11 +205,15 @@
+ }
+ 
+ uint32_t LcfReader::Tell() {
+-	return (uint32_t)ftell(stream);
++	return stream_pos;
+ }
+ 
+ bool LcfReader::Ungetch(uint8_t ch) {
+-	return (ungetc(ch, stream) == ch);
++	if (ungetc(ch, stream) != ch)
++		return false;
++	if (stream_pos > 0)
++		--stream_pos;
++	return true;
+ }
+ 
+ #ifdef _DEBUG
+@@ -227,6 +244,12 @@
+ }
+ #else
+ void LcfReader::Skip(const struct LcfReader::Chunk& chunk_info) {
++	if (chunk_info.length <= 64) {
++		uint8_t buffer[64];
++		if (chunk_info.length != 0)
++			Read(buffer, 1, chunk_info.length);
++		return;
++	}
+ 	Seek((size_t)chunk_info.length, FromCurrent);
+ }
+ #endif
+--- a/src/ldb_eventcommand.cpp
++++ b/src/ldb_eventcommand.cpp
+@@ -35,9 +35,10 @@
+ 	if (event_command.code != 0) {
+ 		stream.Read(event_command.indent);
+ 		stream.ReadString(event_command.string, stream.ReadInt());
+-		for (int i = stream.ReadInt(); i > 0; i--) {
+-			event_command.parameters.push_back(stream.ReadInt());
+-		}
++		const int parameter_count = stream.ReadInt();
++		event_command.parameters.resize(parameter_count);
++		for (int i = 0; i < parameter_count; ++i)
++			event_command.parameters[i] = stream.ReadInt();
+ 	}
+ }
+ 
+@@ -144,9 +145,8 @@
+ 			break;
+ 		}
+ 		stream.Ungetch(ch);
+-		RPG::EventCommand command;
+-		RawStruct<RPG::EventCommand>::ReadLcf(command, stream, 0);
+-		event_commands.push_back(command);
++		event_commands.push_back(RPG::EventCommand());
++		RawStruct<RPG::EventCommand>::ReadLcf(event_commands.back(), stream, 0);
+ 	}
+ 	assert(stream.Tell() == endpos);
+ }
+--- a/src/reader_struct.h
++++ b/src/reader_struct.h
+@@ -698,16 +698,20 @@
+ 	NULL }; \
+ 
+ #define LCF_STRUCT_TYPED_FIELD(T, REF) \
+-	new TypedField<RPG::LCF_CURRENT_STRUCT, T>( \
+-		  &RPG::LCF_CURRENT_STRUCT::REF \
+-		, LCF_CHUNK_SUFFIX::BOOST_PP_CAT(Chunk, LCF_CURRENT_STRUCT)::REF \
+-		, BOOST_PP_STRINGIZE(REF) \
+-	) \
++	([]() -> Field<RPG::LCF_CURRENT_STRUCT> const* { \
++		static TypedField<RPG::LCF_CURRENT_STRUCT, T> field( \
++			  &RPG::LCF_CURRENT_STRUCT::REF \
++			, LCF_CHUNK_SUFFIX::BOOST_PP_CAT(Chunk, LCF_CURRENT_STRUCT)::REF \
++			, BOOST_PP_STRINGIZE(REF)); \
++		return &field; \
++	}()) \
+ 
+ #define LCF_STRUCT_SIZE_FIELD(T, REF) \
+-	new SizeField<RPG::LCF_CURRENT_STRUCT, T>( \
+-		  &RPG::LCF_CURRENT_STRUCT::REF \
+-		, LCF_CHUNK_SUFFIX::BOOST_PP_CAT(Chunk, LCF_CURRENT_STRUCT)::BOOST_PP_CAT(REF, _size) \
+-	) \
++	([]() -> Field<RPG::LCF_CURRENT_STRUCT> const* { \
++		static SizeField<RPG::LCF_CURRENT_STRUCT, T> field( \
++			  &RPG::LCF_CURRENT_STRUCT::REF \
++			, LCF_CHUNK_SUFFIX::BOOST_PP_CAT(Chunk, LCF_CURRENT_STRUCT)::BOOST_PP_CAT(REF, _size)); \
++		return &field; \
++	}()) \
+ 
+ #endif
+--- a/src/generated/ldb_terrain_flags.cpp
++++ b/src/generated/ldb_terrain_flags.cpp
+@@ -21,12 +21,17 @@
+ template <>
+ char const* const Flags<flags_type>::name("Terrain_Flags");
+ 
++static Flags<flags_type>::Flag flag_back_party(&flags_type::back_party, "back_party");
++static Flags<flags_type>::Flag flag_back_enemies(&flags_type::back_enemies, "back_enemies");
++static Flags<flags_type>::Flag flag_lateral_party(&flags_type::lateral_party, "lateral_party");
++static Flags<flags_type>::Flag flag_lateral_enemies(&flags_type::lateral_enemies, "lateral_enemies");
++
+ template <>
+ const Flags<flags_type>::Flag* Flags<flags_type>::flags[] = {
+-	new Flags<flags_type>::Flag(&flags_type::back_party,		"back_party"		),
+-	new Flags<flags_type>::Flag(&flags_type::back_enemies,		"back_enemies"		),
+-	new Flags<flags_type>::Flag(&flags_type::lateral_party,		"lateral_party"		),
+-	new Flags<flags_type>::Flag(&flags_type::lateral_enemies,	"lateral_enemies"	),
++	&flag_back_party,
++	&flag_back_enemies,
++	&flag_lateral_party,
++	&flag_lateral_enemies,
+ 	NULL
+ };
+ 
+--- a/src/generated/ldb_trooppagecondition_flags.cpp
++++ b/src/generated/ldb_trooppagecondition_flags.cpp
+@@ -21,18 +21,29 @@
+ template <>
+ char const* const Flags<flags_type>::name("TroopPageCondition_Flags");
+ 
++static Flags<flags_type>::Flag flag_switch_a(&flags_type::switch_a, "switch_a");
++static Flags<flags_type>::Flag flag_switch_b(&flags_type::switch_b, "switch_b");
++static Flags<flags_type>::Flag flag_variable(&flags_type::variable, "variable");
++static Flags<flags_type>::Flag flag_turn(&flags_type::turn, "turn");
++static Flags<flags_type>::Flag flag_fatigue(&flags_type::fatigue, "fatigue");
++static Flags<flags_type>::Flag flag_enemy_hp(&flags_type::enemy_hp, "enemy_hp");
++static Flags<flags_type>::Flag flag_actor_hp(&flags_type::actor_hp, "actor_hp");
++static Flags<flags_type>::Flag flag_turn_enemy(&flags_type::turn_enemy, "turn_enemy");
++static Flags<flags_type>::Flag flag_turn_actor(&flags_type::turn_actor, "turn_actor");
++static Flags<flags_type>::Flag flag_command_actor(&flags_type::command_actor, "command_actor");
++
+ template <>
+ const Flags<flags_type>::Flag* Flags<flags_type>::flags[] = {
+-	new Flags<flags_type>::Flag(&flags_type::switch_a,		"switch_a"		),
+-	new Flags<flags_type>::Flag(&flags_type::switch_b,		"switch_b"		),
+-	new Flags<flags_type>::Flag(&flags_type::variable,		"variable"		),
+-	new Flags<flags_type>::Flag(&flags_type::turn,			"turn"			),
+-	new Flags<flags_type>::Flag(&flags_type::fatigue,		"fatigue"		),
+-	new Flags<flags_type>::Flag(&flags_type::enemy_hp,		"enemy_hp"		),
+-	new Flags<flags_type>::Flag(&flags_type::actor_hp,		"actor_hp"		),
+-	new Flags<flags_type>::Flag(&flags_type::turn_enemy,	"turn_enemy"	),
+-	new Flags<flags_type>::Flag(&flags_type::turn_actor,	"turn_actor"	),
+-	new Flags<flags_type>::Flag(&flags_type::command_actor,	"command_actor"	),
++	&flag_switch_a,
++	&flag_switch_b,
++	&flag_variable,
++	&flag_turn,
++	&flag_fatigue,
++	&flag_enemy_hp,
++	&flag_actor_hp,
++	&flag_turn_enemy,
++	&flag_turn_actor,
++	&flag_command_actor,
+ 	NULL
+ };
+ 
+--- a/src/generated/lmu_eventpagecondition_flags.cpp
++++ b/src/generated/lmu_eventpagecondition_flags.cpp
+@@ -21,15 +21,23 @@
+ template <>
+ char const* const Flags<flags_type>::name("EventPageCondition_Flags");
+ 
++static Flags<flags_type>::Flag flag_switch_a(&flags_type::switch_a, "switch_a");
++static Flags<flags_type>::Flag flag_switch_b(&flags_type::switch_b, "switch_b");
++static Flags<flags_type>::Flag flag_variable(&flags_type::variable, "variable");
++static Flags<flags_type>::Flag flag_item(&flags_type::item, "item");
++static Flags<flags_type>::Flag flag_actor(&flags_type::actor, "actor");
++static Flags<flags_type>::Flag flag_timer(&flags_type::timer, "timer");
++static Flags<flags_type>::Flag flag_timer2(&flags_type::timer2, "timer2");
++
+ template <>
+ const Flags<flags_type>::Flag* Flags<flags_type>::flags[] = {
+-	new Flags<flags_type>::Flag(&flags_type::switch_a,	"switch_a"	),
+-	new Flags<flags_type>::Flag(&flags_type::switch_b,	"switch_b"	),
+-	new Flags<flags_type>::Flag(&flags_type::variable,	"variable"	),
+-	new Flags<flags_type>::Flag(&flags_type::item,		"item"		),
+-	new Flags<flags_type>::Flag(&flags_type::actor,		"actor"		),
+-	new Flags<flags_type>::Flag(&flags_type::timer,		"timer"		),
+-	new Flags<flags_type>::Flag(&flags_type::timer2,	"timer2"	),
++	&flag_switch_a,
++	&flag_switch_b,
++	&flag_variable,
++	&flag_item,
++	&flag_actor,
++	&flag_timer,
++	&flag_timer2,
+ 	NULL
+ };
+ 

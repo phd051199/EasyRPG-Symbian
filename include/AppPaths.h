@@ -14,9 +14,7 @@ inline TInt Build(TDes& aPath, const TDesC& aSuffix)
         return KErrArgument;
 
     TPtrC suffix(aSuffix);
-    const TBool memoryCard = executable[0] == 'E' || executable[0] == 'e';
-    if (memoryCard &&
-        aSuffix.Length() >= 5 &&
+    if (aSuffix.Length() >= 5 &&
         aSuffix.Left(5).CompareF(_L("\\Data")) == 0 &&
         (aSuffix.Length() == 5 || aSuffix[5] == '\\'))
     {

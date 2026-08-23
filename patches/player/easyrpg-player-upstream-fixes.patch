@@ -1,0 +1,187 @@
+--- a/src/bitmap.cpp
++++ b/src/bitmap.cpp
+@@ -1260,9 +1260,9 @@
+ 
+ 	int w = 0;
+ 	int h = 0;
+-	void* pixels;
++	void* pixels = NULL;
+ 
+-	char data[4];
++	char data[4] = {0, 0, 0, 0};
+ 	size_t bytes = fread(&data, 1, 4, stream);
+ 	fseek(stream, 0, SEEK_SET);
+ 
+@@ -1319,7 +1319,7 @@
+ 	pixman_format = find_format(format);
+ 
+ 	int w = 0, h = 0;
+-	void* pixels;
++	void* pixels = NULL;
+ 
+ 	bool img_okay = false;
+ 
+--- a/src/game_interpreter.cpp
++++ b/src/game_interpreter.cpp
+@@ -48,6 +48,7 @@
+ #include "util_macro.h"
+ #include "reader_util.h"
+ #include "game_battle.h"
++#include "compat/ControlVariableRange.h"
+ 
+ #ifdef EASYRPG_SYMBIAN
+ namespace {
+@@ -722,7 +723,10 @@
+ 	for (;;) {
+ 		if (!SkipTo(Cmd::ShowChoiceOption, Cmd::ShowChoiceEnd, indent, indent))
+ 			return false;
+-		int which = list[index].parameters[0];
++		RPG::EventCommand const& cmd = list[index];
++		if (cmd.code == Cmd::ShowChoiceEnd)
++			return false;
++		int which = cmd.parameters[0];
+ 		index++;
+ 		if (which > Game_Message::choice_result)
+ 			return false;
+@@ -794,7 +798,6 @@
+ 
+ bool Game_Interpreter::CommandControlVariables(RPG::EventCommand const& com) { // code 10220
+ 	int value = 0;
+-	int i = 0;
+ 	Game_Actor* actor;
+ 	Game_Character* character;
+ 
+@@ -811,13 +814,14 @@
+ 			// Number of var A ops B
+ 			value = Game_Variables[Game_Variables[com.parameters[5]]];
+ 			break;
+-		case 3:
++		case 3: {
+ 			// Random between range
+ 			int a, b;
+ 			a = max(com.parameters[5], com.parameters[6]);
+ 			b = min(com.parameters[5], com.parameters[6]);
+ 			value = rand() % (a-b+1)+b;
+ 			break;
++		}
+ 		case 4:
+ 			// Items
+ 			switch (com.parameters[6]) {
+@@ -1028,49 +1032,53 @@
+ 		int start = com.parameters[0] == 2 ? Game_Variables[com.parameters[1]] : com.parameters[1];
+ 		int end = com.parameters[0] == 1 ? com.parameters[2] : start;
+ 
+-		for (i = start; i <= end; ++i) {
+-			const int old_value = Game_Variables[i];
++		EasyRpgCompat::ApplyControlVariableRange(
++			start, end, com.parameters[4], com.parameters[5], com.parameters[6], value,
++			[](int variable_id) { return Game_Variables[variable_id]; },
++			[](int low, int high) { return rand() % (high - low + 1) + low; },
++			[&](int variable_id, int operation_value) {
++			const int old_value = Game_Variables[variable_id];
+ 			switch (com.parameters[3]) {
+ 				case 0:
+ 					// Assignement
+-					Game_Variables[i] = value;
++					Game_Variables[variable_id] = operation_value;
+ 					break;
+ 				case 1:
+ 					// Addition
+-					Game_Variables[i] += value;
++					Game_Variables[variable_id] += operation_value;
+ 					break;
+ 				case 2:
+ 					// Subtraction
+-					Game_Variables[i] -= value;
++					Game_Variables[variable_id] -= operation_value;
+ 					break;
+ 				case 3:
+ 					// Multiplication
+-					Game_Variables[i] *= value;
++					Game_Variables[variable_id] *= operation_value;
+ 					break;
+ 				case 4:
+ 					// Division
+-					if (value != 0) {
+-						Game_Variables[i] /= value;
++					if (operation_value != 0) {
++						Game_Variables[variable_id] /= operation_value;
+ 					}
+ 					break;
+ 				case 5:
+ 					// Module
+-					if (value != 0) {
+-						Game_Variables[i] %= value;
++					if (operation_value != 0) {
++						Game_Variables[variable_id] %= operation_value;
+ 					} else {
+-						Game_Variables[i] = 0;
++						Game_Variables[variable_id] = 0;
+ 					}
+ 			}
+ 
+-			if (Game_Variables[i] > MaxSize) {
+-				Game_Variables[i] = MaxSize;
++			if (Game_Variables[variable_id] > MaxSize) {
++				Game_Variables[variable_id] = MaxSize;
+ 			}
+-			if (Game_Variables[i] < MinSize) {
+-				Game_Variables[i] = MinSize;
++			if (Game_Variables[variable_id] < MinSize) {
++				Game_Variables[variable_id] = MinSize;
+ 			}
+-			if (Game_Variables[i] != old_value)
+-				Game_Map::SetNeedVariableRefresh(i);
+-		}
++			if (Game_Variables[variable_id] != old_value)
++				Game_Map::SetNeedVariableRefresh(variable_id);
++		});
+ 	}
+ 
+ 	return true;
+@@ -1375,11 +1383,11 @@
+ 		amount = -amount;
+ 
+ 	for (const auto& actor : GetActors(com.parameters[0], com.parameters[1])) {
+-		int hp = actor->GetHp() + amount;
+-		if (!lethal && hp <= 0) {
+-			amount += hp * (-1) + 1;
+-		}
+-		actor->ChangeHp(amount);
++		int hp = actor->GetHp();
++		if (!lethal && hp + amount <= 0)
++			actor->ChangeHp(-hp + 1);
++		else
++			actor->ChangeHp(amount);
+ 
+ 		if (actor->IsDead()) {
+ 			Game_Battle::SetNeedRefresh(true);
+@@ -1910,14 +1918,15 @@
+ 	int speed = com.parameters[1];
+ 	int tenths = com.parameters[2];
+ 	bool wait = com.parameters[3] != 0;
++	int shake_cmd = com.parameters.size() > 4 ? com.parameters[4] : 0;
+ 
+-	if (Player::IsRPG2k()) {
++	if (Player::IsRPG2k() || com.parameters.size() <= 4) {
+ 		screen->ShakeOnce(strength, speed, tenths);
+ 		if (wait) {
+ 			SetupWait(tenths);
+ 		}
+ 	} else {
+-		switch (com.parameters[4]) {
++		switch (shake_cmd) {
+ 		case 0:
+ 			screen->ShakeOnce(strength, speed, tenths);
+ 			if (wait) {
+--- a/src/sprite.cpp
++++ b/src/sprite.cpp
+@@ -90,6 +90,8 @@
+ 		if (rect.IsEmpty())
+ 			return;
+ 		const Rect draw_rect(x - ox, y - oy, rect.width, rect.height);
++		if (draw_rect.IsOutOfBounds(Rect(0, 0, DisplayUi->GetWidth(), DisplayUi->GetHeight())))
++			return;
+ 		const Rect* paint_clip = SymbianRenderDamage::PaintClipRect();
+ 		if (paint_clip &&
+ 			(draw_rect.x >= paint_clip->x + paint_clip->width || paint_clip->x >= draw_rect.x + draw_rect.width ||
