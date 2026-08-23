@@ -5,6 +5,44 @@
 #include "NativeAudio.h"
 #include "DirentBridge.h"
 
+namespace TNativeAudio
+{
+
+HBufC8* ReadAudioFileLC(const TDesC& aPath, TInt aMaxBytes)
+{
+    if (aMaxBytes <= 0)
+        User::Leave(KErrArgument);
+    if (EasyRpgIsVirtualPath(aPath))
+        return EasyRpgReadVirtualFileLC(aPath, aMaxBytes);
+
+    RFs fs;
+    User::LeaveIfError(fs.Connect());
+    CleanupClosePushL(fs);
+
+    RFile file;
+    User::LeaveIfError(file.Open(fs, aPath, EFileRead | EFileShareReadersOnly));
+    CleanupClosePushL(file);
+
+    TInt size = 0;
+    User::LeaveIfError(file.Size(size));
+    if (size <= 0 || size > aMaxBytes)
+        User::Leave(KErrTooBig);
+
+    HBufC8* data = HBufC8::NewLC(size);
+    TPtr8 bytes = data->Des();
+    User::LeaveIfError(file.Read(bytes));
+    if (bytes.Length() != size)
+        User::Leave(KErrEof);
+
+    CleanupStack::Pop(data);
+    CleanupStack::PopAndDestroy(&file);
+    CleanupStack::PopAndDestroy(&fs);
+    CleanupStack::PushL(data);
+    return data;
+}
+
+}
+
 namespace
 {
 const TInt KNativeSeVoiceCount = 4;

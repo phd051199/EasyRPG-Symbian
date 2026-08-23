@@ -217,7 +217,6 @@ CRuntimeEngine::CRuntimeEngine()
       iRightSoftHeld(EFalse),
       iHeldPlayerKeys(0),
       iPendingPlayerPulses(0),
-      iDynamicPlayerScanCount(0),
       iDirectScreenRetryFrame(0),
       iGameplayPriorityRaised(EFalse),
       iPreviousThreadPriority(EPriorityNormal),
@@ -553,140 +552,81 @@ void CRuntimeEngine::GameMenuRequestRedraw()
         TRAP_IGNORE(PresentDirectL(ETrue));
 }
 
-TUint32 CRuntimeEngine::MapScanKey(const TKeyEvent& aKey) const
+namespace
 {
-    switch (aKey.iScanCode)
-    {
-    case EStdKeyUpArrow:
-    case 'W': return CPlayerRuntime::EKeyUp;
-    case EStdKeyDownArrow:
-    case 'S': return CPlayerRuntime::EKeyDown;
-    case EStdKeyLeftArrow:
-    case 'A': return CPlayerRuntime::EKeyLeft;
-    case EStdKeyRightArrow:
-    case 'D': return CPlayerRuntime::EKeyRight;
-    case EStdKeyEnter:
-    case EStdKeyDevice3:
-    case EStdKeySpace:
-    case 'Z': return CPlayerRuntime::EKeyDecision;
-    case EStdKeyEscape: return CPlayerRuntime::EKeyCancel;
-    case EStdKeyLeftShift:
-    case EStdKeyRightShift: return CPlayerRuntime::EKeyShift;
-    case '0': return CPlayerRuntime::EKeyN0;
-    case '1': return CPlayerRuntime::EKeyN1;
-    case '2': return CPlayerRuntime::EKeyN2;
-    case '3': return CPlayerRuntime::EKeyN3;
-    case '4': return CPlayerRuntime::EKeyN4;
-    case '5': return CPlayerRuntime::EKeyN5;
-    case '6': return CPlayerRuntime::EKeyN6;
-    case '7': return CPlayerRuntime::EKeyN7;
-    case '8': return CPlayerRuntime::EKeyN8;
-    case '9': return CPlayerRuntime::EKeyN9;
-    case EStdKeyNkpPlus: return CPlayerRuntime::EKeyPlus;
-    case EStdKeyMinus:
-    case EStdKeyNkpMinus: return CPlayerRuntime::EKeyMinus;
-    case EStdKeyNkpAsterisk: return CPlayerRuntime::EKeyMultiply;
-    case EStdKeyForwardSlash:
-    case EStdKeyNkpForwardSlash: return CPlayerRuntime::EKeyDivide;
-    case EStdKeyFullStop:
-    case EStdKeyNkpFullStop: return CPlayerRuntime::EKeyPeriod;
-    default: return 0;
-    }
-}
 
-TUint32 CRuntimeEngine::MapCharacterKey(TInt aCode) const
+// One row per physical mapping: scan code (EStdKey* or char-as-scancode on
+// QWERTY devices) and character code resolve to the same player key. Lookup
+// falls back from scan code to char code, so key-up/repeat events resolve
+// on any device without caching scancode associations.
+struct TKeyMapEntry
 {
-    switch (aCode)
-    {
-    case EKeyUpArrow:
-    case 'W':
-    case 'w': return CPlayerRuntime::EKeyUp;
-    case EKeyDownArrow:
-    case 'S':
-    case 's': return CPlayerRuntime::EKeyDown;
-    case EKeyLeftArrow:
-    case 'A':
-    case 'a': return CPlayerRuntime::EKeyLeft;
-    case EKeyRightArrow:
-    case 'D':
-    case 'd': return CPlayerRuntime::EKeyRight;
-    case EKeyEnter:
-    case EKeyDevice3:
-    case 'Z':
-    case 'z':
-    case ' ': return CPlayerRuntime::EKeyDecision;
-    case EKeyEscape: return CPlayerRuntime::EKeyCancel;
-    case EKeyLeftShift:
-    case EKeyRightShift: return CPlayerRuntime::EKeyShift;
-    case '0': return CPlayerRuntime::EKeyN0;
-    case '1': return CPlayerRuntime::EKeyN1;
-    case '2': return CPlayerRuntime::EKeyN2;
-    case '3': return CPlayerRuntime::EKeyN3;
-    case '4': return CPlayerRuntime::EKeyN4;
-    case '5': return CPlayerRuntime::EKeyN5;
-    case '6': return CPlayerRuntime::EKeyN6;
-    case '7': return CPlayerRuntime::EKeyN7;
-    case '8': return CPlayerRuntime::EKeyN8;
-    case '9': return CPlayerRuntime::EKeyN9;
-    case '+': return CPlayerRuntime::EKeyPlus;
-    case '-': return CPlayerRuntime::EKeyMinus;
-    case '*': return CPlayerRuntime::EKeyMultiply;
-    case '/': return CPlayerRuntime::EKeyDivide;
-    case '.': return CPlayerRuntime::EKeyPeriod;
-    default: return 0;
-    }
-}
+    TInt iScanCode;
+    TInt iCharCode;
+    TUint32 iPlayerKey;
+};
 
-TUint32 CRuntimeEngine::FindDynamicScanKey(TInt aScanCode) const
+const TKeyMapEntry KKeyMap[] =
 {
-    for (TInt index = 0; index < iDynamicPlayerScanCount; ++index)
-    {
-        if (iDynamicPlayerScanCodes[index] == aScanCode)
-            return iDynamicPlayerScanKeys[index];
-    }
+    { EStdKeyUpArrow, EKeyUpArrow, CPlayerRuntime::EKeyUp },
+    { 'W', 'w', CPlayerRuntime::EKeyUp },
+    { EStdKeyDownArrow, EKeyDownArrow, CPlayerRuntime::EKeyDown },
+    { 'S', 's', CPlayerRuntime::EKeyDown },
+    { EStdKeyLeftArrow, EKeyLeftArrow, CPlayerRuntime::EKeyLeft },
+    { 'A', 'a', CPlayerRuntime::EKeyLeft },
+    { EStdKeyRightArrow, EKeyRightArrow, CPlayerRuntime::EKeyRight },
+    { 'D', 'd', CPlayerRuntime::EKeyRight },
+    { EStdKeyEnter, EKeyEnter, CPlayerRuntime::EKeyDecision },
+    { EStdKeyDevice3, EKeyDevice3, CPlayerRuntime::EKeyDecision },
+    { EStdKeySpace, ' ', CPlayerRuntime::EKeyDecision },
+    { 'Z', 'z', CPlayerRuntime::EKeyDecision },
+    { EStdKeyEscape, EKeyEscape, CPlayerRuntime::EKeyCancel },
+    { EStdKeyLeftShift, EKeyLeftShift, CPlayerRuntime::EKeyShift },
+    { EStdKeyRightShift, EKeyRightShift, CPlayerRuntime::EKeyShift },
+    { '0', '0', CPlayerRuntime::EKeyN0 },
+    { '1', '1', CPlayerRuntime::EKeyN1 },
+    { '2', '2', CPlayerRuntime::EKeyN2 },
+    { '3', '3', CPlayerRuntime::EKeyN3 },
+    { '4', '4', CPlayerRuntime::EKeyN4 },
+    { '5', '5', CPlayerRuntime::EKeyN5 },
+    { '6', '6', CPlayerRuntime::EKeyN6 },
+    { '7', '7', CPlayerRuntime::EKeyN7 },
+    { '8', '8', CPlayerRuntime::EKeyN8 },
+    { '9', '9', CPlayerRuntime::EKeyN9 },
+    { EStdKeyNkpPlus, '+', CPlayerRuntime::EKeyPlus },
+    { EStdKeyMinus, '-', CPlayerRuntime::EKeyMinus },
+    { EStdKeyNkpMinus, 0, CPlayerRuntime::EKeyMinus },
+    { EStdKeyNkpAsterisk, '*', CPlayerRuntime::EKeyMultiply },
+    { EStdKeyForwardSlash, '/', CPlayerRuntime::EKeyDivide },
+    { EStdKeyNkpForwardSlash, 0, CPlayerRuntime::EKeyDivide },
+    { EStdKeyFullStop, '.', CPlayerRuntime::EKeyPeriod },
+    { EStdKeyNkpFullStop, 0, CPlayerRuntime::EKeyPeriod }
+};
+
+const TInt KKeyMapCount = sizeof(KKeyMap) / sizeof(KKeyMap[0]);
+
+TUint32 PlayerKeyForScanCode(TInt aScanCode)
+{
+    for (TInt index = 0; index < KKeyMapCount; ++index)
+        if (KKeyMap[index].iScanCode == aScanCode)
+            return KKeyMap[index].iPlayerKey;
     return 0;
 }
 
-void CRuntimeEngine::RememberDynamicScanKey(TInt aScanCode, TUint32 aPlayerKey)
+TUint32 PlayerKeyForCharCode(TInt aCode)
 {
-    if (aScanCode == 0)
-        return;
-    for (TInt index = 0; index < iDynamicPlayerScanCount; ++index)
-    {
-        if (iDynamicPlayerScanCodes[index] == aScanCode)
-        {
-            iDynamicPlayerScanKeys[index] = aPlayerKey;
-            return;
-        }
-    }
-    if (iDynamicPlayerScanCount >= 16)
-        return;
-    iDynamicPlayerScanCodes[iDynamicPlayerScanCount] = aScanCode;
-    iDynamicPlayerScanKeys[iDynamicPlayerScanCount] = aPlayerKey;
-    ++iDynamicPlayerScanCount;
+    for (TInt index = 0; index < KKeyMapCount; ++index)
+        if (KKeyMap[index].iCharCode == aCode)
+            return KKeyMap[index].iPlayerKey;
+    return 0;
 }
 
-void CRuntimeEngine::ForgetDynamicScanKey(TInt aScanCode)
-{
-    for (TInt index = 0; index < iDynamicPlayerScanCount; ++index)
-    {
-        if (iDynamicPlayerScanCodes[index] != aScanCode)
-            continue;
-        for (TInt next = index + 1; next < iDynamicPlayerScanCount; ++next)
-        {
-            iDynamicPlayerScanCodes[next - 1] = iDynamicPlayerScanCodes[next];
-            iDynamicPlayerScanKeys[next - 1] = iDynamicPlayerScanKeys[next];
-        }
-        --iDynamicPlayerScanCount;
-        return;
-    }
 }
 
 void CRuntimeEngine::ClearPlayerInput()
 {
     iHeldPlayerKeys = 0;
     iPendingPlayerPulses = 0;
-    iDynamicPlayerScanCount = 0;
     iRightSoftHeld = EFalse;
     if (iRuntime)
         iRuntime->ReleaseAllKeys();
@@ -770,9 +710,9 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
         return;
     }
 
-    TUint32 playerKey = MapScanKey(aKey);
-    if (playerKey == 0)
-        playerKey = FindDynamicScanKey(aKey.iScanCode);
+    TUint32 playerKey = PlayerKeyForScanCode(aKey.iScanCode);
+    if (playerKey == 0 && aKey.iCode != 0)
+        playerKey = PlayerKeyForCharCode(aKey.iCode);
 
     if (aType == EEventKeyDown && playerKey != 0)
     {
@@ -785,18 +725,11 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
     {
         iHeldPlayerKeys &= ~playerKey;
         iRuntime->SetKeyState(playerKey, EFalse);
-        ForgetDynamicScanKey(aKey.iScanCode);
         return;
     }
 
-    if (aType == EEventKey)
+    if (aType == EEventKey && playerKey != 0)
     {
-        if (playerKey == 0)
-            playerKey = MapCharacterKey(aKey.iCode);
-        if (playerKey == 0)
-            return;
-        if (aKey.iScanCode != 0 && MapScanKey(aKey) == 0)
-            RememberDynamicScanKey(aKey.iScanCode, playerKey);
         if ((iHeldPlayerKeys & playerKey) == 0)
             iPendingPlayerPulses |= playerKey;
     }

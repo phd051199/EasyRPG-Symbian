@@ -37,11 +37,6 @@ private:
     void RaisePriority();
     void RestorePriority();
     void HandleKeyEvent(TInt aType, const TKeyEvent& aKey);
-    TUint32 MapScanKey(const TKeyEvent& aKey) const;
-    TUint32 MapCharacterKey(TInt aCode) const;
-    TUint32 FindDynamicScanKey(TInt aScanCode) const;
-    void RememberDynamicScanKey(TInt aScanCode, TUint32 aPlayerKey);
-    void ForgetDynamicScanKey(TInt aScanCode);
     void SetPlayerKeyMask(TUint32 aMask, TBool aPressed);
     void ClearPlayerInput();
     void MaintainMemory(TUint32 aLogicFrame);
@@ -78,9 +73,6 @@ private:
     TBool iRightSoftHeld;
     TUint32 iHeldPlayerKeys;
     TUint32 iPendingPlayerPulses;
-    TInt iDynamicPlayerScanCodes[16];
-    TUint32 iDynamicPlayerScanKeys[16];
-    TInt iDynamicPlayerScanCount;
     TUint32 iDirectScreenRetryFrame;
     TBool iGameplayPriorityRaised;
     TThreadPriority iPreviousThreadPriority;

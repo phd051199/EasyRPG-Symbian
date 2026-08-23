@@ -509,6 +509,10 @@ TBool VirtualRelativePathL(const char* aPath, TDes& aRelative)
     return VirtualRelativePathL(path, aRelative);
 }
 
+// Validates a FILE* handle by pointer comparison only — never dereferences
+// the candidate, so a stale handle after fclose yields NULL instead of
+// touching freed memory. Deliberately a registry scan, not a stored slot
+// index (which would require dereferencing the object to read).
 CVirtualFile* FindVirtualFile(FILE* aStream, TInt* aIndex)
 {
     for (TInt index = 0; index < KMaxVirtualFiles; ++index)

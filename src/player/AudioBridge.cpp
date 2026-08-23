@@ -236,40 +236,9 @@ void PumpBgm(TInt aMaxFrames)
     if (gAudio.iBgm.iStep <= 0)
         UpdateBgmStep();
     const TInt64 totalPhase = static_cast<TInt64>(gAudio.iBgm.iFrameCount) << 16;
-    if (gAudio.iBgm.iStep == (static_cast<TInt64>(1) << 16) && gAudio.iBgm.iChannels == 2)
-    {
-        const TInt16* samples = reinterpret_cast<const TInt16*>(gAudio.iBgm.iPcm->Ptr());
-        while (freeFrames > 0)
-        {
-            TInt sourceFrame = static_cast<TInt>(gAudio.iBgm.iPhase >> 16);
-            if (sourceFrame >= gAudio.iBgm.iFrameCount)
-            {
-                sourceFrame = 0;
-                gAudio.iBgm.iPhase = 0;
-            }
-            const TInt batch = Min(Min(freeFrames, 512), gAudio.iBgm.iFrameCount - sourceFrame);
-            if (batch <= 0)
-                break;
-            const TInt written = gAudio.iMixer->WriteStreamPcm16(
-                CAudioMixer::EStreamBgm,
-                samples + sourceFrame * 2,
-                batch);
-            if (written <= 0)
-                break;
-            gAudio.iBgm.iPhase += static_cast<TInt64>(written) << 16;
-            while (gAudio.iBgm.iPhase >= totalPhase)
-            {
-                gAudio.iBgm.iPhase -= totalPhase;
-                ++gAudio.iBgm.iLoopCount;
-            }
-            gAudio.iBgm.iFramesQueued += static_cast<TUint64>(written);
-            freeFrames -= written;
-            if (written != batch)
-                break;
-        }
-        return;
-    }
 
+    // Single resample path: at unity pitch the interpolation fraction is 0
+    // and the lerp degenerates to an exact copy, so no fast path is needed.
     while (freeFrames > 0)
     {
         const TInt batch = Min(freeFrames, 512);
