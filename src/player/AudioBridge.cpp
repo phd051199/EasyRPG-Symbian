@@ -6,6 +6,7 @@
 #include "Encoding.h"
 #include "MidiLiteBridge.h"
 #include "NativeAudio.h"
+#include "PlayerConfig.h"
 #include "UpstreamPlayerBridge.h"
 
 namespace
@@ -89,6 +90,11 @@ const TInt KCriticalMemorySoftwareBgmWaveMaxBytes = 128 * 1024;
 const TInt KSoftwareSeWaveMaxBytes = 2 * 1024 * 1024;
 const TInt KLowMemorySoftwareSeWaveMaxBytes = 512 * 1024;
 const TInt KCriticalMemorySoftwareSeWaveMaxBytes = 256 * 1024;
+const TInt KSoftwareMidiFileMaxBytes = 2 * 1024 * 1024;
+
+_LIT(KWavExtension, ".wav");
+_LIT(KMidExtension, ".mid");
+_LIT(KMidiExtension, ".midi");
 
 void StartAudioIdlePump();
 
@@ -139,9 +145,9 @@ TBool HasExtension(const TDesC& aPath, const TDesC& aExtension)
 TInt AdaptiveAudioReadLimit(TInt aNormalBytes, TInt aLowBytes, TInt aCriticalBytes)
 {
     const TInt freeRam = EasyRpgPlatformFreeRamBytes();
-    if (freeRam >= 0 && freeRam < 6 * 1024 * 1024)
+    if (freeRam >= 0 && freeRam < EasyRpgPlayerConfig::KCriticalMemoryBytes)
         return aCriticalBytes;
-    if (freeRam >= 0 && freeRam < 12 * 1024 * 1024)
+    if (freeRam >= 0 && freeRam < EasyRpgPlayerConfig::KLowMemoryBytes)
         return aLowBytes;
     return aNormalBytes;
 }
@@ -346,13 +352,10 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
 
     TFileName path;
     DecodeResourcePathL(aPath, path);
-    _LIT(KWav, ".wav");
-    _LIT(KMid, ".mid");
-    _LIT(KMidi, ".midi");
-    if (HasExtension(path, KMid) || HasExtension(path, KMidi))
+    if (HasExtension(path, KMidExtension) || HasExtension(path, KMidiExtension))
     {
         EnsureMixerL();
-        HBufC8* file = TNativeAudio::ReadAudioFileLC(path, 2 * 1024 * 1024);
+        HBufC8* file = TNativeAudio::ReadAudioFileLC(path, KSoftwareMidiFileMaxBytes);
         gAudio.iBgm.iMidiDecoder = EasyRpgMidiLiteCreate(file->Ptr(),
                                                          file->Length(),
                                                          CAudioMixer::OutputSampleRate(),
@@ -370,7 +373,7 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
         StartAudioIdlePump();
         return;
     }
-    if (!HasExtension(path, KWav))
+    if (!HasExtension(path, KWavExtension))
     {
         TNativeAudio::PlayBgmL(path, aVolume, aPitch, aFadeIn);
         return;
@@ -504,10 +507,9 @@ void PlaySeL(const char* aPath, TInt aVolume, TInt aPitch)
     TFileName path;
     DecodeResourcePathL(aPath, path);
 
-    _LIT(KWav, ".wav");
     _LIT(KSoundBackslash, "Sound\\");
     _LIT(KSoundSlash, "Sound/");
-    const TBool isRpg2kSound = HasExtension(path, KWav) &&
+    const TBool isRpg2kSound = HasExtension(path, KWavExtension) &&
         (path.FindF(KSoundBackslash) >= 0 || path.FindF(KSoundSlash) >= 0);
     if (isRpg2kSound)
     {

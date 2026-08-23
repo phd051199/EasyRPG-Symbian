@@ -106,7 +106,6 @@ private:
     static void ClearVoice(TVoice& aVoice);
     static TBool VoiceIsActive(const TVoice& aVoice);
     static TUint32 HashKey(const TDesC& aKey);
-    static TInt ClampVolume(TInt aVolume);
     static TInt16 ReadPcm16(const TUint8* aData);
     static void WritePcm16(TUint8* aData, TInt aValue);
 

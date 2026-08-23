@@ -1,6 +1,8 @@
 #ifndef EASYRPG_APP_HRH
 #define EASYRPG_APP_HRH
 
+// Must match EasyRpgApp::KLauncherUid (inc/shared/AppConfig.h),
+// group/EasyRPG.mmp and sis/EasyRPG.pkg.
 #define _UID3 0xE31EA5A1
 #define KEasyRpgLocalisableAppInfoResourceId 6
 

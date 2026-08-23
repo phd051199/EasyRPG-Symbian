@@ -6,11 +6,14 @@
 #include "GameMenu.h"
 #include "AppConfig.h"
 #include "AppPaths.h"
+#include "NativeAudio.h"
 
 namespace
 {
 const TInt KDefaultVolume = 50;
 const TInt KVolumeStep = 10;
+_LIT(KMenuFontName, "Series 60 Sans");
+const TInt KMenuFontHeight = 11;
 _LIT8(KMasterVolumeSetting, "master_volume=");
 _LIT8(KSoundSetting, "sound_enabled=");
 _LIT8(KFrameSkipSetting, "frameskip_enabled=");
@@ -34,14 +37,6 @@ TUint32 MenuKeyBit(TInt aKey)
         : 0;
 }
 
-TInt ClampVolume(TInt aVolume)
-{
-    if (aVolume < 0)
-        return 0;
-    if (aVolume > 100)
-        return 100;
-    return aVolume;
-}
 
 TBool ReadSettingInt(const TDesC8& aData, const TDesC8& aKey, TInt& aValue)
 {
@@ -129,7 +124,7 @@ void CGameMenu::LoadSettings()
     TInt value = 0;
     const TBool hasVolume = ReadSettingInt(data, KMasterVolumeSetting, value);
     if (hasVolume)
-        iVolume = ClampVolume(value);
+        iVolume = TNativeAudio::ClampVolume(value);
     if (ReadSettingInt(data, KSoundSetting, value))
         iSoundEnabled = value != 0;
     else if (hasVolume)
@@ -407,7 +402,7 @@ void CGameMenu::AdjustSelectionL(TInt aDelta)
 {
     if (!ItemAdjustable(iSelection) || aDelta == 0)
         return;
-    iVolume = ClampVolume(iVolume + aDelta * KVolumeStep);
+    iVolume = TNativeAudio::ClampVolume(iVolume + aDelta * KVolumeStep);
     iHost.GameMenuSetVolumeL(iVolume);
     SaveSettings();
     iHost.GameMenuRequestRedraw();
@@ -609,7 +604,7 @@ void CGameMenu::DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
     aGc.DrawRect(panel);
 
     CFont* font = NULL;
-    User::LeaveIfError(aDevice.GetNearestFontInPixels(font, TFontSpec(_L("Series 60 Sans"), 11)));
+    User::LeaveIfError(aDevice.GetNearestFontInPixels(font, TFontSpec(KMenuFontName, KMenuFontHeight)));
     if (!font)
         User::Leave(KErrNotFound);
     aGc.UseFont(font);
@@ -675,7 +670,7 @@ void CGameMenu::DrawKeysL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
     aGc.DrawRect(panel);
 
     CFont* font = NULL;
-    User::LeaveIfError(aDevice.GetNearestFontInPixels(font, TFontSpec(_L("Series 60 Sans"), 11)));
+    User::LeaveIfError(aDevice.GetNearestFontInPixels(font, TFontSpec(KMenuFontName, KMenuFontHeight)));
     if (!font)
         User::Leave(KErrNotFound);
     aGc.UseFont(font);

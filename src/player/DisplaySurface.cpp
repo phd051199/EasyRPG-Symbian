@@ -5,6 +5,8 @@
 
 namespace
 {
+// Region budgets, kept separate from PlayerConfig.h::KMaximumScreenUpdateRegions
+// (upstream damage tracking cap): these bound what presentation can batch.
 const TInt KDirtyRegionCapacity = 16;
 const TInt KMaximumPresentRegions = 4;
 const TInt KDirtyRegionFixedCostDivisor = 6;

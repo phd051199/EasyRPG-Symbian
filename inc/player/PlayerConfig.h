@@ -13,6 +13,8 @@ enum
     KRenderFps = 30,
     KLogicTicksPerRender = KLogicFps / KRenderFps,
     KMaxCatchUpLogicFrames = 2,
+    // Upstream damage-tracking cap; presentation batching limits
+    // (KMaximumPresentRegions, KDirtyRegionCapacity) live in DisplaySurface.cpp.
     KMaximumScreenUpdateRegions = 6
 };
 

@@ -1,4 +1,5 @@
 #include "AudioMixer.h"
+#include "NativeAudio.h"
 
 CAudioMixer* CAudioMixer::NewL()
 {
@@ -86,14 +87,6 @@ TUint32 CAudioMixer::HashKey(const TDesC& aKey)
     return hash;
 }
 
-TInt CAudioMixer::ClampVolume(TInt aVolume)
-{
-    if (aVolume < 0)
-        return 0;
-    if (aVolume > 100)
-        return 100;
-    return aVolume;
-}
 
 TInt16 CAudioMixer::ReadPcm16(const TUint8* aData)
 {
@@ -401,7 +394,7 @@ TBool CAudioMixer::PlaySe(const TDesC& aKey, TInt aVolume, TInt aPriority)
     TVoice& voice = iVoices[selected];
     voice.iClip = clip;
     voice.iPosition = 0;
-    voice.iVolume = ClampVolume(aVolume);
+    voice.iVolume = TNativeAudio::ClampVolume(aVolume);
     voice.iPriority = aPriority;
     voice.iSerial = ++iNextSerial;
     voice.iActive = ETrue;
@@ -463,12 +456,12 @@ void CAudioMixer::SetStreamVolume(TStreamBus aBus, TInt aVolume)
 {
     if (aBus < 0 || aBus >= EStreamBusCount)
         return;
-    iStreams[aBus].iVolume = ClampVolume(aVolume);
+    iStreams[aBus].iVolume = TNativeAudio::ClampVolume(aVolume);
 }
 
 void CAudioMixer::SetMasterVolume(TInt aVolume)
 {
-    iMasterVolume = ClampVolume(aVolume);
+    iMasterVolume = TNativeAudio::ClampVolume(aVolume);
     if (iStream && iReady)
         iStream->SetVolume(iStream->MaxVolume() * iMasterVolume / 100);
 }
