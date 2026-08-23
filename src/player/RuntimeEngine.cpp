@@ -1,3 +1,5 @@
+#include <apgtask.h>
+#include <apgwgnam.h>
 #include <bitdev.h>
 #include <e32keys.h>
 #include <f32file.h>
@@ -5,6 +7,7 @@
 #include <w32std.h>
 
 #include "AudioBridge.h"
+#include "AppConfig.h"
 #include "DirentBridge.h"
 #include "DisplaySurface.h"
 #include "MovieBridge.h"
@@ -38,6 +41,19 @@ TBool RectsOverlap(const TRect& aFirst, const TRect& aSecond)
         aSecond.iTl.iX < aFirst.iBr.iX &&
         aFirst.iTl.iY < aSecond.iBr.iY &&
         aSecond.iTl.iY < aFirst.iBr.iY;
+}
+
+TBool IsShutdownSystemEvent(const TWsEvent& aEvent)
+{
+    const TInt type = aEvent.Type();
+    if (type == EEventUser)
+    {
+        const TInt systemEvent = *aEvent.Int();
+        return systemEvent == EApaSystemEventShutdown ||
+               systemEvent == EApaSystemEventSecureShutdown;
+    }
+    return type == EEventPowerMgmt &&
+           *aEvent.Int() == EApaSystemEventSecureShutdown;
 }
 
 }
@@ -214,6 +230,7 @@ CRuntimeEngine::CRuntimeEngine()
       iNeedsFullRedraw(ETrue),
       iForeground(ETrue),
       iPaused(EFalse),
+      iReturnToLauncher(ETrue),
       iRightSoftHeld(EFalse),
       iHeldPlayerKeys(0),
       iPendingPlayerPulses(0),
@@ -244,6 +261,14 @@ void CRuntimeEngine::ConstructL()
     iWindowGroup->EnableReceiptOfFocus(ETrue);
     iWindowGroup->AutoForeground(ETrue);
     iWindowGroup->SetOrdinalPosition(0);
+
+    CApaWindowGroupName* windowGroupName = CApaWindowGroupName::NewLC(iWs);
+    windowGroupName->SetAppUid(EasyRpgApp::KLauncherUid);
+    windowGroupName->SetCaptionL(EasyRpgApp::KApplicationCaption);
+    windowGroupName->SetRespondsToShutdownEvent(ETrue);
+    windowGroupName->SetAppReady(ETrue);
+    User::LeaveIfError(windowGroupName->SetWindowGroupName(*iWindowGroup));
+    CleanupStack::PopAndDestroy(windowGroupName);
 
     iWindow = new (ELeave) RWindow(iWs);
     User::LeaveIfError(iWindow->Construct(*iWindowGroup, handle + 1));
@@ -305,6 +330,11 @@ CRuntimeEngine::~CRuntimeEngine()
 void CRuntimeEngine::Run()
 {
     iFrameTimer->Start();
+}
+
+TBool CRuntimeEngine::ReturnToLauncher() const
+{
+    return iReturnToLauncher;
 }
 
 void CRuntimeEngine::StartDirectScreenL()
@@ -482,13 +512,27 @@ void CRuntimeEngine::RestorePriority()
     iGameplayPriorityRaised = EFalse;
 }
 
+void CRuntimeEngine::RequestExit(TBool aReturnToLauncher)
+{
+    iReturnToLauncher = aReturnToLauncher;
+    ClearPlayerInput();
+    if (iRuntime)
+        iRuntime->Suspend();
+    EasyRpgMovieSetForeground(EFalse);
+    StopDirectScreen();
+
+    if (iFrameTimer && iFrameTimer->Running())
+        iFrameTimer->Stop();
+    else if (CActiveScheduler::Current())
+        CActiveScheduler::Stop();
+}
+
 TUint32 CRuntimeEngine::GameMenuFeatures() const
 {
     return EGameMenuFeatureSound |
            EGameMenuFeatureVolume |
-           EGameMenuFeatureFrameSkip |
            EGameMenuFeatureFps |
-           EGameMenuFeatureKeys;
+           EGameMenuFeatureHelp;
 }
 
 void CRuntimeEngine::GameMenuSetSoundEnabledL(TBool aEnabled)
@@ -501,12 +545,6 @@ void CRuntimeEngine::GameMenuSetSoundEnabledL(TBool aEnabled)
 void CRuntimeEngine::GameMenuSetVolumeL(TInt aVolume)
 {
     EasyRpgAudioSetMasterVolume(aVolume);
-}
-
-void CRuntimeEngine::GameMenuSetFrameSkipEnabledL(TBool aEnabled)
-{
-    if (iFrameTimer)
-        iFrameTimer->SetFrameSkipEnabled(aEnabled);
 }
 
 void CRuntimeEngine::GameMenuSetFpsEnabledL(TBool aEnabled)
@@ -541,8 +579,7 @@ void CRuntimeEngine::GameMenuPauseL(TBool aPaused)
 
 void CRuntimeEngine::GameMenuExitL()
 {
-    if (iFrameTimer)
-        iFrameTimer->Stop();
+    RequestExit(ETrue);
 }
 
 void CRuntimeEngine::GameMenuRequestRedraw()
@@ -737,6 +774,12 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
 
 void CRuntimeEngine::HandleWindowEvent(const TWsEvent& aEvent)
 {
+    if (IsShutdownSystemEvent(aEvent))
+    {
+        RequestExit(EFalse);
+        return;
+    }
+
     switch (aEvent.Type())
     {
     case EEventFocusLost:

@@ -8,8 +8,18 @@
 #include "ldb_reader.h"
 #include "lmu_reader.h"
 #include "reader_util.h"
+#include "CharsetDetector.h"
 #include "CoreEncoding.h"
 #include "GohuFont.h"
+
+#ifdef EASYRPG_ENCODING_CORPUS_TEST
+extern "C" void EasyRpgEncodingCorpusRecord(const char* aSourceEncoding,
+                                               const char* aDestinationEncoding,
+                                               const unsigned char* aSource,
+                                               unsigned int aSourceLength,
+                                               const unsigned char* aDestination,
+                                               unsigned int aDestinationLength);
+#endif
 
 namespace {
 char AsciiLower(char value) {
@@ -65,6 +75,11 @@ bool IsUtf8Encoding(const std::string& encoding) {
 
 bool IsMixedVietnameseEncoding(const std::string& encoding) {
     return EncodingEquals(encoding, "EASYRPG_VI_CP932") || EncodingEquals(encoding, "TCVN3_CP932");
+}
+
+bool IsMixedGbkCp932Encoding(const std::string& encoding) {
+    return EncodingEquals(encoding, "EASYRPG_GBK_CP932") ||
+           EncodingEquals(encoding, "GBK_CP932");
 }
 
 bool IsAsciiLetter(unsigned char value) {
@@ -128,6 +143,7 @@ struct Cp932Evidence {
     bool valid = true;
     unsigned int multibyte_chars = 0;
     unsigned int longest_multibyte_run = 0;
+    unsigned int kana_lead_pairs = 0;
 };
 
 Cp932Evidence InspectCp932(const std::string& input) {
@@ -146,12 +162,96 @@ Cp932Evidence InspectCp932(const std::string& input) {
             return result;
         }
         ++result.multibyte_chars;
+        if (value == 0x82u || value == 0x83u)
+            ++result.kana_lead_pairs;
         ++current_run;
         if (current_run > result.longest_multibyte_run)
             result.longest_multibyte_run = current_run;
         index += 2u;
     }
     return result;
+}
+
+struct GbkByteEvidence {
+    bool valid = true;
+    unsigned int multibyte_chars = 0;
+    unsigned int gb2312_lead_pairs = 0;
+};
+
+bool IsGbkTrailByte(unsigned char value) {
+    return (value >= 0x40u && value <= 0x7eu) ||
+           (value >= 0x80u && value <= 0xfeu);
+}
+
+GbkByteEvidence InspectGbkBytes(const std::string& input) {
+    GbkByteEvidence result;
+    for (std::string::size_type index = 0; index < input.size();) {
+        const unsigned char lead = static_cast<unsigned char>(input[index]);
+        if (lead < 0x80u) {
+            ++index;
+            continue;
+        }
+        if (lead < 0x81u || lead > 0xfeu || index + 1u >= input.size() ||
+            !IsGbkTrailByte(static_cast<unsigned char>(input[index + 1u]))) {
+            result.valid = false;
+            return result;
+        }
+        ++result.multibyte_chars;
+        if (lead >= 0xa1u && lead <= 0xdfu)
+            ++result.gb2312_lead_pairs;
+        index += 2u;
+    }
+    return result;
+}
+
+enum class MixedCjkEncoding {
+    Unknown,
+    Cp932,
+    Gbk
+};
+
+MixedCjkEncoding ClassifyMixedCjkText(const std::string& input) {
+    const Cp932Evidence cp932 = InspectCp932(input);
+    const GbkByteEvidence gbk = InspectGbkBytes(input);
+    if (cp932.valid && !gbk.valid)
+        return MixedCjkEncoding::Cp932;
+    if (gbk.valid && !cp932.valid)
+        return MixedCjkEncoding::Gbk;
+    if (!cp932.valid && !gbk.valid)
+        return MixedCjkEncoding::Unknown;
+    // In a Chinese-primary mixed game many perfectly valid GBK byte pairs are
+    // also structurally valid CP932. Only prefer CP932 when the byte pattern
+    // has explicit kana evidence; otherwise GBK is the deterministic primary.
+    if (cp932.kana_lead_pairs != 0u)
+        return MixedCjkEncoding::Cp932;
+    if (gbk.multibyte_chars != 0u)
+        return MixedCjkEncoding::Gbk;
+    if (cp932.multibyte_chars != 0u)
+        return MixedCjkEncoding::Cp932;
+    return MixedCjkEncoding::Unknown;
+}
+
+bool IsMixedGbkCp932Sample(const std::string& input) {
+    unsigned int cp932_lines = 0;
+    unsigned int gbk_lines = 0;
+    std::string::size_type start = 0;
+    while (start < input.size()) {
+        std::string::size_type end = input.find('\n', start);
+        if (end == std::string::npos)
+            end = input.size();
+        if (end > start) {
+            const std::string line(input, start, end - start);
+            const Cp932Evidence cp932 = InspectCp932(line);
+            const GbkByteEvidence gbk = InspectGbkBytes(line);
+            if (cp932.valid && cp932.kana_lead_pairs >= 2u)
+                ++cp932_lines;
+            if (gbk.valid && gbk.gb2312_lead_pairs >= 2u &&
+                cp932.multibyte_chars <= 1u)
+                ++gbk_lines;
+        }
+        start = end + 1u;
+    }
+    return cp932_lines >= 5u && gbk_lines >= 5u;
 }
 
 enum class MixedLegacyEncoding {
@@ -314,6 +414,72 @@ std::string Cp932ToUtf8(const std::string& input) {
     return output;
 }
 
+std::string GbkToUtf8(const std::string& input) {
+    if (input.empty())
+        return std::string();
+
+    const unsigned int source_length = static_cast<unsigned int>(input.size());
+    std::vector<unsigned short> utf16(source_length);
+    unsigned int utf16_length = 0;
+    const int status = EasyRpgCoreGbkToUtf16(
+        reinterpret_cast<const unsigned char*>(input.data()), source_length,
+        &utf16[0], source_length, &utf16_length);
+    if (status != 0)
+        return std::string();
+
+    std::string output;
+    output.reserve(utf16_length * 3u);
+    for (unsigned int index = 0; index < utf16_length; ++index)
+        AppendUtf8(output, utf16[index]);
+    return output;
+}
+
+bool IsValidUtf8(const std::string& value);
+
+bool IsStrongUtf8CjkText(const std::string& input) {
+    if (!IsValidUtf8(input))
+        return false;
+
+    unsigned int three_byte_sequences = 0;
+    for (std::string::size_type index = 0; index < input.size();) {
+        const unsigned char first = static_cast<unsigned char>(input[index]);
+        if (first < 0x80u) {
+            ++index;
+        } else if (first >= 0xc2u && first <= 0xdfu) {
+            index += 2u;
+        } else if (first >= 0xe0u && first <= 0xefu) {
+            ++three_byte_sequences;
+            index += 3u;
+        } else if (first >= 0xf0u && first <= 0xf4u) {
+            index += 4u;
+        } else {
+            return false;
+        }
+    }
+    return three_byte_sequences >= 2u;
+}
+
+std::string DecodeMixedGbkCp932Text(const std::string& input) {
+    const std::string cp932 = Cp932ToUtf8(input);
+    const std::string gbk = GbkToUtf8(input);
+
+    // Some RPG Maker projects contain newer UTF-8 save strings alongside a
+    // legacy GBK database. A strong multi-byte UTF-8 payload is unambiguous
+    // enough to preserve before trying the legacy codecs.
+    if (IsStrongUtf8CjkText(input))
+        return input;
+
+    if (gbk.empty() && cp932.empty())
+        return IsValidUtf8(input) ? input : std::string();
+    if (gbk.empty())
+        return cp932;
+    if (cp932.empty())
+        return gbk;
+
+    const MixedCjkEncoding encoding = ClassifyMixedCjkText(input);
+    return encoding == MixedCjkEncoding::Cp932 ? cp932 : gbk;
+}
+
 std::string PlatformLegacyToUtf8(const std::string& input, unsigned int codepage) {
     if (input.empty())
         return std::string();
@@ -338,11 +504,17 @@ std::string PlatformLegacyToUtf8(const std::string& input, unsigned int codepage
 
 std::string DecodeMixedLegacyText(const std::string& input) {
     switch (ClassifyMixedLegacyText(input)) {
-    case MixedLegacyEncoding::Cp932:
-        return Cp932ToUtf8(input);
+    case MixedLegacyEncoding::Cp932: {
+        const std::string decoded = Cp932ToUtf8(input);
+        return decoded.empty() && !input.empty() ? Tcvn3ToUtf8(input) : decoded;
+    }
     case MixedLegacyEncoding::Tcvn3:
         return Tcvn3ToUtf8(input);
     case MixedLegacyEncoding::Unknown:
+        for (std::string::size_type index = 0; index < input.size(); ++index) {
+            if (static_cast<unsigned char>(input[index]) >= 0x80u)
+                return Tcvn3ToUtf8(input);
+        }
         return input;
     }
     return input;
@@ -379,6 +551,41 @@ std::string Utf8ToCp932(const std::string& input) {
     const int status = EasyRpgCoreUtf16ToCp932(&utf16[0], static_cast<unsigned int>(utf16.size()), &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length);
     if (status != 0) return std::string();
     return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+}
+
+std::string Utf8ToGbk(const std::string& input) {
+    std::vector<unsigned short> utf16;
+    if (!Utf8ToUtf16(input, utf16) || utf16.empty()) return std::string();
+    std::vector<unsigned char> encoded(utf16.size() * 2u);
+    unsigned int encoded_length = 0;
+    const int status = EasyRpgCoreUtf16ToGbk(
+        &utf16[0], static_cast<unsigned int>(utf16.size()),
+        &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length);
+    if (status != 0) return std::string();
+    return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+}
+
+bool ContainsJapaneseKana(const std::vector<unsigned short>& utf16) {
+    for (std::vector<unsigned short>::const_iterator it = utf16.begin(); it != utf16.end(); ++it) {
+        if ((*it >= 0x3040u && *it <= 0x30ffu) ||
+            (*it >= 0xff61u && *it <= 0xff9fu))
+            return true;
+    }
+    return false;
+}
+
+std::string Utf8ToMixedGbkCp932(const std::string& input) {
+    const std::string cp932 = Utf8ToCp932(input);
+    const std::string gbk = Utf8ToGbk(input);
+    if (cp932.empty())
+        return gbk;
+    if (gbk.empty())
+        return cp932;
+
+    std::vector<unsigned short> utf16;
+    if (Utf8ToUtf16(input, utf16) && ContainsJapaneseKana(utf16))
+        return cp932;
+    return gbk;
 }
 
 std::string Utf8ToPlatformLegacy(const std::string& input, unsigned int codepage) {
@@ -507,6 +714,69 @@ void PushEncoding(std::vector<std::string>& encodings, const std::string& encodi
     encodings.push_back(encoding);
 }
 
+bool HasNonAsciiByte(const std::string& value) {
+    for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
+        if (static_cast<unsigned char>(*it) >= 0x80u)
+            return true;
+    }
+    return false;
+}
+
+bool IsValidUtf8(const std::string& value) {
+    for (std::string::size_type i = 0; i < value.size();) {
+        const unsigned char first = static_cast<unsigned char>(value[i]);
+        if (first <= 0x7fu) {
+            ++i;
+            continue;
+        }
+
+        unsigned int count = 0;
+        unsigned char second_min = 0x80u;
+        unsigned char second_max = 0xbfu;
+        if (first >= 0xc2u && first <= 0xdfu) {
+            count = 2u;
+        } else if (first >= 0xe0u && first <= 0xefu) {
+            count = 3u;
+            if (first == 0xe0u) second_min = 0xa0u;
+            if (first == 0xedu) second_max = 0x9fu;
+        } else if (first >= 0xf0u && first <= 0xf4u) {
+            count = 4u;
+            if (first == 0xf0u) second_min = 0x90u;
+            if (first == 0xf4u) second_max = 0x8fu;
+        } else {
+            return false;
+        }
+
+        if (i + count > value.size())
+            return false;
+        const unsigned char second = static_cast<unsigned char>(value[i + 1u]);
+        if (second < second_min || second > second_max)
+            return false;
+        for (unsigned int offset = 2u; offset < count; ++offset) {
+            const unsigned char continuation = static_cast<unsigned char>(value[i + offset]);
+            if (continuation < 0x80u || continuation > 0xbfu)
+                return false;
+        }
+        i += count;
+    }
+    return true;
+}
+
+std::string DetectIniTitleEncoding(INIReader& ini) {
+    const std::string title = ini.Get("RPG_RT", "GameTitle", std::string());
+    if (title.empty() || !HasNonAsciiByte(title))
+        return std::string();
+
+    if (IsValidUtf8(title))
+        return "UTF-8";
+
+    const std::vector<EasyRpgCharsetDetector::Guess> guesses =
+        EasyRpgCharsetDetector::Detect(title);
+    if (!guesses.empty() && guesses.front().confidence >= 0.80f)
+        return guesses.front().encoding;
+    return std::string();
+}
+
 void AppendMapDetectionSamples(std::string& sample, const std::string& database_file) {
     if (sample.size() >= 65536u)
         return;
@@ -567,16 +837,26 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
     std::string detection_sample = sample;
     AppendMapDetectionSamples(detection_sample, database_file);
 
-    if (IsMixedVietnameseSample(detection_sample)) {
+    const std::vector<EasyRpgCharsetDetector::Guess> guesses =
+        EasyRpgCharsetDetector::Detect(detection_sample);
+    const bool mixed_vietnamese = IsMixedVietnameseSample(detection_sample);
+    const bool strong_chinese = !guesses.empty() &&
+        (guesses.front().encoding == "GBK" || guesses.front().encoding == "BIG5") &&
+        guesses.front().confidence >= 0.80f;
+    const bool mixed_gbk_cp932 = strong_chinese &&
+        IsMixedGbkCp932Sample(detection_sample);
+
+    if (mixed_vietnamese && !strong_chinese)
         PushEncoding(encodings, "EASYRPG_VI_CP932");
-    }
-    unsigned int codepage = 0;
-    int confidence = 0;
-    if (EasyRpgPlatformDetectLegacyEncoding(
-            reinterpret_cast<const unsigned char*>(sample.data()),
-            static_cast<unsigned int>(sample.size()),
-            &codepage, &confidence) == 0 && codepage != 0)
-        PushEncoding(encodings, CodepageToEncoding(static_cast<int>(codepage)));
+    if (mixed_gbk_cp932)
+        PushEncoding(encodings, "EASYRPG_GBK_CP932");
+
+    for (std::vector<EasyRpgCharsetDetector::Guess>::const_iterator it = guesses.begin();
+         it != guesses.end(); ++it)
+        PushEncoding(encodings, it->encoding);
+
+    if (mixed_vietnamese && !strong_chinese)
+        PushEncoding(encodings, "EASYRPG_VI_CP932");
 
     PushEncoding(encodings, "SHIFT_JIS");
     PushEncoding(encodings, "GBK");
@@ -590,8 +870,9 @@ std::string ReaderUtil::GetEncoding(const std::string& ini_file) {
     INIReader ini(ini_file);
     if (ini.ParseError() == -1) return std::string();
     const std::string value = ini.Get("EasyRPG", "Encoding", std::string());
-    if (value.empty()) return std::string();
-    return CodepageToEncoding(std::atoi(value.c_str()));
+    if (!value.empty())
+        return CodepageToEncoding(std::atoi(value.c_str()));
+    return DetectIniTitleEncoding(ini);
 }
 
 std::string ReaderUtil::GetLocaleEncoding() { return "SHIFT_JIS"; }
@@ -602,14 +883,28 @@ std::string ReaderUtil::Recode(const std::string& str_to_encode, const std::stri
 
 std::string ReaderUtil::Recode(const std::string& str_to_encode, const std::string& src_enc, const std::string& dst_enc) {
     if (src_enc.empty() || dst_enc.empty() || str_to_encode.empty()) return str_to_encode;
-    if (IsUtf8Encoding(src_enc) && IsUtf8Encoding(dst_enc)) return str_to_encode;
+    std::string result = str_to_encode;
+    if (IsUtf8Encoding(src_enc) && IsUtf8Encoding(dst_enc)) {
+        result = str_to_encode;
+    }
     if (IsMixedVietnameseEncoding(src_enc) && IsUtf8Encoding(dst_enc))
-        return DecodeMixedLegacyText(str_to_encode);
-    if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc)) return Cp932ToUtf8(str_to_encode);
-    if (IsGbkEncoding(src_enc) && IsUtf8Encoding(dst_enc)) return PlatformLegacyToUtf8(str_to_encode, 936);
-    if (IsBig5Encoding(src_enc) && IsUtf8Encoding(dst_enc)) return PlatformLegacyToUtf8(str_to_encode, 950);
-    if (IsUtf8Encoding(src_enc) && IsCp932Encoding(dst_enc)) return Utf8ToCp932(str_to_encode);
-    if (IsUtf8Encoding(src_enc) && IsGbkEncoding(dst_enc)) return Utf8ToPlatformLegacy(str_to_encode, 936);
-    if (IsUtf8Encoding(src_enc) && IsBig5Encoding(dst_enc)) return Utf8ToPlatformLegacy(str_to_encode, 950);
-    return str_to_encode;
+        result = DecodeMixedLegacyText(str_to_encode);
+    else if (IsMixedGbkCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc))
+        result = DecodeMixedGbkCp932Text(str_to_encode);
+    else if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc)) result = Cp932ToUtf8(str_to_encode);
+    else if (IsGbkEncoding(src_enc) && IsUtf8Encoding(dst_enc)) result = GbkToUtf8(str_to_encode);
+    else if (IsBig5Encoding(src_enc) && IsUtf8Encoding(dst_enc)) result = PlatformLegacyToUtf8(str_to_encode, 950);
+    else if (IsUtf8Encoding(src_enc) && IsCp932Encoding(dst_enc)) result = Utf8ToCp932(str_to_encode);
+    else if (IsUtf8Encoding(src_enc) && IsGbkEncoding(dst_enc)) result = Utf8ToGbk(str_to_encode);
+    else if (IsUtf8Encoding(src_enc) && IsMixedGbkCp932Encoding(dst_enc)) result = Utf8ToMixedGbkCp932(str_to_encode);
+    else if (IsUtf8Encoding(src_enc) && IsBig5Encoding(dst_enc)) result = Utf8ToPlatformLegacy(str_to_encode, 950);
+#ifdef EASYRPG_ENCODING_CORPUS_TEST
+    EasyRpgEncodingCorpusRecord(
+        src_enc.c_str(), dst_enc.c_str(),
+        reinterpret_cast<const unsigned char*>(str_to_encode.data()),
+        static_cast<unsigned int>(str_to_encode.size()),
+        reinterpret_cast<const unsigned char*>(result.data()),
+        static_cast<unsigned int>(result.size()));
+#endif
+    return result;
 }

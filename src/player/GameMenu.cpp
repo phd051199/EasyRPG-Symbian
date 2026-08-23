@@ -6,17 +6,20 @@
 #include "GameMenu.h"
 #include "AppConfig.h"
 #include "AppPaths.h"
+#include "GohuFont.h"
 #include "NativeAudio.h"
 
 namespace
 {
 const TInt KDefaultVolume = 50;
 const TInt KVolumeStep = 10;
-_LIT(KMenuFontName, "Series 60 Sans");
-const TInt KMenuFontHeight = 11;
+const TInt KGohuGlyphWidth = 6;
+const TInt KGohuGlyphHeight = 11;
+const TInt KMenuFontScale = 2;
+const TInt KMenuTextHeight = KGohuGlyphHeight * KMenuFontScale;
+const TInt KMenuTextAdvance = KGohuGlyphWidth * KMenuFontScale;
 _LIT8(KMasterVolumeSetting, "master_volume=");
 _LIT8(KSoundSetting, "sound_enabled=");
-_LIT8(KFrameSkipSetting, "frameskip_enabled=");
 _LIT8(KFpsSetting, "fps_enabled=");
 
 enum TMenuKey
@@ -60,14 +63,51 @@ TBool ReadSettingInt(const TDesC8& aData, const TDesC8& aKey, TInt& aValue)
     return ETrue;
 }
 
-void CopyAscii(const TDesC8& aSource, TDes& aDestination)
+TInt GohuTextWidth(const TDesC8& aText)
 {
-    aDestination.Zero();
-    const TInt count = Min(aSource.Length(), aDestination.MaxLength());
-    for (TInt index = 0; index < count; ++index)
+    return aText.Length() * KMenuTextAdvance;
+}
+
+void DrawGohuText(CGraphicsContext& aGc,
+                  const TDesC8& aText,
+                  const TPoint& aOrigin,
+                  const TRgb& aColor)
+{
+    aGc.SetPenStyle(CGraphicsContext::ENullPen);
+    aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
+    aGc.SetBrushColor(aColor);
+
+    TInt cursorX = aOrigin.iX;
+    for (TInt index = 0; index < aText.Length(); ++index)
     {
-        const TUint8 c = aSource[index];
-        aDestination.Append(static_cast<TChar>(c >= 32 && c < 127 ? c : '?'));
+        const TUint8 c = aText[index];
+        const unsigned char* rows = EasyRpgGohuGlyphRows(c >= 32 && c < 127 ? c : '?');
+        if (!rows)
+        {
+            cursorX += KMenuTextAdvance;
+            continue;
+        }
+
+        for (TInt y = 0; y < KGohuGlyphHeight; ++y)
+        {
+            TInt x = 0;
+            while (x < KGohuGlyphWidth)
+            {
+                while (x < KGohuGlyphWidth && (rows[y] & (1u << x)) == 0)
+                    ++x;
+                const TInt runStart = x;
+                while (x < KGohuGlyphWidth && (rows[y] & (1u << x)) != 0)
+                    ++x;
+                if (runStart < x)
+                {
+                    aGc.DrawRect(TRect(TPoint(cursorX + runStart * KMenuFontScale,
+                                             aOrigin.iY + y * KMenuFontScale),
+                                       TSize((x - runStart) * KMenuFontScale,
+                                             KMenuFontScale)));
+                }
+            }
+        }
+        cursorX += KMenuTextAdvance;
     }
 }
 }
@@ -85,15 +125,14 @@ CGameMenu::CGameMenu(MGameMenuHost& aHost, RFs& aFs)
     : iHost(aHost),
       iFs(aFs),
       iOpen(EFalse),
-      iKeysVisible(EFalse),
+      iHelpVisible(EFalse),
       iSelection(0),
       iLeftSoftHeld(EFalse),
       iRightSoftHeld(EFalse),
       iHeldMenuKeys(0),
       iVolume(KDefaultVolume),
       iSoundEnabled(ETrue),
-      iFrameSkipEnabled(EFalse),
-      iFpsEnabled(ETrue)
+      iFpsEnabled(EFalse)
 {
 }
 
@@ -129,8 +168,6 @@ void CGameMenu::LoadSettings()
         iSoundEnabled = value != 0;
     else if (hasVolume)
         iSoundEnabled = iVolume > 0;
-    if (ReadSettingInt(data, KFrameSkipSetting, value))
-        iFrameSkipEnabled = value != 0;
     if (ReadSettingInt(data, KFpsSetting, value))
         iFpsEnabled = value != 0;
 }
@@ -149,10 +186,9 @@ void CGameMenu::SaveSettings()
     if (file.Replace(iFs, settingsPath, EFileWrite | EFileShareExclusive) != KErrNone)
         return;
     TBuf8<128> data;
-    data.Format(_L8("master_volume=%d\nsound_enabled=%d\nframeskip_enabled=%d\nfps_enabled=%d\n"),
+    data.Format(_L8("master_volume=%d\nsound_enabled=%d\nfps_enabled=%d\n"),
                 iVolume,
                 iSoundEnabled ? 1 : 0,
-                iFrameSkipEnabled ? 1 : 0,
                 iFpsEnabled ? 1 : 0);
     file.Write(data);
     file.Close();
@@ -165,8 +201,6 @@ void CGameMenu::ApplySettingsL()
         iHost.GameMenuSetVolumeL(iVolume);
     if (features & EGameMenuFeatureSound)
         iHost.GameMenuSetSoundEnabledL(iSoundEnabled);
-    if (features & EGameMenuFeatureFrameSkip)
-        iHost.GameMenuSetFrameSkipEnabledL(iFrameSkipEnabled);
     if (features & EGameMenuFeatureFps)
         iHost.GameMenuSetFpsEnabledL(iFpsEnabled);
 }
@@ -194,12 +228,11 @@ TBool CGameMenu::SoundEnabled() const
 TInt CGameMenu::ItemCount() const
 {
     const TUint32 features = iHost.GameMenuFeatures();
-    TInt count = 2;
+    TInt count = 1;
     if (features & EGameMenuFeatureSound) ++count;
     if (features & EGameMenuFeatureVolume) ++count;
-    if (features & EGameMenuFeatureFrameSkip) ++count;
     if (features & EGameMenuFeatureFps) ++count;
-    if (features & EGameMenuFeatureKeys) ++count;
+    if (features & EGameMenuFeatureHelp) ++count;
     count += Max(0, iHost.GameMenuCustomItemCount());
     if (features & EGameMenuFeatureReset) ++count;
     return count;
@@ -216,9 +249,8 @@ CGameMenu::TItemKind CGameMenu::ItemKindAt(TInt aIndex, TInt& aCustomIndex) cons
     if (features & (flag)) { if (aIndex == cursor) return (kind); ++cursor; }
     MATCH_FEATURE(EGameMenuFeatureSound, EItemSound)
     MATCH_FEATURE(EGameMenuFeatureVolume, EItemVolume)
-    MATCH_FEATURE(EGameMenuFeatureFrameSkip, EItemFrameSkip)
     MATCH_FEATURE(EGameMenuFeatureFps, EItemFps)
-    MATCH_FEATURE(EGameMenuFeatureKeys, EItemKeys)
+    MATCH_FEATURE(EGameMenuFeatureHelp, EItemHelp)
 #undef MATCH_FEATURE
 
     const TInt customCount = Max(0, iHost.GameMenuCustomItemCount());
@@ -234,8 +266,6 @@ CGameMenu::TItemKind CGameMenu::ItemKindAt(TInt aIndex, TInt& aCustomIndex) cons
             return EItemReset;
         ++cursor;
     }
-    if (aIndex == cursor++)
-        return EItemResume;
     if (aIndex == cursor)
         return EItemExit;
     return EItemInvalid;
@@ -248,19 +278,16 @@ void CGameMenu::ItemText(TInt aIndex, TDes8& aText) const
     switch (ItemKindAt(aIndex, customIndex))
     {
     case EItemSound:
-        aText.Copy(iSoundEnabled ? _L8("SOUND ON") : _L8("SOUND OFF"));
+        aText.Copy(iSoundEnabled ? _L8("SOUND: ON") : _L8("SOUND: OFF"));
         break;
     case EItemVolume:
         aText.Format(_L8("VOLUME %d%%"), iVolume);
         break;
-    case EItemFrameSkip:
-        aText.Copy(iFrameSkipEnabled ? _L8("FRAMESKIP AUTO") : _L8("FRAMESKIP OFF"));
-        break;
     case EItemFps:
-        aText.Copy(iFpsEnabled ? _L8("FPS ON") : _L8("FPS OFF"));
+        aText.Copy(iFpsEnabled ? _L8("FPS: ON") : _L8("FPS: OFF"));
         break;
-    case EItemKeys:
-        aText.Copy(_L8("KEYS"));
+    case EItemHelp:
+        aText.Copy(_L8("HELP"));
         break;
     case EItemCustom:
         iHost.GameMenuCustomItemText(customIndex, aText);
@@ -268,11 +295,8 @@ void CGameMenu::ItemText(TInt aIndex, TDes8& aText) const
     case EItemReset:
         aText.Copy(_L8("RESET"));
         break;
-    case EItemResume:
-        aText.Copy(_L8("RESUME"));
-        break;
     case EItemExit:
-        aText.Copy(_L8("EXIT TO LAUNCHER"));
+        aText.Copy(_L8("EXIT"));
         break;
     default:
         break;
@@ -291,7 +315,7 @@ void CGameMenu::OpenL()
         return;
     NormalizeSelection();
     iHeldMenuKeys = 0;
-    iKeysVisible = EFalse;
+    iHelpVisible = EFalse;
     iOpen = ETrue;
     TRAPD(error, iHost.GameMenuPauseL(ETrue));
     if (error != KErrNone)
@@ -307,7 +331,7 @@ void CGameMenu::CloseL()
     if (!iOpen)
         return;
     iHeldMenuKeys = 0;
-    iKeysVisible = EFalse;
+    iHelpVisible = EFalse;
     iOpen = EFalse;
     TRAPD(error, iHost.GameMenuPauseL(EFalse));
     if (error != KErrNone)
@@ -341,7 +365,7 @@ void CGameMenu::NormalizeSelection()
 
 void CGameMenu::MoveSelection(TInt aDelta)
 {
-    if (!iOpen || iKeysVisible || ItemCount() <= 0)
+    if (!iOpen || iHelpVisible || ItemCount() <= 0)
         return;
     iSelection += aDelta;
     NormalizeSelection();
@@ -362,18 +386,13 @@ void CGameMenu::ActivateSelectionL()
     case EItemVolume:
         AdjustSelectionL(1);
         return;
-    case EItemFrameSkip:
-        iFrameSkipEnabled = !iFrameSkipEnabled;
-        iHost.GameMenuSetFrameSkipEnabledL(iFrameSkipEnabled);
-        SaveSettings();
-        break;
     case EItemFps:
         iFpsEnabled = !iFpsEnabled;
         iHost.GameMenuSetFpsEnabledL(iFpsEnabled);
         SaveSettings();
         break;
-    case EItemKeys:
-        iKeysVisible = ETrue;
+    case EItemHelp:
+        iHelpVisible = ETrue;
         break;
     case EItemCustom:
         if (!iHost.GameMenuCustomActivateL(customIndex))
@@ -384,9 +403,6 @@ void CGameMenu::ActivateSelectionL()
         break;
     case EItemReset:
         iHost.GameMenuResetL();
-        CloseL();
-        return;
-    case EItemResume:
         CloseL();
         return;
     case EItemExit:
@@ -480,9 +496,9 @@ TBool CGameMenu::HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent& aKey)
         OpenL();
         return ETrue;
     }
-    if (iKeysVisible)
+    if (iHelpVisible)
     {
-        iKeysVisible = EFalse;
+        iHelpVisible = EFalse;
         iHost.GameMenuRequestRedraw();
         return ETrue;
     }
@@ -536,11 +552,11 @@ TBool CGameMenu::HandleKeyEventL(TInt aType, const TKeyEvent& aKey)
     if (!trigger)
         return ETrue;
 
-    if (iKeysVisible)
+    if (iHelpVisible)
     {
         if (menuKey == EMenuKeyDecision || menuKey == EMenuKeyCancel)
         {
-            iKeysVisible = EFalse;
+            iHelpVisible = EFalse;
             iHost.GameMenuRequestRedraw();
         }
         return ETrue;
@@ -576,8 +592,8 @@ void CGameMenu::DrawL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
 {
     if (!iOpen)
         return;
-    if (iKeysVisible)
-        DrawKeysL(aGc, aDevice);
+    if (iHelpVisible)
+        DrawHelpL(aGc, aDevice);
     else
         DrawMenuL(aGc, aDevice);
 }
@@ -590,9 +606,10 @@ void CGameMenu::DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
     NormalizeSelection();
 
     const TSize screenSize = aDevice.SizeInPixels();
-    const TInt rowHeight = 16;
+    const TInt rowHeight = KMenuTextHeight + 5;
+    const TInt footerHeight = KMenuTextHeight + 8;
     const TInt panelWidth = Min(190, Max(1, screenSize.iWidth - 12));
-    const TInt wantedHeight = 38 + itemCount * rowHeight;
+    const TInt wantedHeight = itemCount * rowHeight + footerHeight + 8;
     const TInt panelHeight = Min(wantedHeight, Max(1, screenSize.iHeight - 12));
     const TPoint origin(0, screenSize.iHeight - panelHeight);
     const TRect panel(origin, TSize(panelWidth, panelHeight));
@@ -603,19 +620,10 @@ void CGameMenu::DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
     aGc.SetBrushColor(TRgb(0, 0, 0));
     aGc.DrawRect(panel);
 
-    CFont* font = NULL;
-    User::LeaveIfError(aDevice.GetNearestFontInPixels(font, TFontSpec(KMenuFontName, KMenuFontHeight)));
-    if (!font)
-        User::Leave(KErrNotFound);
-    aGc.UseFont(font);
-    aGc.SetPenColor(TRgb(255, 255, 255));
-    aGc.SetBrushStyle(CGraphicsContext::ENullBrush);
-    aGc.DrawText(_L("MENU"), TPoint(panel.iTl.iX + 7, panel.iTl.iY + 13));
-
     const TInt rowX = panel.iTl.iX + 5;
     const TInt rowWidth = panelWidth - 10;
-    const TInt firstBaseline = panel.iTl.iY + 29;
-    const TInt visibleRows = Max(1, (panelHeight - 42) / rowHeight);
+    const TInt firstY = panel.iTl.iY + 5;
+    const TInt visibleRows = Max(1, (panelHeight - footerHeight - 8) / rowHeight);
     TInt firstItem = 0;
     if (iSelection >= visibleRows)
         firstItem = iSelection - visibleRows + 1;
@@ -625,40 +633,39 @@ void CGameMenu::DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
     for (TInt row = 0; row < visibleRows && firstItem + row < itemCount; ++row)
     {
         const TInt item = firstItem + row;
-        const TInt baseline = firstBaseline + row * rowHeight;
+        const TInt textY = firstY + row * rowHeight + 2;
         TBuf8<64> text8;
         ItemText(item, text8);
-        TBuf<64> text;
-        CopyAscii(text8, text);
         if (item == iSelection)
         {
+            aGc.SetPenStyle(CGraphicsContext::ENullPen);
             aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
             aGc.SetBrushColor(TRgb(255, 255, 255));
-            aGc.SetPenColor(TRgb(255, 255, 255));
-            aGc.DrawRect(TRect(TPoint(rowX, baseline - 11), TSize(rowWidth, 14)));
-            aGc.SetBrushStyle(CGraphicsContext::ENullBrush);
-            aGc.SetPenColor(TRgb(0, 0, 0));
-            aGc.DrawText(text, TPoint(rowX + 4, baseline));
-            aGc.SetPenColor(TRgb(255, 255, 255));
+            aGc.DrawRect(TRect(TPoint(rowX, firstY + row * rowHeight),
+                               TSize(rowWidth, rowHeight - 1)));
+            DrawGohuText(aGc, text8, TPoint(rowX + 4, textY), TRgb(0, 0, 0));
         }
         else
         {
-            aGc.DrawText(text, TPoint(rowX + 4, baseline));
+            DrawGohuText(aGc, text8, TPoint(rowX + 4, textY), TRgb(255, 255, 255));
         }
     }
 
-    aGc.DrawText(_L("SELECT"), TPoint(panel.iTl.iX + 7, panel.iBr.iY - 4));
-    const TInt backWidth = font->TextWidthInPixels(_L("BACK"));
-    aGc.DrawText(_L("BACK"), TPoint(panel.iBr.iX - backWidth - 7, panel.iBr.iY - 4));
-    aGc.DiscardFont();
-    aDevice.ReleaseFont(font);
+    _LIT8(KSelect, "SELECT");
+    _LIT8(KBack, "BACK");
+    const TInt footerY = panel.iBr.iY - KMenuTextHeight - 4;
+    DrawGohuText(aGc, KSelect, TPoint(panel.iTl.iX + 7, footerY), TRgb(255, 255, 255));
+    DrawGohuText(aGc,
+                 KBack,
+                 TPoint(panel.iBr.iX - GohuTextWidth(KBack) - 7, footerY),
+                 TRgb(255, 255, 255));
 }
 
-void CGameMenu::DrawKeysL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
+void CGameMenu::DrawHelpL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
 {
     const TSize screenSize = aDevice.SizeInPixels();
     const TInt panelWidth = Min(292, Max(1, screenSize.iWidth - 12));
-    const TInt panelHeight = Min(150, Max(1, screenSize.iHeight - 12));
+    const TInt panelHeight = Min(210, Max(1, screenSize.iHeight - 12));
     const TRect panel(TPoint((screenSize.iWidth - panelWidth) / 2,
                              (screenSize.iHeight - panelHeight) / 2),
                       TSize(panelWidth, panelHeight));
@@ -669,32 +676,33 @@ void CGameMenu::DrawKeysL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
     aGc.SetBrushColor(TRgb(0, 0, 0));
     aGc.DrawRect(panel);
 
-    CFont* font = NULL;
-    User::LeaveIfError(aDevice.GetNearestFontInPixels(font, TFontSpec(KMenuFontName, KMenuFontHeight)));
-    if (!font)
-        User::Leave(KErrNotFound);
-    aGc.UseFont(font);
-    aGc.SetBrushStyle(CGraphicsContext::ENullBrush);
-    aGc.SetPenColor(TRgb(255, 255, 255));
-
     TInt x = panel.iTl.iX + 10;
-    TInt y = panel.iTl.iY + 16;
-    const TInt step = 18;
-    aGc.DrawText(_L("KEYS"), TPoint(x, y));
-    y += step;
-    aGc.DrawText(_L("UP / W        UP"), TPoint(x, y));
-    y += step;
-    aGc.DrawText(_L("DOWN / S      DOWN"), TPoint(x, y));
-    y += step;
-    aGc.DrawText(_L("LEFT / A      LEFT"), TPoint(x, y));
-    y += step;
-    aGc.DrawText(_L("RIGHT / D     RIGHT"), TPoint(x, y));
-    y += step;
-    aGc.DrawText(_L("CENTER / Z    PRIMARY"), TPoint(x, y));
-    y += step;
-    aGc.DrawText(_L("R SOFT / ESC  BACK"), TPoint(x, y));
-    aGc.DrawText(_L("CENTER/BACK TO MENU"), TPoint(x, panel.iBr.iY - 7));
+    TInt y = panel.iTl.iY + 8;
+    const TInt step = KMenuTextHeight + 4;
+    _LIT8(KHelp, "HELP");
+    _LIT8(KUp, "UP / W        UP");
+    _LIT8(KDown, "DOWN / S      DOWN");
+    _LIT8(KLeft, "LEFT / A      LEFT");
+    _LIT8(KRight, "RIGHT / D     RIGHT");
+    _LIT8(KPrimary, "CENTER / Z    PRIMARY");
+    _LIT8(KBack, "R SOFT / ESC  BACK");
+    _LIT8(KClose, "CENTER/BACK TO CLOSE");
 
-    aGc.DiscardFont();
-    aDevice.ReleaseFont(font);
+    DrawGohuText(aGc, KHelp, TPoint(x, y), TRgb(255, 255, 255));
+    y += step;
+    DrawGohuText(aGc, KUp, TPoint(x, y), TRgb(255, 255, 255));
+    y += step;
+    DrawGohuText(aGc, KDown, TPoint(x, y), TRgb(255, 255, 255));
+    y += step;
+    DrawGohuText(aGc, KLeft, TPoint(x, y), TRgb(255, 255, 255));
+    y += step;
+    DrawGohuText(aGc, KRight, TPoint(x, y), TRgb(255, 255, 255));
+    y += step;
+    DrawGohuText(aGc, KPrimary, TPoint(x, y), TRgb(255, 255, 255));
+    y += step;
+    DrawGohuText(aGc, KBack, TPoint(x, y), TRgb(255, 255, 255));
+    DrawGohuText(aGc,
+                 KClose,
+                 TPoint(x, panel.iBr.iY - KMenuTextHeight - 7),
+                 TRgb(255, 255, 255));
 }

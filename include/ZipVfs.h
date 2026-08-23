@@ -43,7 +43,7 @@ public:
 private:
     enum
     {
-        KBucketCount = 512,
+        KBucketCount = 2048,
         KMaxCentralDirectoryBytes = 2 * 1024 * 1024,
         KMaxArchivePathChars = KMaxFileName
     };

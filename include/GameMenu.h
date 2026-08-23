@@ -12,10 +12,9 @@ enum TGameMenuFeature
 {
     EGameMenuFeatureSound = 1u << 0,
     EGameMenuFeatureVolume = 1u << 1,
-    EGameMenuFeatureFrameSkip = 1u << 2,
-    EGameMenuFeatureFps = 1u << 3,
-    EGameMenuFeatureKeys = 1u << 4,
-    EGameMenuFeatureReset = 1u << 5
+    EGameMenuFeatureFps = 1u << 2,
+    EGameMenuFeatureHelp = 1u << 3,
+    EGameMenuFeatureReset = 1u << 4
 };
 
 class MGameMenuHost
@@ -24,7 +23,6 @@ public:
     virtual TUint32 GameMenuFeatures() const { return 0; }
     virtual void GameMenuSetSoundEnabledL(TBool) {}
     virtual void GameMenuSetVolumeL(TInt) {}
-    virtual void GameMenuSetFrameSkipEnabledL(TBool) {}
     virtual void GameMenuSetFpsEnabledL(TBool) {}
     virtual void GameMenuResetL() {}
     virtual TInt GameMenuCustomItemCount() const { return 0; }
@@ -57,12 +55,10 @@ private:
         EItemInvalid = 0,
         EItemSound,
         EItemVolume,
-        EItemFrameSkip,
         EItemFps,
-        EItemKeys,
+        EItemHelp,
         EItemCustom,
         EItemReset,
-        EItemResume,
         EItemExit
     };
 
@@ -83,20 +79,19 @@ private:
     TBool HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent& aKey);
     TBool TriggerMenuKey(TInt aMenuKey, TInt aType, const TKeyEvent& aKey);
     void DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
-    void DrawKeysL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
+    void DrawHelpL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
 
 private:
     MGameMenuHost& iHost;
     RFs& iFs;
     TBool iOpen;
-    TBool iKeysVisible;
+    TBool iHelpVisible;
     TInt iSelection;
     TBool iLeftSoftHeld;
     TBool iRightSoftHeld;
     TUint32 iHeldMenuKeys;
     TInt iVolume;
     TBool iSoundEnabled;
-    TBool iFrameSkipEnabled;
     TBool iFpsEnabled;
 };
 

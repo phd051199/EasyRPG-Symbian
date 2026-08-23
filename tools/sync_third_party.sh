@@ -85,11 +85,16 @@ fetch_archive \
     "https://releases.llvm.org/4.0.1/libcxx-4.0.1.src.tar.xz" \
     "libcxx-4.0.1.src.tar.xz" \
     "520a1171f272c9ff82f324d5d89accadcec9bc9f3c78de11f5575cdb99accc4c"
+fetch_archive \
+    "https://gitlab.freedesktop.org/uchardet/uchardet/-/archive/v0.0.8/uchardet-v0.0.8.tar.gz" \
+    "uchardet-0.0.8.tar.gz" \
+    "5aa402a1b5b1dbb8d81096f141ff1224e079f4d3a1db0f79ecca782756d3a416"
 
 extract_tgz "easyrpg-player-0.5.0.tar.gz" "easyrpg-player-0.5.0"
 extract_tgz "pixman-0.34.0.tar.gz" "pixman-0.34.0"
 extract_tgz "liblcf-0.5.0.tar.gz" "liblcf-0.5.0"
 extract_txz "libcxx-4.0.1.src.tar.xz" "libcxx-4.0.1.src"
+extract_tgz "uchardet-0.0.8.tar.gz" "uchardet-v0.0.8"
 
 replace_component "$IMPORT_DIR/easyrpg-player-0.5.0" \
     "easyrpg-player-0.5.0" "$MANIFEST_DIR/easyrpg-player-0.5.0.files"
@@ -99,5 +104,7 @@ replace_component "$IMPORT_DIR/liblcf-0.5.0" \
     "liblcf-0.5.0" "$MANIFEST_DIR/liblcf-0.5.0.files"
 replace_component "$IMPORT_DIR/libcxx-4.0.1.src" \
     "libcxx-4.0.1" "$MANIFEST_DIR/libcxx-4.0.1.files"
+replace_component "$IMPORT_DIR/uchardet-v0.0.8" \
+    "uchardet-0.0.8" "$MANIFEST_DIR/uchardet-0.0.8.files"
 
 "$PROJECT_DIR/tools/verify_third_party.sh"

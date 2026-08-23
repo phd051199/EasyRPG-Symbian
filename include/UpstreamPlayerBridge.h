@@ -26,6 +26,27 @@ int EasyRpgUpstreamPlayerShouldRender(void);
 void EasyRpgUpstreamPlayerRefreshAudio(void);
 int EasyRpgUpstreamPlayerTrimMemory(int pressure_level);
 int EasyRpgPlatformFreeRamBytes(void);
+int EasyRpgPlatformPrepareAllocation(int bytes);
+enum EasyRpgDirectImageFormat
+{
+    EEasyRpgDirectImageNone = 0,
+    EEasyRpgDirectImageRgb565 = 1,
+    EEasyRpgDirectImageA1555 = 2,
+    EEasyRpgDirectImageBgra8888 = 3
+};
+int EasyRpgPlatformProbeDirectImage(void* stream,
+                                    int transparent,
+                                    unsigned int flags,
+                                    int* width,
+                                    int* height,
+                                    int* pixel_format);
+int EasyRpgPlatformDecodeDirectImage(void* stream,
+                                     int transparent,
+                                     int pixel_format,
+                                     int width,
+                                     int height,
+                                     void* pixels,
+                                     int pitch_bytes);
 int EasyRpgUpstreamPlayerDirtyRegionCount(void);
 int EasyRpgUpstreamPlayerDirtyRegion(int index,
                                      int* x,

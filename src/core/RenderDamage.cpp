@@ -10,6 +10,7 @@ enum TPhase {
 };
 
 const int KCommandCapacity = 2048;
+const int KDrawableCapacity = 2048;
 const int KDirtyCapacity = 16;
 const int KMaximumDirtyRegions = 2;
 const int KFullRedrawAreaPercent = 88;
@@ -22,6 +23,11 @@ const int KAdaptiveFullFrames = 6;
 
 struct TCommand {
     unsigned int signature;
+    Rect rect;
+};
+
+struct TDrawableRecord {
+    Drawable* drawable;
     Rect rect;
 };
 
@@ -48,6 +54,12 @@ int gAdaptiveScore = 0;
 int gAdaptiveFullFrames = 0;
 bool gAdaptiveFullPaintActive = false;
 int gRecordSuppressionDepth = 0;
+TDrawableRecord gDrawables[KDrawableCapacity];
+int gDrawableCount = 0;
+bool gDrawableOverflow = false;
+Drawable* gActiveDrawable = nullptr;
+Rect gActiveDrawableRect;
+bool gActiveDrawableHasRect = false;
 
 int Area(const Rect& aRect) {
     return aRect.width > 0 && aRect.height > 0 ? aRect.width * aRect.height : 0;
@@ -234,6 +246,10 @@ void Reset() {
     gAdaptiveFullFrames = 0;
     gAdaptiveFullPaintActive = false;
     gRecordSuppressionDepth = 0;
+    gDrawableCount = 0;
+    gDrawableOverflow = false;
+    gActiveDrawable = nullptr;
+    gActiveDrawableHasRect = false;
     gFrameRect = Rect();
     gPaintRect = Rect();
     gPaintClipRect = nullptr;
@@ -252,6 +268,10 @@ void ForceFullFrame(int aWidth, int aHeight) {
     gFrameRect = Rect(0, 0, aWidth, aHeight);
     gPaintRect = gFrameRect;
     gPaintClipRect = nullptr;
+    gDrawableCount = 0;
+    gDrawableOverflow = false;
+    gActiveDrawable = nullptr;
+    gActiveDrawableHasRect = false;
     ForceFull();
     gDamageValid = true;
 }
@@ -296,6 +316,10 @@ void BeginRecord(int aWidth, int aHeight) {
     gFrameRect = Rect(0, 0, aWidth, aHeight);
     gPaintRect = gFrameRect;
     gPaintClipRect = nullptr;
+    gDrawableCount = 0;
+    gDrawableOverflow = false;
+    gActiveDrawable = nullptr;
+    gActiveDrawableHasRect = false;
 }
 
 void BeginFullPaintRecord(int aWidth, int aHeight) {
@@ -312,6 +336,34 @@ void BeginFullPaintRecord(int aWidth, int aHeight) {
     gPaintClipRect = nullptr;
     ForceFull();
     gPaintRegion = 0;
+    gDrawableCount = 0;
+    gDrawableOverflow = false;
+    gActiveDrawable = nullptr;
+    gActiveDrawableHasRect = false;
+}
+
+void BeginDrawable(Drawable* aDrawable) {
+    if (gPhase != ERecording && gPhase != EFullPaintRecording)
+        return;
+    gActiveDrawable = aDrawable;
+    gActiveDrawableRect = Rect();
+    gActiveDrawableHasRect = false;
+}
+
+void EndDrawable() {
+    if ((gPhase != ERecording && gPhase != EFullPaintRecording) || !gActiveDrawable)
+        return;
+    if (gActiveDrawableHasRect) {
+        if (gDrawableCount < KDrawableCapacity) {
+            gDrawables[gDrawableCount].drawable = gActiveDrawable;
+            gDrawables[gDrawableCount].rect = gActiveDrawableRect;
+            ++gDrawableCount;
+        } else {
+            gDrawableOverflow = true;
+        }
+    }
+    gActiveDrawable = nullptr;
+    gActiveDrawableHasRect = false;
 }
 
 bool IsRecording() {
@@ -359,6 +411,15 @@ void Record(unsigned int aSignature, const Rect& aInput) {
     rect.Adjust(gFrameRect);
     if (rect.IsEmpty())
         return;
+
+    if (gActiveDrawable) {
+        if (!gActiveDrawableHasRect) {
+            gActiveDrawableRect = rect;
+            gActiveDrawableHasRect = true;
+        } else {
+            gActiveDrawableRect = UnionRect(gActiveDrawableRect, rect);
+        }
+    }
 
     if (gCurrentCount >= KCommandCapacity) {
         gOverflow = true;
@@ -544,6 +605,23 @@ void EndPaint() {
     gPaintRegion = -1;
     gPaintClipRect = nullptr;
     gPhase = EIdle;
+}
+
+bool RecordedDrawablesValid() {
+    return !gDrawableOverflow;
+}
+
+int RecordedDrawableCount() {
+    return gDrawableCount;
+}
+
+Drawable* RecordedDrawable(int aIndex) {
+    return aIndex >= 0 && aIndex < gDrawableCount ? gDrawables[aIndex].drawable : nullptr;
+}
+
+const Rect& RecordedDrawableRect(int aIndex) {
+    static const Rect empty;
+    return aIndex >= 0 && aIndex < gDrawableCount ? gDrawables[aIndex].rect : empty;
 }
 
 }

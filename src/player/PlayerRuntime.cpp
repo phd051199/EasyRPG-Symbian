@@ -159,6 +159,20 @@ extern "C" int EasyRpgPlatformFreeRamBytes(void)
     return Min(allocationHeadroom, systemFree);
 }
 
+extern "C" int EasyRpgPlatformPrepareAllocation(int aBytes)
+{
+    if (aBytes <= 0)
+        return EasyRpgPlatformFreeRamBytes();
+    TInt freeRam = EasyRpgPlatformFreeRamBytes();
+    if (freeRam >= aBytes)
+        return freeRam;
+
+    const TInt pressure = freeRam >= 0 && freeRam > aBytes / 2 ? 1 : 2;
+    EasyRpgUpstreamPlayerTrimMemory(pressure);
+    User::Heap().Compress();
+    return EasyRpgPlatformFreeRamBytes();
+}
+
 extern "C" int EasyRpgResolveResource(const char* aDirectory,
                                                const char* aFile,
                                                char* aPath,

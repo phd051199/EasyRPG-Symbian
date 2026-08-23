@@ -19,8 +19,6 @@ public:
     void Start();
     void Stop();
     TBool Running() const;
-    void SetFrameSkipEnabled(TBool aEnabled);
-    TBool FrameSkipEnabled() const;
 
 private:
     explicit CFrameTimer(MFrameTimerObserver& aObserver);
@@ -46,8 +44,6 @@ private:
     TInt64 iNextDeadlineCounter;
     TUint32 iLogicFrame;
     TBool iRunning;
-    TBool iFrameSkipEnabled;
-    TBool iRenderPending;
 };
 
 #endif

@@ -112,16 +112,17 @@ index 8a3a984..8b2fc15 100644
  };
  
 diff --git a/src/bitmap.cpp b/src/bitmap.cpp
-index 01b46e8..ae86a56 100644
+index 01b46e8..819e4ea 100644
 --- a/src/bitmap.cpp
 +++ b/src/bitmap.cpp
-@@ -36,6 +36,632 @@
+@@ -36,6 +36,633 @@
  #include "output.h"
  #include "util_macro.h"
  #include "bitmap_hslrgb.h"
 +#ifdef EASYRPG_SYMBIAN
 +#include "baseui.h"
 +#include "RenderDamage.h"
++#include "UpstreamPlayerBridge.h"
 +#endif
 +
 +#ifdef EASYRPG_SYMBIAN
@@ -748,7 +749,7 @@ index 01b46e8..ae86a56 100644
  
  const Opacity Opacity::opaque;
  
-@@ -72,6 +698,12 @@ BitmapRef Bitmap::Create(Bitmap const& source, Rect const& src_rect, bool transp
+@@ -72,6 +699,12 @@ BitmapRef Bitmap::Create(Bitmap const& source, Rect const& src_rect, bool transp
  void Bitmap::InitBitmap() {
  	editing = false;
  	font = Font::Default();
@@ -761,7 +762,7 @@ index 01b46e8..ae86a56 100644
  }
  
  Bitmap::Bitmap() {
-@@ -127,41 +759,55 @@ void Bitmap::SetTransparentColor(Color /* color */) {
+@@ -127,41 +760,55 @@ void Bitmap::SetTransparentColor(Color /* color */) {
  }
  
  Bitmap::TileOpacity Bitmap::CheckOpacity(const Rect& rect) {
@@ -845,7 +846,7 @@ index 01b46e8..ae86a56 100644
  	}
  
  	if (flags & Flag_Chipset) {
-@@ -211,7 +857,11 @@ uint8_t const* Bitmap::pointer(int x, int y) const {
+@@ -211,7 +858,11 @@ uint8_t const* Bitmap::pointer(int x, int y) const {
  	return (uint8_t const*) pixels() + y * pitch() + x * bytes();
  }
  
@@ -858,7 +859,7 @@ index 01b46e8..ae86a56 100644
  	return std::make_shared<Bitmap>(width, height, transparent);
  }
  
-@@ -256,6 +906,11 @@ void Bitmap::HueChangeBlit(int x, int y, Bitmap const& src, Rect const& src_rect
+@@ -256,6 +907,11 @@ void Bitmap::HueChangeBlit(int x, int y, Bitmap const& src, Rect const& src_rect
  }
  
  void Bitmap::RefreshCallback() {
@@ -870,7 +871,7 @@ index 01b46e8..ae86a56 100644
  }
  
  FontRef const& Bitmap::GetFont() const {
-@@ -268,7 +923,7 @@ void Bitmap::SetFont(FontRef const& new_font) {
+@@ -268,7 +924,7 @@ void Bitmap::SetFont(FontRef const& new_font) {
  
  void Bitmap::TextDraw(int x, int y, int width, int /* height */, int color, std::string const& text, Text::Alignment align) {
  	Rect rect = GetFont()->GetSize(text);
@@ -879,7 +880,7 @@ index 01b46e8..ae86a56 100644
  
  	switch (align) {
  	case Text::AlignLeft:
-@@ -290,12 +945,11 @@ void Bitmap::TextDraw(Rect const& rect, int color, std::string const& text, Text
+@@ -290,12 +946,11 @@ void Bitmap::TextDraw(Rect const& rect, int color, std::string const& text, Text
  
  void Bitmap::TextDraw(int x, int y, int color, std::string const& text, Text::Alignment align) {
  	Text::Draw(*this, x, y, color, text, align);
@@ -893,7 +894,7 @@ index 01b46e8..ae86a56 100644
  
  	switch (align) {
  	case Text::AlignLeft:
-@@ -317,7 +971,6 @@ void Bitmap::TextDraw(Rect const& rect, Color color, std::string const& text, Te
+@@ -317,7 +972,6 @@ void Bitmap::TextDraw(Rect const& rect, Color color, std::string const& text, Te
  
  void Bitmap::TextDraw(int x, int y, Color color, std::string const& text) {
  	Text::Draw(*this, x, y, color, text);
@@ -901,7 +902,7 @@ index 01b46e8..ae86a56 100644
  }
  
  Rect Bitmap::TransformRectangle(const Matrix& m, const Rect& rect) {
-@@ -397,7 +1050,7 @@ void Bitmap::initialize_formats() {
+@@ -397,7 +1051,7 @@ void Bitmap::initialize_formats() {
  	add_pair(PIXMAN_x4r4g4b4, DynamicFormat(16,4,8,4,4,4,0,0,0,PF::NoAlpha));
  	add_pair(PIXMAN_a4b4g4r4, DynamicFormat(16,4,0,4,4,4,8,4,12,PF::Alpha));
  	add_pair(PIXMAN_x4b4g4r4, DynamicFormat(16,4,0,4,4,4,8,0,0,PF::NoAlpha));
@@ -910,7 +911,7 @@ index 01b46e8..ae86a56 100644
  	add_pair(PIXMAN_g8, DynamicFormat(8,8,0,8,0,8,0,0,0,PF::NoAlpha));
  
  	formats_initialized = true;
-@@ -428,9 +1081,20 @@ DynamicFormat Bitmap::image_format;
+@@ -428,9 +1082,20 @@ DynamicFormat Bitmap::image_format;
  DynamicFormat Bitmap::opaque_image_format;
  
  void Bitmap::SetFormat(const DynamicFormat& format) {
@@ -931,10 +932,26 @@ index 01b46e8..ae86a56 100644
  	image_format = format_R8G8B8A8_a().format();
  	opaque_image_format = format_R8G8B8A8_n().format();
  }
-@@ -484,8 +1148,17 @@ void Bitmap::Init(int width, int height, void* data, int pitch, bool destroy) {
+@@ -479,13 +1144,33 @@ void Bitmap::Init(int width, int height, void* data, int pitch, bool destroy) {
+ 	if (!pitch)
+ 		pitch = width * bytes();
+ 
++#ifdef EASYRPG_SYMBIAN
++	if (!data && width > 0 && height > 0) {
++		const long long allocation = static_cast<long long>(width) * height * bytes();
++		if (allocation >= 512 * 1024 && allocation < 0x7fffffffLL)
++			EasyRpgPlatformPrepareAllocation(static_cast<int>(allocation + std::min<long long>(2 * 1024 * 1024, 0x7fffffffLL - allocation)));
++	}
++#endif
++
+ 	bitmap = pixman_image_create_bits(pixman_format, width, height, (uint32_t*) data, pitch);
+ 
  	if (bitmap == NULL) {
  		Output::Error("Couldn't create %dx%d image.", width, height);
- 	}
++		if (data != NULL && destroy)
++			free(data);
++		return;
++	}
 +#ifdef EASYRPG_SYMBIAN
 +	else {
 +		symbian_width = width;
@@ -942,7 +959,7 @@ index 01b46e8..ae86a56 100644
 +		symbian_pitch = pixman_image_get_stride(bitmap);
 +		symbian_bpp = (pixman_image_get_depth(bitmap) + 7) / 8;
 +		symbian_pixels = pixman_image_get_data(bitmap);
-+	}
+ 	}
 +#endif
  
 -	if (format.bits == 8) {
@@ -950,7 +967,7 @@ index 01b46e8..ae86a56 100644
  		initialize_palette();
  		pixman_image_set_indexed(bitmap, &palette);
  	}
-@@ -497,15 +1170,22 @@ void Bitmap::Init(int width, int height, void* data, int pitch, bool destroy) {
+@@ -497,15 +1182,22 @@ void Bitmap::Init(int width, int height, void* data, int pitch, bool destroy) {
  void Bitmap::ConvertImage(int& width, int& height, void*& pixels, bool transparent) {
  	const DynamicFormat& img_format = transparent ? image_format : opaque_image_format;
  
@@ -982,7 +999,37 @@ index 01b46e8..ae86a56 100644
  		}
  	}
  
-@@ -580,6 +1260,12 @@ Bitmap::Bitmap(const std::string& filename, bool transparent, uint32_t flags) {
+@@ -543,6 +1235,29 @@ Bitmap::Bitmap(const std::string& filename, bool transparent, uint32_t flags) {
+ 		return;
+ 	}
+ 
++#ifdef EASYRPG_SYMBIAN
++	int direct_width = 0;
++	int direct_height = 0;
++	int direct_format = EEasyRpgDirectImageNone;
++	if (EasyRpgPlatformProbeDirectImage(stream, transparent ? 1 : 0, flags,
++		&direct_width, &direct_height, &direct_format)) {
++		format = direct_format == EEasyRpgDirectImageA1555
++			? SymbianA1555Format()
++			: (direct_format == EEasyRpgDirectImageBgra8888 ? pixel_format : opaque_pixel_format);
++		pixman_format = find_format(format);
++		Init(direct_width, direct_height, (void*) NULL);
++		if (!bitmap || !EasyRpgPlatformDecodeDirectImage(stream,
++			transparent ? 1 : 0, direct_format, direct_width, direct_height,
++			pixels(), pitch())) {
++			fclose(stream);
++			return;
++		}
++		fclose(stream);
++		CheckPixels(flags);
++		return;
++	}
++#endif
++
+ 	int w = 0;
+ 	int h = 0;
+ 	void* pixels;
+@@ -580,7 +1295,17 @@ Bitmap::Bitmap(const std::string& filename, bool transparent, uint32_t flags) {
  		return;
  	}
  
@@ -993,9 +1040,14 @@ index 01b46e8..ae86a56 100644
 +	}
 +#endif
  	Init(w, h, (void *) NULL);
++	if (!bitmap) {
++		free(pixels);
++		return;
++	}
  
  	ConvertImage(w, h, pixels, transparent);
-@@ -610,7 +1296,11 @@ Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t f
+ 
+@@ -610,7 +1335,11 @@ Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t f
  #endif
  #ifdef SUPPORT_PNG
  	if (bytes > 4 && strncmp((char*)(data + 1), "PNG", 3) == 0)
@@ -1007,7 +1059,7 @@ index 01b46e8..ae86a56 100644
  	else
  #endif
  		Output::Warning("Unsupported image");
-@@ -619,6 +1309,12 @@ Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t f
+@@ -619,7 +1348,17 @@ Bitmap::Bitmap(const uint8_t* data, unsigned bytes, bool transparent, uint32_t f
  		return;
  	}
  
@@ -1018,9 +1070,14 @@ index 01b46e8..ae86a56 100644
 +	}
 +#endif
  	Init(w, h, (void *) NULL);
++	if (!bitmap) {
++		free(pixels);
++		return;
++	}
  
  	ConvertImage(w, h, pixels, transparent);
-@@ -638,32 +1334,209 @@ Bitmap::Bitmap(Bitmap const& source, Rect const& src_rect, bool transparent) {
+ 
+@@ -638,32 +1377,209 @@ Bitmap::Bitmap(Bitmap const& source, Rect const& src_rect, bool transparent) {
  }
  
  void* Bitmap::pixels() {
@@ -1077,8 +1134,8 @@ index 01b46e8..ae86a56 100644
 +#ifdef EASYRPG_SYMBIAN
 +uint32_t Bitmap::Revision() const {
 +	return revision_counter;
-+}
-+
+ }
+ 
 +void Bitmap::Touch() {
 +	RefreshCallback();
 +}
@@ -1208,8 +1265,8 @@ index 01b46e8..ae86a56 100644
 +	if (has_written)
 +		written.Set(dx, dy, copy_width, copy_height);
 +	return true;
- }
- 
++}
++
 +void Bitmap::SetClipRects(const Rect* aRect) {
 +	if (!bitmap || !aRect || aRect->IsEmpty()) {
 +		pixman_image_set_clip_region32(bitmap, nullptr);
@@ -1231,7 +1288,7 @@ index 01b46e8..ae86a56 100644
  uint32_t Bitmap::rmask() const {
  	return pixel_format.r.mask;
  }
-@@ -686,8 +1559,13 @@ namespace {
+@@ -686,8 +1602,13 @@ namespace {
  			return (pixman_image_t*) NULL;
  
  		if (!opacity.IsSplit()) {
@@ -1247,7 +1304,7 @@ index 01b46e8..ae86a56 100644
  		}
  
  		pixman_image_t *mask = pixman_image_create_bits(PIXMAN_a8, 1, 2, (uint32_t*) NULL, 4);
-@@ -717,6 +1595,40 @@ namespace {
+@@ -717,6 +1638,40 @@ namespace {
  void Bitmap::Blit(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity const& opacity) {
  	if (opacity.IsTransparent())
  		return;
@@ -1288,7 +1345,7 @@ index 01b46e8..ae86a56 100644
  
  	pixman_image_t* mask = CreateMask(opacity, src_rect);
  
-@@ -731,14 +1643,144 @@ void Bitmap::Blit(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity
+@@ -731,14 +1686,144 @@ void Bitmap::Blit(int x, int y, Bitmap const& src, Rect const& src_rect, Opacity
  	if (mask != NULL)
  		pixman_image_unref(mask);
  
@@ -1434,7 +1491,7 @@ index 01b46e8..ae86a56 100644
  		src.bitmap,
  		nullptr, bitmap,
  		src_rect.x, src_rect.y,
-@@ -762,6 +1804,73 @@ void Bitmap::TiledBlit(Rect const& src_rect, Bitmap const& src, Rect const& dst_
+@@ -762,6 +1847,73 @@ void Bitmap::TiledBlit(Rect const& src_rect, Bitmap const& src, Rect const& dst_
  void Bitmap::TiledBlit(int ox, int oy, Rect const& src_rect, Bitmap const& src, Rect const& dst_rect, Opacity const& opacity) {
  	if (opacity.IsTransparent())
  		return;
@@ -1508,7 +1565,7 @@ index 01b46e8..ae86a56 100644
  
  	if (ox >= src_rect.width)	ox %= src_rect.width;
  	if (oy >= src_rect.height)	ox %= src_rect.height;
-@@ -803,6 +1912,25 @@ void Bitmap::StretchBlit(Bitmap const&  src, Rect const& src_rect, Opacity const
+@@ -803,6 +1955,25 @@ void Bitmap::StretchBlit(Bitmap const&  src, Rect const& src_rect, Opacity const
  void Bitmap::StretchBlit(Rect const& dst_rect, Bitmap const& src, Rect const& src_rect, Opacity const& opacity) {
  	if (opacity.IsTransparent())
  		return;
@@ -1534,7 +1591,7 @@ index 01b46e8..ae86a56 100644
  
  	double zoom_x = (double)src_rect.width  / dst_rect.width;
  	double zoom_y = (double)src_rect.height / dst_rect.height;
-@@ -835,9 +1963,24 @@ void Bitmap::StretchBlit(Rect const& dst_rect, Bitmap const& src, Rect const& sr
+@@ -835,9 +2006,24 @@ void Bitmap::StretchBlit(Rect const& dst_rect, Bitmap const& src, Rect const& sr
  	RefreshCallback();
  }
  
@@ -1560,7 +1617,7 @@ index 01b46e8..ae86a56 100644
  
  	pixman_transform_t xform = {{
  		{ pixman_double_to_fixed(inv.xx), pixman_double_to_fixed(inv.xy), pixman_double_to_fixed(inv.x0) },
-@@ -861,11 +2004,28 @@ void Bitmap::TransformBlit(Rect const& dst_rect, Bitmap const& src, Rect const&
+@@ -861,11 +2047,28 @@ void Bitmap::TransformBlit(Rect const& dst_rect, Bitmap const& src, Rect const&
  
  	if (mask != NULL)
  		pixman_image_unref(mask);
@@ -1589,7 +1646,7 @@ index 01b46e8..ae86a56 100644
  
  	pixman_transform_t xform;
  	pixman_transform_init_scale(&xform,
-@@ -914,6 +2074,19 @@ static pixman_color_t PixmanColor(const Color &color) {
+@@ -914,6 +2117,19 @@ static pixman_color_t PixmanColor(const Color &color) {
  }
  
  void Bitmap::Fill(const Color &color) {
@@ -1609,7 +1666,7 @@ index 01b46e8..ae86a56 100644
  	pixman_color_t pcolor = PixmanColor(color);
  	Rect src_rect(0, 0, static_cast<uint16_t>(width()), static_cast<uint16_t>(height()));
  
-@@ -928,10 +2101,28 @@ void Bitmap::Fill(const Color &color) {
+@@ -928,10 +2144,28 @@ void Bitmap::Fill(const Color &color) {
  
  	pixman_image_unref(timage);
  
@@ -1638,7 +1695,7 @@ index 01b46e8..ae86a56 100644
  	pixman_color_t pcolor = PixmanColor(color);
  	pixman_rectangle16_t rect = {
  	static_cast<int16_t>(dst_rect.x),
-@@ -941,16 +2132,47 @@ void Bitmap::FillRect(Rect const& dst_rect, const Color &color) {
+@@ -941,16 +2175,47 @@ void Bitmap::FillRect(Rect const& dst_rect, const Color &color) {
  
  	pixman_image_fill_rectangles(PIXMAN_OP_OVER, bitmap, &pcolor, 1, &rect);
  
@@ -1686,7 +1743,7 @@ index 01b46e8..ae86a56 100644
  	pixman_color_t pcolor = {0, 0, 0, 0};
  	pixman_rectangle16_t rect = {
  		static_cast<int16_t>(dst_rect.x),
-@@ -961,23 +2183,22 @@ void Bitmap::ClearRect(Rect const& dst_rect) {
+@@ -961,23 +2226,22 @@ void Bitmap::ClearRect(Rect const& dst_rect) {
  
  	pixman_image_fill_rectangles(PIXMAN_OP_CLEAR, bitmap, &pcolor, 1, &rect);
  
@@ -1723,7 +1780,7 @@ index 01b46e8..ae86a56 100644
  }
  
  void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, const Tone &tone, Opacity const& opacity) {
-@@ -987,14 +2208,105 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
+@@ -987,14 +2251,105 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
  		}
  		return;
  	}
@@ -1836,7 +1893,7 @@ index 01b46e8..ae86a56 100644
  
  	if (tone.gray != 128) {
  		uint32_t* pixels = (uint32_t*)this->pixels();
-@@ -1047,13 +2359,7 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
+@@ -1047,13 +2402,7 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
  		}
  	}
  
@@ -1851,7 +1908,7 @@ index 01b46e8..ae86a56 100644
  		int as = pixel_format.a.shift;
  		int rs = pixel_format.r.shift;
  		int gs = pixel_format.g.shift;
-@@ -1077,9 +2383,9 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
+@@ -1077,9 +2426,9 @@ void Bitmap::ToneBlit(int x, int y, Bitmap const& src, Rect const& src_rect, con
  				uint8_t g = (pixel >> gs) & 0xFF;
  				uint8_t b = (pixel >> bs) & 0xFF;
  
@@ -1864,7 +1921,7 @@ index 01b46e8..ae86a56 100644
  				pixels[j] = ((uint32_t) red << rs) | ((uint32_t) green << gs) | ((uint32_t) blue << bs) |
  							((uint32_t) a << as);
  			}
-@@ -1095,6 +2401,61 @@ void Bitmap::BlendBlit(int x, int y, Bitmap const& src, Rect const& src_rect, co
+@@ -1095,6 +2444,61 @@ void Bitmap::BlendBlit(int x, int y, Bitmap const& src, Rect const& src_rect, co
  			Blit(x, y, src, src_rect, opacity);
  		return;
  	}
@@ -1926,7 +1983,7 @@ index 01b46e8..ae86a56 100644
  
  	if (&src != this)
  		pixman_image_composite32(src.GetOperator(),
-@@ -1124,6 +2485,27 @@ void Bitmap::FlipBlit(int x, int y, Bitmap const& src, Rect const& src_rect, boo
+@@ -1124,6 +2528,27 @@ void Bitmap::FlipBlit(int x, int y, Bitmap const& src, Rect const& src_rect, boo
  		Blit(x, y, src, src_rect, opacity);
  		return;
  	}
@@ -1954,7 +2011,7 @@ index 01b46e8..ae86a56 100644
  
  	pixman_transform_t xform;
  	pixman_transform_init_scale(&xform,
-@@ -1169,6 +2551,16 @@ void Bitmap::Flip(const Rect& dst_rect, bool horizontal, bool vertical) {
+@@ -1169,6 +2594,16 @@ void Bitmap::Flip(const Rect& dst_rect, bool horizontal, bool vertical) {
  }
  
  void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my, Color const& color) {
@@ -1971,7 +2028,7 @@ index 01b46e8..ae86a56 100644
  	pixman_color_t tcolor = {
  		static_cast<uint16_t>(color.red << 8),
  		static_cast<uint16_t>(color.green << 8),
-@@ -1190,6 +2582,18 @@ void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my
+@@ -1190,6 +2625,18 @@ void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my
  }
  
  void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my, Bitmap const& src, int sx, int sy) {
@@ -1990,7 +2047,7 @@ index 01b46e8..ae86a56 100644
  	pixman_image_composite32(PIXMAN_OP_OVER,
  							 src.bitmap, mask.bitmap, bitmap,
  							 sx, sy,
-@@ -1201,6 +2605,14 @@ void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my
+@@ -1201,6 +2648,14 @@ void Bitmap::MaskedBlit(Rect const& dst_rect, Bitmap const& mask, int mx, int my
  }
  
  void Bitmap::Blit2x(Rect const& dst_rect, Bitmap const& src, Rect const& src_rect) {
@@ -2005,7 +2062,7 @@ index 01b46e8..ae86a56 100644
  	pixman_transform_t xform;
  	pixman_transform_init_scale(&xform,
  								pixman_double_to_fixed(0.5),
-@@ -1233,11 +2645,19 @@ uint32_t Bitmap::GetUint32Color(const Color &color) const {
+@@ -1233,11 +2688,19 @@ uint32_t Bitmap::GetUint32Color(const Color &color) const {
  
  uint32_t Bitmap::GetUint32Color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) const {
  	MultiplyAlpha(r, g, b, a);
@@ -2074,7 +2131,7 @@ index 059cf6f..023f66c 100644
  
  #endif
 diff --git a/src/cache.cpp b/src/cache.cpp
-index f035e58..9edce33 100644
+index f035e58..c74a684 100644
 --- a/src/cache.cpp
 +++ b/src/cache.cpp
 @@ -15,7 +15,6 @@
@@ -2093,7 +2150,7 @@ index f035e58..9edce33 100644
  
  namespace {
  	typedef std::pair<std::string,std::string> string_pair;
-@@ -41,55 +41,126 @@ namespace {
+@@ -41,56 +41,166 @@ namespace {
  	};
  
  	typedef std::pair<std::string, int> tile_pair;
@@ -2109,8 +2166,11 @@ index f035e58..9edce33 100644
 +	cache_tiles_type::iterator tile_sweep = cache_tiles.end();
 +	uint32_t next_cleanup_tick = 0;
 +	int loads_since_cleanup = 0;
++	int cached_bitmap_bytes = 0;
 +	const int low_memory_bytes = 12 * 1024 * 1024;
 +	const int critical_memory_bytes = 6 * 1024 * 1024;
++	const int bitmap_cache_soft_bytes = 10 * 1024 * 1024;
++	const int bitmap_cache_hard_bytes = 16 * 1024 * 1024;
 +
 +	int MemoryPressure(int free_ram) {
 +		if (free_ram >= 0 && free_ram < critical_memory_bytes)
@@ -2129,7 +2189,9 @@ index f035e58..9edce33 100644
 +			static_cast<long long>(bitmap->GetHeight());
 +		return bytes > 0x7fffffff ? 0x7fffffff : static_cast<int>(bytes);
 +	}
-+
+ 
+-		for (auto& i : cache) {
+-			if (i.second.bitmap.use_count() != 1) { continue; }
 +	void AddFreedBytes(int bytes, int& total) {
 +		if (bytes > 0x7fffffff - total)
 +			total = 0x7fffffff;
@@ -2137,8 +2199,38 @@ index f035e58..9edce33 100644
 +			total += bytes;
 +	}
  
--		for (auto& i : cache) {
--			if (i.second.bitmap.use_count() != 1) { continue; }
+-			if (cur_ticks - i.second.last_access < 5000) {
+-				// Last access < 5s
+-				continue;
+-			}
++	void RemoveCachedBitmap(cache_type::iterator current, int& freed_bytes) {
++		const int bytes = BitmapBytes(current->second.bitmap);
++		AddFreedBytes(bytes, freed_bytes);
++		cached_bitmap_bytes -= bytes;
++		if (cached_bitmap_bytes < 0)
++			cached_bitmap_bytes = 0;
++		cache.erase(current);
++	}
+ 
+-			//Output::Debug("Freeing memory of %s/%s %d %d",
+-			//			  i.first.first.c_str(), i.first.second.c_str(), i.second.last_access, cur_ticks);
++	BitmapRef StoreCachedBitmap(const string_pair& key, const BitmapRef& bitmap, uint32_t ticks) {
++		cache_type::iterator current = cache.find(key);
++		if (current != cache.end()) {
++			cached_bitmap_bytes -= BitmapBytes(current->second.bitmap);
++			if (cached_bitmap_bytes < 0)
++				cached_bitmap_bytes = 0;
++		}
++		cache[key] = {bitmap, ticks};
++		const int bytes = BitmapBytes(bitmap);
++		if (bytes > 0x7fffffff - cached_bitmap_bytes)
++			cached_bitmap_bytes = 0x7fffffff;
++		else
++			cached_bitmap_bytes += bytes;
++		return bitmap;
++	}
+ 
+-			i.second.bitmap.reset();
 +	void SweepExpiredTiles(size_t inspect_budget) {
 +		if (cache_tiles.empty()) {
 +			tile_sweep = cache_tiles.end();
@@ -2154,9 +2246,7 @@ index f035e58..9edce33 100644
 +				cache_tiles.erase(current);
 +		}
 +	}
- 
--			if (cur_ticks - i.second.last_access < 5000) {
--				// Last access < 5s
++
 +	size_t SweepBitmaps(uint32_t cur_ticks,
 +					 int pressure,
 +					 size_t release_budget,
@@ -2175,20 +2265,14 @@ index f035e58..9edce33 100644
 +				bitmap_sweep = cache.begin();
 +			cache_type::iterator current = bitmap_sweep++;
 +			if (!current->second.bitmap) {
-+				cache.erase(current);
- 				continue;
- 			}
--
--			//Output::Debug("Freeing memory of %s/%s %d %d",
--			//			  i.first.first.c_str(), i.first.second.c_str(), i.second.last_access, cur_ticks);
--
--			i.second.bitmap.reset();
++				RemoveCachedBitmap(current, freed_bytes);
++				continue;
++			}
 +			if (current->second.bitmap.use_count() != 1)
 +				continue;
 +			if (minimum_age > 0 && static_cast<uint32_t>(cur_ticks - current->second.last_access) < minimum_age)
 +				continue;
-+			AddFreedBytes(BitmapBytes(current->second.bitmap), freed_bytes);
-+			cache.erase(current);
++			RemoveCachedBitmap(current, freed_bytes);
 +			++freed;
 +			if (freed >= release_budget)
 +				break;
@@ -2204,7 +2288,12 @@ index f035e58..9edce33 100644
 +		loads_since_cleanup = 0;
 +		next_cleanup_tick = cur_ticks + 2000;
 +		const int free_ram = EasyRpgPlatformFreeRamBytes();
-+		int pressure = MemoryPressure(free_ram); if (pressure == 0 && cache.size() > 96) pressure = 1;
++		int pressure = MemoryPressure(free_ram);
++		if (cached_bitmap_bytes > bitmap_cache_hard_bytes)
++			pressure = 2;
++		else if (pressure == 0 &&
++			(cached_bitmap_bytes > bitmap_cache_soft_bytes || cache.size() > 96))
++			pressure = 1;
 +		const size_t release_budget = pressure >= 2 ? 16 : (pressure > 0 ? 6 : 2);
 +		const size_t inspect_budget = pressure >= 2 ? 128 : (pressure > 0 ? 64 : 24);
 +		int freed_bytes = 0;
@@ -2240,10 +2329,19 @@ index f035e58..9edce33 100644
 -
 -			FreeBitmapMemory();
 -
- 			return (cache[key] = {bmp, DisplayUi->GetTicks()}).bitmap;
+-			return (cache[key] = {bmp, DisplayUi->GetTicks()}).bitmap;
++			const uint32_t ticks = DisplayUi->GetTicks();
++			BitmapRef stored = StoreCachedBitmap(key, bmp, ticks);
++			if (cached_bitmap_bytes > bitmap_cache_hard_bytes) {
++				int freed_bytes = 0;
++				SweepBitmaps(ticks, 2, 32, 192, freed_bytes);
++				SweepExpiredTiles(64);
++			}
++			return stored;
  		} else {
  			it->second.last_access = DisplayUi->GetTicks();
-@@ -118,8 +189,7 @@ namespace {
+ 			return it->second.bitmap;
+@@ -118,8 +228,7 @@ namespace {
  			Frame,
  			END
  		};
@@ -2253,7 +2351,7 @@ index f035e58..9edce33 100644
  
  	template<Material::Type T> BitmapRef DrawCheckerboard();
  
-@@ -171,74 +241,50 @@ namespace {
+@@ -171,74 +280,50 @@ namespace {
  	template<Material::Type T>
  	BitmapRef DrawCheckerboard() {
  		static_assert(Material::REND < T && T < Material::END, "Invalid material.");
@@ -2287,7 +2385,8 @@ index f035e58..9edce33 100644
 -
  		BitmapRef bitmap = s.dummy_renderer();
 -
- 		return (cache[key] = {bitmap, DisplayUi->GetTicks()}).bitmap;
+-		return (cache[key] = {bitmap, DisplayUi->GetTicks()}).bitmap;
++		return StoreCachedBitmap(key, bitmap, DisplayUi->GetTicks());
  	}
  
  	template<Material::Type T>
@@ -2330,7 +2429,7 @@ index f035e58..9edce33 100644
  		return ret;
  	}
  }
-@@ -274,9 +320,7 @@ BitmapRef Cache::Picture(const std::string& f, bool trans) {
+@@ -274,11 +359,9 @@ BitmapRef Cache::Picture(const std::string& f, bool trans) {
  
  BitmapRef Cache::Exfont() {
  	string_pair const hash("ExFont","ExFont");
@@ -2338,9 +2437,12 @@ index f035e58..9edce33 100644
  	cache_type::iterator const it = cache.find(hash);
 -
  	if (it == cache.end() || !it->second.bitmap) {
- 		return(cache[hash] = {Bitmap::Create(exfont_h, sizeof(exfont_h), true), DisplayUi->GetTicks()}).bitmap;
+-		return(cache[hash] = {Bitmap::Create(exfont_h, sizeof(exfont_h), true), DisplayUi->GetTicks()}).bitmap;
++		return StoreCachedBitmap(hash, Bitmap::Create(exfont_h, sizeof(exfont_h), true), DisplayUi->GetTicks());
  	} else {
-@@ -288,13 +332,10 @@ BitmapRef Cache::Exfont() {
+ 		it->second.last_access = DisplayUi->GetTicks();
+ 		return it->second.bitmap;
+@@ -288,13 +371,10 @@ BitmapRef Cache::Exfont() {
  BitmapRef Cache::Tile(const std::string& filename, int tile_id) {
  	tile_pair const key(filename, tile_id);
  	cache_tiles_type::const_iterator const it = cache_tiles.find(key);
@@ -2354,7 +2456,7 @@ index f035e58..9edce33 100644
  		if (tile_id > 0 && tile_id < 48) {
  			sub_tile_id = tile_id;
  			rect.x += 288;
-@@ -306,28 +347,53 @@ BitmapRef Cache::Tile(const std::string& filename, int tile_id) {
+@@ -306,28 +386,54 @@ BitmapRef Cache::Tile(const std::string& filename, int tile_id) {
  			sub_tile_id = tile_id - 96;
  			rect.x += 384;
  			rect.y += 128;
@@ -2377,6 +2479,7 @@ index f035e58..9edce33 100644
  void Cache::Clear() {
  	cache.clear();
 -
++	cached_bitmap_bytes = 0;
  	for (cache_tiles_type::const_iterator i = cache_tiles.begin(); i != cache_tiles.end(); ++i) {
 -		if (i->second.expired()) { continue; }
 +		if (i->second.expired())
@@ -2415,7 +2518,7 @@ index f035e58..9edce33 100644
  }
  
  void Cache::SetSystemName(std::string const& filename) {
-@@ -338,11 +404,8 @@ BitmapRef Cache::System() {
+@@ -338,11 +444,8 @@ BitmapRef Cache::System() {
  	if (!system_name.empty()) {
  		return Cache::System(system_name);
  	} else {
@@ -2455,7 +2558,7 @@ index 8527439..9e6df66 100644
  			return;
  		}
 diff --git a/src/filefinder.cpp b/src/filefinder.cpp
-index 686bfad..93a3dc2 100644
+index 686bfad..15df66a 100644
 --- a/src/filefinder.cpp
 +++ b/src/filefinder.cpp
 @@ -69,6 +69,13 @@
@@ -2513,7 +2616,17 @@ index 686bfad..93a3dc2 100644
  #ifdef EMSCRIPTEN
  		// The php filefinder should have given us an useable path
  		std::string em_file = MakePath(dir, name);
-@@ -217,13 +251,8 @@ const std::shared_ptr<FileFinder::DirectoryTree> FileFinder::CreateSaveDirectory
+@@ -211,19 +245,18 @@ const std::shared_ptr<FileFinder::DirectoryTree> FileFinder::GetDirectoryTree()
+ const std::shared_ptr<FileFinder::DirectoryTree> FileFinder::CreateSaveDirectoryTree() {
+ 	std::string save_path = Main_Data::GetSavePath();
+ 
++#ifdef EASYRPG_SYMBIAN
++	if (!IsDirectory(save_path)) { return std::shared_ptr<DirectoryTree>(); }
++#else
+ 	if (!(Exists(save_path) && IsDirectory(save_path))) { return std::shared_ptr<DirectoryTree>(); }
++#endif
+ 
+ 	std::shared_ptr<DirectoryTree> tree = std::make_shared<DirectoryTree>();
  	tree->directory_path = save_path;
  
  	Directory mem = GetDirectoryMembers(tree->directory_path, FILES);
@@ -2529,7 +2642,7 @@ index 686bfad..93a3dc2 100644
  
  	return tree;
  }
-@@ -233,23 +262,33 @@ void FileFinder::SetDirectoryTree(std::shared_ptr<FileFinder::DirectoryTree> dir
+@@ -233,23 +266,33 @@ void FileFinder::SetDirectoryTree(std::shared_ptr<FileFinder::DirectoryTree> dir
  }
  
  std::shared_ptr<FileFinder::DirectoryTree> FileFinder::CreateDirectoryTree(std::string const& p, bool recursive) {
@@ -2570,7 +2683,7 @@ index 686bfad..93a3dc2 100644
  	return tree;
  }
  
-@@ -437,6 +476,11 @@ void FileFinder::InitRtpPaths(bool warn_no_rtp_found) {
+@@ -437,6 +480,11 @@ void FileFinder::InitRtpPaths(bool warn_no_rtp_found) {
  	add_rtp_path("usb:/data/rtp/" + version_str + "/");
  #elif defined(PSP2)
  	add_rtp_path("ux0:/data/easyrpg-player/rtp/" + version_str + "/");
@@ -2582,7 +2695,7 @@ index 686bfad..93a3dc2 100644
  #elif defined(__ANDROID__)
  	// Invoke "String getRtpPath()" in EasyRPG Activity via JNI
  	JNIEnv* env = (JNIEnv*)SDL_AndroidGetJNIEnv();
-@@ -536,6 +580,11 @@ std::string FileFinder::FindDefault(const std::string& dir, const std::string& n
+@@ -536,6 +584,11 @@ std::string FileFinder::FindDefault(const std::string& dir, const std::string& n
  }
  
  std::string FileFinder::FindDefault(std::string const& name) {
@@ -2594,7 +2707,35 @@ index 686bfad..93a3dc2 100644
  	return FindDefault(*GetDirectoryTree(), name);
  }
  
-@@ -629,7 +678,7 @@ bool FileFinder::Exists(std::string const& filename) {
+@@ -565,7 +618,17 @@ std::string FileFinder::FindDefault(const DirectoryTree& tree, const std::string
+ 
+ 	string_map::const_iterator const it = files.find(Utils::LowerCase(name));
+ 
+-	return(it != files.end()) ? MakePath(p.directory_path, it->second) : "";
++	if (it != files.end())
++		return MakePath(p.directory_path, it->second);
++#ifdef EASYRPG_SYMBIAN
++	// Saves are written to a native writable directory. Some S60 filesystems
++	// do not expose a newly-created entry through the directory snapshot
++	// immediately, so probe the canonical filename before reporting a miss.
++	const std::string direct = MakePath(p.directory_path, name);
++	if (Exists(direct))
++		return direct;
++#endif
++	return "";
+ }
+ 
+ bool FileFinder::IsValidProject(DirectoryTree const & dir) {
+@@ -590,6 +653,8 @@ bool FileFinder::IsEasyRpgProject(DirectoryTree const& dir){
+ 
+ bool FileFinder::HasSavegame() {
+ 	std::shared_ptr<FileFinder::DirectoryTree> tree = FileFinder::CreateSaveDirectoryTree();
++	if (!tree)
++		return false;
+ 
+ 	for (int i = 1; i <= 15; i++) {
+ 		std::stringstream ss;
+@@ -629,7 +694,7 @@ bool FileFinder::Exists(std::string const& filename) {
  #elif defined(GEKKO)
  	struct stat sb;
  	return ::stat(filename.c_str(), &sb) == 0;
@@ -2603,7 +2744,7 @@ index 686bfad..93a3dc2 100644
  	FILE* tmp = fopen(filename.c_str(),"r");
  	if (tmp == NULL){ 
  		DIR* tmp2 = opendir(filename.c_str());
-@@ -658,7 +707,7 @@ bool FileFinder::Exists(std::string const& filename) {
+@@ -658,7 +723,7 @@ bool FileFinder::Exists(std::string const& filename) {
  }
  
  bool FileFinder::IsDirectory(std::string const& dir) {
@@ -2612,7 +2753,7 @@ index 686bfad..93a3dc2 100644
  	DIR* d = opendir(dir.c_str());
  	if(d) {
  		closedir(d);
-@@ -709,7 +758,7 @@ FileFinder::Directory FileFinder::GetDirectoryMembers(const std::string& path, F
+@@ -709,7 +774,7 @@ FileFinder::Directory FileFinder::GetDirectoryMembers(const std::string& path, F
  #  define wpath Utils::ToWideString(path)
  #  define dirent _wdirent
  #  define readdir _wreaddir
@@ -3035,10 +3176,41 @@ index 0217e0d..5447163 100644
  		interpreter->Update();
  	}
 diff --git a/src/game_event.cpp b/src/game_event.cpp
-index c2bd707..0a3c3e0 100644
+index c2bd707..02d63bc 100644
 --- a/src/game_event.cpp
 +++ b/src/game_event.cpp
-@@ -64,7 +64,11 @@ int Game_Event::GetX() const {
+@@ -33,9 +33,10 @@
+ #include <cstdlib>
+ 
+ Game_Event::Game_Event(int map_id, const RPG::Event& event) :
+-	event(event),
++	event(&event),
+ 	from_save(false) {
+ 
++	data.ID = event.ID;
+ 	SetMapId(map_id);
+ 	MoveTo(event.x, event.y);
+ 	Refresh();
+@@ -44,16 +45,14 @@ Game_Event::Game_Event(int map_id, const RPG::Event& event) :
+ Game_Event::Game_Event(int /* map_id */, const RPG::Event& event, const RPG::SaveMapEvent& data) :
+ 	// FIXME unused int parameter
+ 	data(data),
+-	event(event),
++	event(&event),
+ 	from_save(true) {
+ 
+-	this->event.ID = data.ID;
+-
+ 	MoveTo(data.position_x, data.position_y);
+ 
+ 	if (!data.event_data.commands.empty()) {
+ 		interpreter.reset(new Game_Interpreter_Map());
+-		static_cast<Game_Interpreter_Map*>(interpreter.get())->SetupFromSave(data.event_data.commands, event.ID);
++		static_cast<Game_Interpreter_Map*>(interpreter.get())->SetupFromSave(data.event_data.commands, data.ID);
+ 	}
+ 
+ 	Refresh();
+@@ -64,7 +63,11 @@ int Game_Event::GetX() const {
  }
  
  void Game_Event::SetX(int new_x) {
@@ -3050,7 +3222,7 @@ index c2bd707..0a3c3e0 100644
  }
  
  int Game_Event::GetY() const {
-@@ -72,7 +76,11 @@ int Game_Event::GetY() const {
+@@ -72,7 +75,11 @@ int Game_Event::GetY() const {
  }
  
  void Game_Event::SetY(int new_y) {
@@ -3062,7 +3234,54 @@ index c2bd707..0a3c3e0 100644
  }
  
  int Game_Event::GetMapId() const {
-@@ -272,7 +280,7 @@ void Game_Event::Setup(RPG::EventPage* new_page) {
+@@ -144,6 +151,7 @@ const RPG::MoveRoute& Game_Event::GetMoveRoute() const {
+ 
+ void Game_Event::SetMoveRoute(const RPG::MoveRoute& move_route) {
+ 	data.move_route = move_route;
++	Game_Map::RequestEventUpdateListRefresh();
+ }
+ 
+ int Game_Event::GetOriginalMoveRouteIndex() const {
+@@ -167,7 +175,10 @@ bool Game_Event::IsMoveRouteOverwritten() const {
+ }
+ 
+ void Game_Event::SetMoveRouteOverwritten(bool force) {
++	if (data.move_route_overwrite == force)
++		return;
+ 	data.move_route_overwrite = force;
++	Game_Map::RequestEventUpdateListRefresh();
+ }
+ 
+ bool Game_Event::IsMoveRouteRepeated() const {
+@@ -229,14 +240,16 @@ void Game_Event::SetThrough(bool through) {
+ }
+ 
+ void Game_Event::ClearStarting() {
++	if (starting)
++		Game_Map::RequestEventUpdateListRefresh();
+ 	starting = false;
+ 	started_by_decision_key = false;
+ }
+ 
+-void Game_Event::Setup(RPG::EventPage* new_page) {
++void Game_Event::Setup(const RPG::EventPage* new_page) {
+ 	bool from_null = page == NULL;
+ 
+-	RPG::EventPage* old_page = page;
++	const RPG::EventPage* old_page = page;
+ 	page = new_page;
+ 
+ 	// Free resources if needed
+@@ -256,7 +269,7 @@ void Game_Event::Setup(RPG::EventPage* new_page) {
+ 		SetDirection(RPG::EventPage::Direction_down);
+ 		//move_type = 0;
+ 		trigger = -1;
+-		list.clear();
++		list = nullptr;
+ 		return;
+ 	}
+ 	SetSpriteName(page->character_name);
+@@ -272,7 +285,7 @@ void Game_Event::Setup(RPG::EventPage* new_page) {
  	move_type = page->move_type;
  	SetMoveSpeed(page->move_speed);
  	SetMoveFrequency(page->move_frequency);
@@ -3071,7 +3290,67 @@ index c2bd707..0a3c3e0 100644
  	original_move_frequency = page->move_frequency;
  	original_move_route = page->move_route;
  	SetOriginalMoveRouteIndex(0);
-@@ -460,6 +468,11 @@ int Game_Event::GetTrigger() const {
+@@ -289,20 +302,20 @@ void Game_Event::Setup(RPG::EventPage* new_page) {
+ 	SetLayer(page->layer);
+ 	data.overlap_forbidden = page->overlap_forbidden;
+ 	trigger = page->trigger;
+-	list = page->event_commands;
++	list = &page->event_commands;
+ 
+ 	if (trigger == RPG::EventPage::Trigger_parallel) {
+ 		interpreter.reset(new Game_Interpreter_Map());
+ 	}
+ }
+ 
+-void Game_Event::SetupFromSave(RPG::EventPage* new_page) {
++void Game_Event::SetupFromSave(const RPG::EventPage* new_page) {
+ 	page = new_page;
+ 
+ 	if (page == NULL) {
+ 		tile_id = 0;
+ 		trigger = -1;
+-		list.clear();
++		list = nullptr;
+ 		interpreter.reset();
+ 		return;
+ 	}
+@@ -318,7 +331,7 @@ void Game_Event::SetupFromSave(RPG::EventPage* new_page) {
+ 	original_move_route = page->move_route;
+ 	animation_type = page->animation_type;
+ 	trigger = page->trigger;
+-	list = page->event_commands;
++	list = &page->event_commands;
+ 
+ 	// FIXME: transparency gets not restored otherwise
+ 	SetOpacity(page->translucent ? 160 : 255);
+@@ -339,9 +352,9 @@ void Game_Event::Refresh() {
+ 		return;
+ 	}
+ 
+-	RPG::EventPage* new_page = NULL;
+-	std::vector<RPG::EventPage>::reverse_iterator i;
+-	for (i = event.pages.rbegin(); i != event.pages.rend(); ++i) {
++	const RPG::EventPage* new_page = NULL;
++	std::vector<RPG::EventPage>::const_reverse_iterator i;
++	for (i = event->pages.rbegin(); i != event->pages.rend(); ++i) {
+ 		// Loop in reverse order to see whether any page meets conditions...
+ 		if (AreConditionsMet(*i)) {
+ 			new_page = &(*i);
+@@ -441,11 +454,11 @@ bool Game_Event::AreConditionsMet(const RPG::EventPage& page) {
+ }
+ 
+ int Game_Event::GetId() const {
+-	return event.ID;
++	return data.ID;
+ }
+ 
+ std::string Game_Event::GetName() const {
+-	return event.name;
++	return event->name;
+ }
+ 
+ bool Game_Event::GetStarting() const {
+@@ -460,9 +473,34 @@ int Game_Event::GetTrigger() const {
  	return trigger;
  }
  
@@ -3080,44 +3359,240 @@ index c2bd707..0a3c3e0 100644
 +		(interpreter || move_type != RPG::EventPage::MoveType_stationary);
 +}
 +
++bool Game_Event::RequiresParallelInterpreter() const {
++	return page != NULL && interpreter != NULL;
++}
++
++bool Game_Event::RequiresRegularUpdate() const {
++	if (!data.active || page == NULL)
++		return false;
++	if (starting || running || halting)
++		return true;
++	if (move_type != RPG::EventPage::MoveType_stationary || IsMoveRouteOverwritten())
++		return true;
++	if (stop_count < 256)
++		return true;
++	return IsMoving() || IsJumping() || IsSpinning() ||
++		(walk_animation && IsContinuous()) || pattern != original_pattern;
++}
++
  void Game_Event::SetActive(bool active) {
++	const bool changed = data.active != active;
  	data.active = active;
  	SetVisible(active);
-@@ -691,7 +704,8 @@ void Game_Event::UpdateParallel() {
++	if (changed)
++		Game_Map::RequestEventUpdateListRefresh();
+ }
+ 
+ bool Game_Event::GetActive() const {
+@@ -471,15 +509,17 @@ bool Game_Event::GetActive() const {
+ 
+ void Game_Event::Start(bool by_decision_key) {
+ 	// RGSS scripts consider list empty if size <= 1. Why?
+-	if (list.empty() || !data.active)
++	if (!list || list->empty() || !data.active)
+ 		return;
+ 
+ 	starting = true;
+ 	started_by_decision_key = by_decision_key;
++	Game_Map::RequestEventUpdateListRefresh();
+ }
+ 
+-std::vector<RPG::EventCommand>& Game_Event::GetList() {
+-	return list;
++const std::vector<RPG::EventCommand>& Game_Event::GetList() const {
++	static const std::vector<RPG::EventCommand> empty;
++	return list ? *list : empty;
+ }
+ 
+ void Game_Event::StartTalkToHero() {
+@@ -496,6 +536,7 @@ void Game_Event::StopTalkToHero() {
+ 	}
+ 
+ 	halting = true;
++	Game_Map::RequestEventUpdateListRefresh();
+ }
+ 
+ void Game_Event::CheckEventTriggers() {
+@@ -664,7 +705,25 @@ void Game_Event::Update() {
+ 		return;
+ 	}
+ 
++#ifdef EASYRPG_SYMBIAN
++	const bool stable_idle = !IsMoving() && !IsJumping() && !IsSpinning() &&
++		!(walk_animation && IsContinuous()) && pattern == original_pattern &&
++		move_type == RPG::EventPage::MoveType_stationary && !IsMoveRouteOverwritten();
++	if (stable_idle) {
++		// Self-movement frequency thresholds never exceed 128. Saturating the
++		// idle counter preserves a later page/move-route eligibility check while
++		// avoiding the full animation state machine for static map decoration.
++		if (stop_count < 256) {
++			++stop_count;
++			if (stop_count == 256)
++				Game_Map::RequestEventUpdateListRefresh();
++		}
++	} else {
++		Game_Character::UpdateSprite();
++	}
++#else
+ 	Game_Character::UpdateSprite();
++#endif
+ 
+ 	if (starting && !Game_Map::GetInterpreter().IsRunning()) {
+ 		Game_Map::GetInterpreter().SetupStartingEvent(this);
+@@ -685,28 +744,46 @@ void Game_Event::UpdateParallel() {
+ 
+ 	updating = true;
+ 
+-	if (interpreter) {
++	if (interpreter && list) {
+ 		if (!interpreter->IsRunning()) {
+-			interpreter->Setup(list, event.ID, started_by_decision_key, -event.x, event.y);
++			interpreter->SetupReference(*list, data.ID, started_by_decision_key, -event->x, event->y);
  		}
  		interpreter->Update();
  	}
 -	Game_Character::Update();
 +	if (move_type != RPG::EventPage::MoveType_stationary || IsMoveRouteOverwritten())
 +		Game_Character::Update();
++	updating = false;
++}
++
++void Game_Event::UpdateParallelInterpreter() {
++	if (!data.active || page == NULL || updating || !interpreter || !list)
++		return;
++
++	updating = true;
++	if (!interpreter->IsRunning()) {
++		interpreter->SetupReference(*list, data.ID, started_by_decision_key, -event->x, event->y);
++	}
++	interpreter->Update();
  	updating = false;
  }
  
++void Game_Event::UpdateParallelMovement() {
++	if (!data.active || page == NULL || updating)
++		return;
++	if (move_type != RPG::EventPage::MoveType_stationary || IsMoveRouteOverwritten())
++		Game_Character::Update();
++}
++
+ const RPG::EventPage* Game_Event::GetPage(int page) const {
+-	if (page <= 0 || page - 1 >= static_cast<int>(event.pages.size())) {
++	if (page <= 0 || page - 1 >= static_cast<int>(event->pages.size())) {
+ 		return nullptr;
+ 	}
+-	return &event.pages[page - 1];
++	return &event->pages[page - 1];
+ }
+ 
+ const RPG::SaveMapEvent& Game_Event::GetSaveData() {
+ 	if (interpreter) {
+ 		data.event_data.commands = static_cast<Game_Interpreter_Map*>(interpreter.get())->GetSaveData();
+ 	}
+-	data.ID = event.ID;
+-
+ 	return data;
+ }
 diff --git a/src/game_event.h b/src/game_event.h
-index 68faec5..4c546ed 100644
+index 68faec5..f9b8403 100644
 --- a/src/game_event.h
 +++ b/src/game_event.h
-@@ -137,6 +137,7 @@ public:
+@@ -99,8 +99,8 @@ public:
+ 	 */
+ 	void Refresh();
+ 
+-	void Setup(RPG::EventPage* new_page);
+-	void SetupFromSave(RPG::EventPage* new_page);
++	void Setup(const RPG::EventPage* new_page);
++	void SetupFromSave(const RPG::EventPage* new_page);
+ 
+ 	/**
+ 	 * Gets event ID.
+@@ -137,13 +137,16 @@ public:
  	 * @return trigger condition.
  	 */
  	int GetTrigger() const;
 +	bool RequiresParallelUpdate() const;
++	bool RequiresParallelInterpreter() const;
++	bool RequiresRegularUpdate() const;
  
  	/**
  	 * Gets event commands list.
+ 	 *
+ 	 * @return event commands list.
+ 	 */
+-	std::vector<RPG::EventCommand>& GetList();
++	const std::vector<RPG::EventCommand>& GetList() const;
+ 
+ 	/**
+ 	 * Event's sprite looks towards the hero but its original direction is remembered.
+@@ -160,6 +163,8 @@ public:
+ 	void Start(bool triggered_by_decision_key = false);
+ 	void Update() override;
+ 	void UpdateParallel();
++	void UpdateParallelInterpreter();
++	void UpdateParallelMovement();
+ 	bool AreConditionsMet(const RPG::EventPage& page);
+ 
+ 	/**
+@@ -216,17 +221,18 @@ private:
+ 	 */
+ 	void MoveTypeAwayFromPlayer();
+ 
+-	// Not a reference on purpose.
+-	// Events change during map change and old are destroyed, breaking the
+-	// reference.
++	// Runtime/save state remains owned by Game_Event, but the immutable map
++	// definition is owned by Game_Map for exactly the same lifetime as this
++	// object. Keeping a pointer avoids duplicating every page/command list on
++	// memory constrained targets.
+ 	RPG::SaveMapEvent data;
+ 
+ 	bool starting = false, running = false, halting = false;
+ 	bool started_by_decision_key = false;
+ 	int trigger = -1;
+-	RPG::Event event;
+-	RPG::EventPage* page = nullptr;
+-	std::vector<RPG::EventCommand> list;
++	const RPG::Event* event = nullptr;
++	const RPG::EventPage* page = nullptr;
++	const std::vector<RPG::EventCommand>* list = nullptr;
+ 	std::shared_ptr<Game_Interpreter> interpreter;
+ 	bool from_save;
+ 	bool updating = false;
 diff --git a/src/game_interpreter.cpp b/src/game_interpreter.cpp
-index 5c0fe96..8a7cc53 100644
+index 5c0fe96..1332995 100644
 --- a/src/game_interpreter.cpp
 +++ b/src/game_interpreter.cpp
-@@ -49,6 +49,7 @@
+@@ -49,6 +49,26 @@
  #include "reader_util.h"
  #include "game_battle.h"
  
++#ifdef EASYRPG_SYMBIAN
++namespace {
++	int symbian_parallel_frame_budget = -1;
++	int symbian_parallel_call_budget = -1;
++
++	bool SymbianParallelBudgetExhausted(int call_commands) {
++		return symbian_parallel_frame_budget == 0 ||
++			(symbian_parallel_call_budget > 0 && call_commands >= symbian_parallel_call_budget);
++	}
++
++	void SymbianConsumeParallelBudget(int& call_commands) {
++		if (symbian_parallel_frame_budget > 0) {
++			--symbian_parallel_frame_budget;
++			++call_commands;
++		}
++	}
++}
++#endif
++
 +
  Game_Interpreter::Game_Interpreter(int _depth, bool _main_flag) {
  	depth = _depth;
  	main_flag = _main_flag;
-@@ -115,8 +116,32 @@ void Game_Interpreter::Setup(
+@@ -115,8 +135,32 @@ void Game_Interpreter::Setup(
  		Game_Message::SetFaceName("");
  }
  
@@ -3151,7 +3626,64 @@ index 5c0fe96..8a7cc53 100644
  }
  
  void Game_Interpreter::SetupWait(int duration) {
-@@ -234,6 +259,7 @@ void Game_Interpreter::Update() {
+@@ -132,11 +176,32 @@ void Game_Interpreter::SetContinuation(Game_Interpreter::ContinuationFunction fu
+ 	continuation = func;
+ }
+ 
++#ifdef EASYRPG_SYMBIAN
++void Game_Interpreter::BeginParallelFrameBudget(int total_commands, int per_interpreter_commands) {
++	symbian_parallel_frame_budget = std::max(0, total_commands);
++	symbian_parallel_call_budget = std::max(1, per_interpreter_commands);
++}
++
++void Game_Interpreter::EndParallelFrameBudget() {
++	symbian_parallel_frame_budget = -1;
++	symbian_parallel_call_budget = -1;
++}
++
++int Game_Interpreter::GetParallelFrameBudgetRemaining() {
++	return symbian_parallel_frame_budget;
++}
++#endif
++
+ // Update
+ void Game_Interpreter::Update() {
+ 	updating = true;
++	int call_commands = 0;
+ 	// 10000 based on: https://gist.github.com/4406621
+ 	for (loop_count = 0; loop_count < 10000; ++loop_count) {
++#ifdef EASYRPG_SYMBIAN
++		if (SymbianParallelBudgetExhausted(call_commands))
++			break;
++#endif
+ 		/* If map is different than event startup time
+ 		set event_id to 0 */
+ 		if (Game_Map::GetMapId() != map_id) {
+@@ -196,6 +261,11 @@ void Game_Interpreter::Update() {
+ 		}
+ 
+ 		if (continuation) {
++#ifdef EASYRPG_SYMBIAN
++			if (SymbianParallelBudgetExhausted(call_commands))
++				break;
++			SymbianConsumeParallelBudget(call_commands);
++#endif
+ 			bool result;
+ 			if (index >= list.size()) {
+ 				result = (this->*continuation)(RPG::EventCommand());
+@@ -217,6 +287,11 @@ void Game_Interpreter::Update() {
+ 			break;
+ 		}
+ 
++#ifdef EASYRPG_SYMBIAN
++		if (SymbianParallelBudgetExhausted(call_commands))
++			break;
++		SymbianConsumeParallelBudget(call_commands);
++#endif
+ 		if (!ExecuteCommand()) {
+ 			break;
+ 		}
+@@ -234,6 +309,7 @@ void Game_Interpreter::Update() {
  		Output::Debug("Event %d exceeded execution limit", event_id);
  	}
  
@@ -3159,7 +3691,7 @@ index 5c0fe96..8a7cc53 100644
  	updating = false;
  }
  
-@@ -244,7 +270,7 @@ void Game_Interpreter::SetupStartingEvent(Game_Event* ev) {
+@@ -244,7 +320,7 @@ void Game_Interpreter::SetupStartingEvent(Game_Event* ev) {
  }
  
  void Game_Interpreter::SetupStartingEvent(Game_CommonEvent* ev) {
@@ -3168,7 +3700,30 @@ index 5c0fe96..8a7cc53 100644
  }
  
  void Game_Interpreter::CheckGameOver() {
-@@ -899,7 +925,7 @@ bool Game_Interpreter::CommandControlVariables(RPG::EventCommand const& com) { /
+@@ -699,14 +775,18 @@ bool Game_Interpreter::CommandControlSwitches(RPG::EventCommand const& com) { //
+ 		int end = com.parameters[0] == 1 ? com.parameters[2] : start;
+ 
+ 		for (int i = start; i <= end; ++i) {
++			const bool old_value = Game_Switches[i];
++			bool new_value = old_value;
+ 			if (com.parameters[3] != 2) {
+-				Game_Switches[i] = com.parameters[3] == 0;
++				new_value = com.parameters[3] == 0;
+ 			} else {
+-				Game_Switches[i] = !Game_Switches[i];
++				new_value = !old_value;
++			}
++			if (new_value != old_value) {
++				Game_Switches[i] = new_value;
++				Game_Map::SetNeedSwitchRefresh(i);
+ 			}
+ 		}
+-
+-		Game_Map::SetNeedRefresh(Game_Map::Refresh_All);
+ 	}
+ 
+ 	return true;
+@@ -899,7 +979,7 @@ bool Game_Interpreter::CommandControlVariables(RPG::EventCommand const& com) { /
  			break;
  		case 8:
  			// Battle related
@@ -3177,7 +3732,27 @@ index 5c0fe96..8a7cc53 100644
  				break;
  			}
  
-@@ -1254,6 +1280,8 @@ bool Game_Interpreter::CommandChangeEquipment(RPG::EventCommand const& com) { //
+@@ -949,6 +1029,7 @@ bool Game_Interpreter::CommandControlVariables(RPG::EventCommand const& com) { /
+ 		int end = com.parameters[0] == 1 ? com.parameters[2] : start;
+ 
+ 		for (i = start; i <= end; ++i) {
++			const int old_value = Game_Variables[i];
+ 			switch (com.parameters[3]) {
+ 				case 0:
+ 					// Assignement
+@@ -987,9 +1068,9 @@ bool Game_Interpreter::CommandControlVariables(RPG::EventCommand const& com) { /
+ 			if (Game_Variables[i] < MinSize) {
+ 				Game_Variables[i] = MinSize;
+ 			}
++			if (Game_Variables[i] != old_value)
++				Game_Map::SetNeedVariableRefresh(i);
+ 		}
+-
+-		Game_Map::SetNeedRefresh(Game_Map::Refresh_Map);
+ 	}
+ 
+ 	return true;
+@@ -1254,6 +1335,8 @@ bool Game_Interpreter::CommandChangeEquipment(RPG::EventCommand const& com) { //
  		case 0:
  			item_id = ValueOrVariable(com.parameters[3],
  									  com.parameters[4]);
@@ -3186,7 +3761,7 @@ index 5c0fe96..8a7cc53 100644
  			type = Data::items[item_id - 1].type;
  			switch (type) {
  				case RPG::Item::Type_weapon:
-@@ -2369,6 +2397,9 @@ bool Game_Interpreter::CommandCallEvent(RPG::EventCommand const& com) { // code
+@@ -2369,6 +2452,9 @@ bool Game_Interpreter::CommandCallEvent(RPG::EventCommand const& com) { // code
  	int evt_id;
  	int event_page;
  
@@ -3196,7 +3771,7 @@ index 5c0fe96..8a7cc53 100644
  	if (child_interpreter)
  		return false;
  
-@@ -2378,14 +2409,34 @@ bool Game_Interpreter::CommandCallEvent(RPG::EventCommand const& com) { // code
+@@ -2378,14 +2464,34 @@ bool Game_Interpreter::CommandCallEvent(RPG::EventCommand const& com) { // code
  
  	switch (com.parameters[0]) {
  	case 0: // Common Event
@@ -3232,7 +3807,7 @@ index 5c0fe96..8a7cc53 100644
  		evt_id = Game_Variables[com.parameters[1]];
  		event_page = Game_Variables[com.parameters[2]];
  		break;
-@@ -2413,6 +2464,9 @@ bool Game_Interpreter::CommandReturnToTitleScreen(RPG::EventCommand const& /* co
+@@ -2413,6 +2519,9 @@ bool Game_Interpreter::CommandReturnToTitleScreen(RPG::EventCommand const& /* co
  }
  
  bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // code 1008
@@ -3242,7 +3817,7 @@ index 5c0fe96..8a7cc53 100644
  	int actor_id = com.parameters[1];
  	int class_id = com.parameters[2];
  	bool level1 = com.parameters[3] > 0;
-@@ -2421,6 +2475,8 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
+@@ -2421,6 +2530,8 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
  	bool show = com.parameters[6] > 0;
  
  	Game_Actor* actor = Game_Actors::GetActor(actor_id);
@@ -3251,7 +3826,7 @@ index 5c0fe96..8a7cc53 100644
  
  	int cur_lvl = actor->GetLevel();
  	int cur_exp = actor->GetExp();
-@@ -2471,6 +2527,21 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
+@@ -2471,6 +2582,21 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
  	actor->SetBaseAgi(cur_agi);
  
  	int level = actor->GetLevel();
@@ -3273,7 +3848,7 @@ index 5c0fe96..8a7cc53 100644
  
  	switch (skill_mode) {
  	case 0:
-@@ -2487,28 +2558,38 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
+@@ -2487,28 +2613,38 @@ bool Game_Interpreter::CommandChangeClass(RPG::EventCommand const& com) { // cod
  		std::vector<RPG::Learning>::const_iterator it;
  		for (it = klass.skills.begin(); it != klass.skills.end(); ++it) {
  			const RPG::Learning& learn = *it;
@@ -3319,10 +3894,10 @@ index 5c0fe96..8a7cc53 100644
  	return true;
  }
 diff --git a/src/game_interpreter.h b/src/game_interpreter.h
-index f347393..2b98646 100644
+index f347393..5a15810 100644
 --- a/src/game_interpreter.h
 +++ b/src/game_interpreter.h
-@@ -52,6 +52,12 @@ public:
+@@ -52,10 +52,22 @@ public:
  		bool started_by_decision_key = false,
  		int dbg_x = -1, int dbg_y = -1
  	);
@@ -3335,7 +3910,17 @@ index f347393..2b98646 100644
  
  	bool IsRunning() const;
  	void Update();
-@@ -86,7 +92,40 @@ protected:
+ 
++#ifdef EASYRPG_SYMBIAN
++	static void BeginParallelFrameBudget(int total_commands, int per_interpreter_commands);
++	static void EndParallelFrameBudget();
++	static int GetParallelFrameBudgetRemaining();
++#endif
++
+ 	void SetupStartingEvent(Game_Event* ev);
+ 	void SetupStartingEvent(Game_CommonEvent* ev);
+ 	void InputButton();
+@@ -86,7 +98,40 @@ protected:
  	typedef bool (Game_Interpreter::*ContinuationFunction)(RPG::EventCommand const& com);
  	ContinuationFunction continuation;
  
@@ -3673,34 +4258,48 @@ index 3d37f28..e65e2ec 100644
  	/**
  	* Parses a SaveEventCommand to create an interpreter.
 diff --git a/src/game_map.cpp b/src/game_map.cpp
-index 46f570e..20b0311 100644
+index 46f570e..ec5e6bc 100644
 --- a/src/game_map.cpp
 +++ b/src/game_map.cpp
-@@ -42,6 +42,7 @@
+@@ -42,6 +42,8 @@
  #include "filefinder.h"
  #include "player.h"
  #include "input.h"
 +#include "UpstreamPlayerBridge.h"
++#include <map>
  
  namespace {
  	RPG::SaveMapInfo& map_info = Main_Data::game_data.map_info;
-@@ -62,6 +63,15 @@ namespace {
+@@ -62,6 +64,28 @@ namespace {
  	std::vector<unsigned char> passages_up;
  	std::vector<Game_Event> events;
  	std::vector<Game_CommonEvent> common_events;
 +	std::vector<Game_CommonEvent*> common_parallel_events;
 +	std::vector<Game_CommonEvent*> common_auto_events;
 +	std::vector<Game_Event*> event_parallel_updates;
++	std::vector<Game_Event*> event_parallel_interpreters;
++	std::vector<Game_Event*> event_regular_updates;
 +	std::vector<Game_Event*> event_trigger_checks;
++#ifdef EASYRPG_SYMBIAN
++	size_t symbian_parallel_event_cursor = 0;
++	size_t symbian_parallel_common_cursor = 0;
++#endif
 +	std::vector<int> event_cell_heads;
 +	std::vector<int> event_next;
 +	std::vector<int> event_prev;
 +	std::vector<int> event_index_by_id;
++	std::map<int, std::vector<int> > switch_refresh_dependencies;
++	std::map<int, std::vector<int> > variable_refresh_dependencies;
++	std::map<int, bool> common_switch_refresh_dependencies;
++	std::vector<unsigned char> targeted_refresh_flags;
++	std::vector<int> targeted_refresh_events;
++	bool targeted_refresh_common = false;
++	bool event_update_lists_dirty = false;
 +	const int event_query_stack_capacity = 64;
  
  	std::unique_ptr<RPG::Map> map;
  	int scroll_direction;
-@@ -78,8 +88,117 @@ namespace {
+@@ -78,8 +102,196 @@ namespace {
  	bool pan_locked;
  	bool pan_wait;
  	int pan_speed;
@@ -3756,17 +4355,96 @@ index 46f570e..20b0311 100644
 +
 +	void RebuildEventUpdateLists() {
 +		event_parallel_updates.clear();
++		event_parallel_interpreters.clear();
++		event_regular_updates.clear();
 +		event_trigger_checks.clear();
 +		event_parallel_updates.reserve(events.size());
++		event_parallel_interpreters.reserve(events.size());
++		event_regular_updates.reserve(events.size());
 +		event_trigger_checks.reserve(events.size());
 +		for (Game_Event& event : events) {
 +			if (event.RequiresParallelUpdate())
 +				event_parallel_updates.push_back(&event);
++			if (event.RequiresParallelInterpreter())
++				event_parallel_interpreters.push_back(&event);
++			if (event.RequiresRegularUpdate())
++				event_regular_updates.push_back(&event);
 +			const int trigger = event.GetTrigger();
 +			if (trigger == RPG::EventPage::Trigger_auto_start ||
 +				trigger == RPG::EventPage::Trigger_collision)
 +				event_trigger_checks.push_back(&event);
 +		}
++#ifdef EASYRPG_SYMBIAN
++		if (symbian_parallel_event_cursor >= event_parallel_interpreters.size())
++			symbian_parallel_event_cursor = 0;
++		if (symbian_parallel_common_cursor >= common_parallel_events.size())
++			symbian_parallel_common_cursor = 0;
++#endif
++		event_update_lists_dirty = false;
++	}
++
++	void AddRefreshDependency(std::map<int, std::vector<int> >& dependencies,
++			int id, int event_index) {
++		if (id <= 0)
++			return;
++		std::vector<int>& list = dependencies[id];
++		if (list.empty() || list.back() != event_index)
++			list.push_back(event_index);
++	}
++
++	void RebuildRefreshDependencies() {
++		switch_refresh_dependencies.clear();
++		variable_refresh_dependencies.clear();
++		common_switch_refresh_dependencies.clear();
++		targeted_refresh_flags.assign(events.size(), 0);
++		targeted_refresh_events.clear();
++		targeted_refresh_common = false;
++		if (!map)
++			return;
++
++		for (size_t event_index = 0; event_index < map->events.size(); ++event_index) {
++			const RPG::Event& event = map->events[event_index];
++			for (const RPG::EventPage& page : event.pages) {
++				if (page.condition.flags.switch_a)
++					AddRefreshDependency(switch_refresh_dependencies,
++						page.condition.switch_a_id, static_cast<int>(event_index));
++				if (page.condition.flags.switch_b)
++					AddRefreshDependency(switch_refresh_dependencies,
++						page.condition.switch_b_id, static_cast<int>(event_index));
++				if (page.condition.flags.variable)
++					AddRefreshDependency(variable_refresh_dependencies,
++						page.condition.variable_id, static_cast<int>(event_index));
++			}
++		}
++
++		for (const RPG::CommonEvent& event : Data::commonevents) {
++			if (event.switch_flag && event.switch_id > 0)
++				common_switch_refresh_dependencies[event.switch_id] = true;
++		}
++	}
++
++	void QueueTargetedRefresh(const std::map<int, std::vector<int> >& dependencies,
++			int id) {
++		const std::map<int, std::vector<int> >::const_iterator found = dependencies.find(id);
++		if (found == dependencies.end())
++			return;
++		for (int event_index : found->second) {
++			if (event_index < 0 || event_index >= static_cast<int>(events.size()))
++				continue;
++			if (targeted_refresh_flags[event_index])
++				continue;
++			targeted_refresh_flags[event_index] = 1;
++			targeted_refresh_events.push_back(event_index);
++		}
++	}
++
++	void ClearTargetedRefresh() {
++		for (int event_index : targeted_refresh_events) {
++			if (event_index >= 0 && event_index < static_cast<int>(targeted_refresh_flags.size()))
++				targeted_refresh_flags[event_index] = 0;
++		}
++		targeted_refresh_events.clear();
++		targeted_refresh_common = false;
 +	}
 +
 +	void RebuildEventSpatialIndex() {
@@ -3818,7 +4496,7 @@ index 46f570e..20b0311 100644
  }
  
  void Game_Map::Init() {
-@@ -97,10 +216,20 @@ void Game_Map::Init() {
+@@ -97,10 +309,20 @@ void Game_Map::Init() {
  	map_info.encounter_rate = 0;
  
  	common_events.clear();
@@ -3839,7 +4517,7 @@ index 46f570e..20b0311 100644
  
  	vehicles.clear();
  	for (int i = 0; i < 3; i++)
-@@ -109,14 +238,22 @@ void Game_Map::Init() {
+@@ -109,14 +331,29 @@ void Game_Map::Init() {
  	pan_locked = false;
  	pan_wait = false;
  	pan_speed = 0;
@@ -3862,11 +4540,18 @@ index 46f570e..20b0311 100644
 +	event_prev.clear();
 +	event_index_by_id.clear();
 +	event_parallel_updates.clear();
++	event_parallel_interpreters.clear();
 +	event_trigger_checks.clear();
++	switch_refresh_dependencies.clear();
++	variable_refresh_dependencies.clear();
++	common_switch_refresh_dependencies.clear();
++	targeted_refresh_flags.clear();
++	targeted_refresh_events.clear();
++	targeted_refresh_common = false;
  	events.clear();
  	pending.clear();
  
-@@ -131,6 +268,8 @@ void Game_Map::Dispose() {
+@@ -131,6 +368,8 @@ void Game_Map::Dispose() {
  void Game_Map::Quit() {
  	Dispose();
  
@@ -3875,11 +4560,12 @@ index 46f570e..20b0311 100644
  	common_events.clear();
  	interpreter.reset();
  }
-@@ -154,11 +293,15 @@ void Game_Map::Setup(int _id) {
+@@ -154,11 +393,16 @@ void Game_Map::Setup(int _id) {
  	for (const RPG::Event& ev : map->events) {
  		events.emplace_back(location.map_id, ev);
  	}
 +	RebuildEventSpatialIndex();
++	RebuildRefreshDependencies();
 +	RebuildEventUpdateLists();
  
 -	location.pan_finish_x = 0;
@@ -3895,16 +4581,17 @@ index 46f570e..20b0311 100644
  
  	// Save allowed
  	int current_index = GetMapIndex(location.map_id);
-@@ -200,6 +343,8 @@ void Game_Map::SetupFromSave() {
+@@ -200,6 +444,9 @@ void Game_Map::SetupFromSave() {
  		if (events.back().IsMoveRouteOverwritten())
  			pending.push_back(&events.back());
  	}
 +	RebuildEventSpatialIndex();
++	RebuildRefreshDependencies();
 +	RebuildEventUpdateLists();
  
  	for (size_t i = 0; i < Main_Data::game_data.common_events.size() && i < common_events.size(); ++i) {
  		common_events[i].SetSaveData(Main_Data::game_data.common_events[i].event_data);
-@@ -212,11 +357,14 @@ void Game_Map::SetupFromSave() {
+@@ -212,11 +459,14 @@ void Game_Map::SetupFromSave() {
  	map_info.Fixup(*map.get());
  	SetChipset(map_info.chipset_id);
  
@@ -3924,15 +4611,44 @@ index 46f570e..20b0311 100644
  }
  
  void Game_Map::SetupCommon(int _id) {
-@@ -332,6 +480,7 @@ void Game_Map::Refresh() {
+@@ -323,17 +573,34 @@ void Game_Map::PlayBgm() {
+ 
+ void Game_Map::Refresh() {
+ 	if (location.map_id > 0) {
+-		for (Game_Event& ev : events) {
+-			ev.Refresh();
++		if (refresh_type == Refresh_Targeted) {
++			for (int event_index : targeted_refresh_events) {
++				if (event_index >= 0 && event_index < static_cast<int>(events.size()))
++					events[event_index].Refresh();
++			}
++			if (targeted_refresh_common) {
++				for (Game_CommonEvent& ev : common_events)
++					ev.Refresh();
++			}
++			if (!targeted_refresh_events.empty())
++				RebuildEventUpdateLists();
++			ClearTargetedRefresh();
++			refresh_type = Refresh_None;
++			return;
+ 		}
+ 
++		for (Game_Event& ev : events)
++			ev.Refresh();
++
+ 		if (refresh_type == Refresh_All) {
+ 			for (Game_CommonEvent& ev : common_events) {
  				ev.Refresh();
  			}
  		}
 +		RebuildEventUpdateLists();
  	}
  
++	ClearTargetedRefresh();
  	refresh_type = Refresh_None;
-@@ -348,8 +497,8 @@ void Game_Map::ReserveInterpreterDeletion(std::shared_ptr<Game_Interpreter> inte
+ }
+ 
+@@ -348,8 +615,8 @@ void Game_Map::ReserveInterpreterDeletion(std::shared_ptr<Game_Interpreter> inte
  
  void Game_Map::ScrollDown(int distance) {
  	if (LoopVertical()) {
@@ -3943,7 +4659,7 @@ index 46f570e..20b0311 100644
  		parallax_y -= map_info.parallax_vert ? distance / 2 : 0;
  	} else {
  		if (map_info.position_y + distance <= (GetHeight() - 15) * SCREEN_TILE_WIDTH) {
-@@ -365,8 +514,8 @@ void Game_Map::ScrollDown(int distance) {
+@@ -365,8 +632,8 @@ void Game_Map::ScrollDown(int distance) {
  
  void Game_Map::ScrollLeft(int distance) {
  	if (LoopHorizontal()) {
@@ -3954,7 +4670,7 @@ index 46f570e..20b0311 100644
  		parallax_x += map_info.parallax_horz ? distance / 2 : 0;
  	} else {
  		if (map_info.position_x - distance >= 0) {
-@@ -382,8 +531,8 @@ void Game_Map::ScrollLeft(int distance) {
+@@ -382,8 +649,8 @@ void Game_Map::ScrollLeft(int distance) {
  
  void Game_Map::ScrollRight(int distance) {
  	if (LoopHorizontal()) {
@@ -3965,7 +4681,7 @@ index 46f570e..20b0311 100644
  		parallax_x -= map_info.parallax_horz ? distance / 2 : 0;
  	} else {
  		if (map_info.position_x + distance <= (GetWidth() - 20) * SCREEN_TILE_WIDTH) {
-@@ -399,8 +548,8 @@ void Game_Map::ScrollRight(int distance) {
+@@ -399,8 +666,8 @@ void Game_Map::ScrollRight(int distance) {
  
  void Game_Map::ScrollUp(int distance) {
  	if (LoopVertical()) {
@@ -3976,7 +4692,7 @@ index 46f570e..20b0311 100644
  		parallax_y += map_info.parallax_vert ? distance / 2 : 0;
  	} else {
  		if (map_info.position_y - distance >= 0) {
-@@ -441,6 +590,7 @@ static int DirToMask(int d) {
+@@ -441,6 +708,7 @@ static int DirToMask(int d) {
  		default:
  			assert(false);
  	}
@@ -3984,7 +4700,7 @@ index 46f570e..20b0311 100644
  }
  
  enum CollisionResult {
-@@ -537,21 +687,51 @@ bool Game_Map::MakeWay(int x, int y, int d, const Game_Character& self) {
+@@ -537,21 +805,51 @@ bool Game_Map::MakeWay(int x, int y, int d, const Game_Character& self) {
  	bool stepped_off_event = false;
  	bool stepped_onto_event = false;
  
@@ -4041,7 +4757,7 @@ index 46f570e..20b0311 100644
  	}
  
  	if (!self.IsInPosition(x, y) && (vehicles[0]->IsInPosition(x, y) || vehicles[1]->IsInPosition(x, y)))
-@@ -582,42 +762,42 @@ bool Game_Map::IsPassable(int x, int y, int d, const Game_Character* self_event)
+@@ -582,42 +880,42 @@ bool Game_Map::IsPassable(int x, int y, int d, const Game_Character* self_event)
  
  	if (self_event) {
  		bool pass = false;
@@ -4109,7 +4825,7 @@ index 46f570e..20b0311 100644
  			return true;
  	}
  
-@@ -638,21 +818,31 @@ bool Game_Map::IsPassableVehicle(int x, int y, Game_Vehicle::Type vehicle_type)
+@@ -638,21 +936,31 @@ bool Game_Map::IsPassableVehicle(int x, int y, Game_Vehicle::Type vehicle_type)
  	}
  
  	int tile_id;
@@ -4152,7 +4868,7 @@ index 46f570e..20b0311 100644
  	}
  
  	int const tile_index = x + y * GetWidth();
-@@ -681,17 +871,20 @@ bool Game_Map::IsLandable(int x, int y, const Game_Character *self_event) {
+@@ -681,17 +989,20 @@ bool Game_Map::IsLandable(int x, int y, const Game_Character *self_event) {
  	int bit = Passable::Down | Passable::Right | Passable::Left | Passable::Up;
  
  	if (self_event) {
@@ -4179,7 +4895,7 @@ index 46f570e..20b0311 100644
  			}
  		}
  	}
-@@ -785,10 +978,41 @@ bool Game_Map::AirshipLandOk(int const x, int const y) {
+@@ -785,10 +1096,41 @@ bool Game_Map::AirshipLandOk(int const x, int const y) {
  	return Data::data.terrains[GetTerrainTag(x, y) - 1].airship_land;
  }
  
@@ -4225,7 +4941,7 @@ index 46f570e..20b0311 100644
  		}
  	}
  }
-@@ -802,19 +1026,15 @@ bool Game_Map::LoopVertical() {
+@@ -802,19 +1144,15 @@ bool Game_Map::LoopVertical() {
  }
  
  int Game_Map::RoundX(int x) {
@@ -4251,7 +4967,7 @@ index 46f570e..20b0311 100644
  }
  
  int Game_Map::XwithDirection(int x, int direction) {
-@@ -826,12 +1046,11 @@ int Game_Map::YwithDirection(int y, int direction) {
+@@ -826,12 +1164,11 @@ int Game_Map::YwithDirection(int y, int direction) {
  }
  
  int Game_Map::CheckEvent(int x, int y) {
@@ -4268,25 +4984,68 @@ index 46f570e..20b0311 100644
  	return 0;
  }
  
-@@ -878,20 +1097,23 @@ void Game_Map::Update(bool only_parallel) {
+@@ -878,30 +1215,77 @@ void Game_Map::Update(bool only_parallel) {
  		}
  	}
  
 -	for (Game_CommonEvent& ev : common_events) {
 -		ev.UpdateParallel();
-+	for (Game_CommonEvent* ev : common_parallel_events) {
-+		ev->UpdateParallel();
++#ifdef EASYRPG_SYMBIAN
++	const int parallel_count = static_cast<int>(common_parallel_events.size() + event_parallel_interpreters.size());
++	const int parallel_budget = std::max(1024, std::min(4096, 1024 + parallel_count * 16));
++	const int parallel_quantum = parallel_count > 0
++		? std::max(4, std::min(96, parallel_budget / parallel_count))
++		: parallel_budget;
++	Game_Interpreter::BeginParallelFrameBudget(parallel_budget, parallel_quantum);
++	if (parallel_count > 0) {
++		size_t common_count = common_parallel_events.size();
++		size_t event_count = event_parallel_interpreters.size();
++		size_t common_done = 0;
++		size_t event_done = 0;
++		bool take_common = common_count > 0 && (event_count == 0 || symbian_parallel_common_cursor <= symbian_parallel_event_cursor);
++		while ((common_done < common_count || event_done < event_count) &&
++				Game_Interpreter::GetParallelFrameBudgetRemaining() != 0) {
++			if (take_common && common_done < common_count) {
++				const size_t index = symbian_parallel_common_cursor % common_count;
++				common_parallel_events[index]->UpdateParallel();
++				symbian_parallel_common_cursor = (index + 1) % common_count;
++				++common_done;
++			} else if (event_done < event_count) {
++				const size_t index = symbian_parallel_event_cursor % event_count;
++				event_parallel_interpreters[index]->UpdateParallelInterpreter();
++				symbian_parallel_event_cursor = (index + 1) % event_count;
++				++event_done;
++			}
++			take_common = !take_common;
++		}
  	}
++	Game_Interpreter::EndParallelFrameBudget();
++	if (event_update_lists_dirty)
++		RebuildEventUpdateLists();
  
 -	for (Game_Event& ev : events) {
 -		ev.UpdateParallel();
++	// Interpreter priority rotates, but movement always stays in map order so
++	// budget pressure cannot freeze late events or change collision semantics.
++	if (pending.empty()) {
++		for (Game_Event* ev : event_parallel_updates)
++			ev->UpdateParallelMovement();
++	} else {
++		for (Game_Event& ev : events)
++			ev.UpdateParallelMovement();
+ 	}
++#else
++	for (Game_CommonEvent* ev : common_parallel_events) {
++		ev->UpdateParallel();
++	}
 +	if (pending.empty()) {
 +		for (Game_Event* ev : event_parallel_updates)
 +			ev->UpdateParallel();
 +	} else {
 +		for (Game_Event& ev : events)
 +			ev.UpdateParallel();
- 	}
++	}
++#endif
  
  	if (only_parallel)
  		return;
@@ -4299,9 +5058,14 @@ index 46f570e..20b0311 100644
  
  	Main_Data::game_player->Update();
  	GetInterpreter().Update();
-@@ -900,8 +1122,8 @@ void Game_Map::Update(bool only_parallel) {
- 		ev.Update();
- 	}
+ 
+-	for (Game_Event& ev : events) {
+-		ev.Update();
+-	}
++	if (event_update_lists_dirty)
++		RebuildEventUpdateLists();
++	for (Game_Event* ev : event_regular_updates)
++		ev->Update();
  
 -	for (Game_CommonEvent& ev : common_events) {
 -		ev.Update();
@@ -4310,7 +5074,62 @@ index 46f570e..20b0311 100644
  	}
  
  	for (int i = 0; i < 3; ++i)
-@@ -1139,8 +1361,16 @@ std::vector<Game_Event>& Game_Map::GetEvents() {
+@@ -910,6 +1294,10 @@ void Game_Map::Update(bool only_parallel) {
+ 	free_interpreters.clear();
+ }
+ 
++void Game_Map::RequestEventUpdateListRefresh() {
++	event_update_lists_dirty = true;
++}
++
+ RPG::Map const& Game_Map::GetMap() {
+ 	return *map;
+ }
+@@ -1111,7 +1499,42 @@ Game_Map::RefreshMode Game_Map::GetNeedRefresh() {
+ 	return refresh_type;
+ }
+ void Game_Map::SetNeedRefresh(Game_Map::RefreshMode refresh_mode) {
+-	refresh_type = refresh_mode;
++	if (refresh_mode == Refresh_None)
++		return;
++	if (refresh_type == Refresh_All)
++		return;
++	if (refresh_mode == Refresh_All) {
++		refresh_type = Refresh_All;
++		ClearTargetedRefresh();
++		return;
++	}
++	if (refresh_type == Refresh_Map)
++		return;
++	if (refresh_mode == Refresh_Map) {
++		refresh_type = Refresh_Map;
++		ClearTargetedRefresh();
++		return;
++	}
++	if (refresh_type == Refresh_None)
++		refresh_type = refresh_mode;
++}
++
++void Game_Map::SetNeedSwitchRefresh(int switch_id) {
++	if (switch_id <= 0 || refresh_type == Refresh_All || refresh_type == Refresh_Map)
++		return;
++	QueueTargetedRefresh(switch_refresh_dependencies, switch_id);
++	if (common_switch_refresh_dependencies.find(switch_id) != common_switch_refresh_dependencies.end())
++		targeted_refresh_common = true;
++	if (!targeted_refresh_events.empty() || targeted_refresh_common)
++		refresh_type = Refresh_Targeted;
++}
++
++void Game_Map::SetNeedVariableRefresh(int variable_id) {
++	if (variable_id <= 0 || refresh_type == Refresh_All || refresh_type == Refresh_Map)
++		return;
++	QueueTargetedRefresh(variable_refresh_dependencies, variable_id);
++	if (!targeted_refresh_events.empty())
++		refresh_type = Refresh_Targeted;
+ }
+ 
+ std::vector<unsigned char>& Game_Map::GetPassagesDown() {
+@@ -1139,8 +1562,16 @@ std::vector<Game_Event>& Game_Map::GetEvents() {
  }
  
  Game_Event* Game_Map::GetEvent(int event_id) {
@@ -4328,7 +5147,7 @@ index 46f570e..20b0311 100644
  	return it == events.end() ? nullptr : &(*it);
  }
  
-@@ -1288,10 +1518,12 @@ void Game_Map::SubstituteUp(int old_id, int new_id) {
+@@ -1288,10 +1719,12 @@ void Game_Map::SubstituteUp(int old_id, int new_id) {
  
  void Game_Map::LockPan() {
  	pan_locked = true;
@@ -4341,7 +5160,7 @@ index 46f570e..20b0311 100644
  }
  
  void Game_Map::StartPan(int direction, int distance, int speed, bool wait) {
-@@ -1303,13 +1535,15 @@ void Game_Map::StartPan(int direction, int distance, int speed, bool wait) {
+@@ -1303,13 +1736,15 @@ void Game_Map::StartPan(int direction, int distance, int speed, bool wait) {
  		case PanLeft:	location.pan_finish_x -= distance;		break;
  	}
  	pan_speed = speed;
@@ -4359,7 +5178,7 @@ index 46f570e..20b0311 100644
  	pan_wait = wait;
  }
  
-@@ -1345,11 +1579,11 @@ bool Game_Map::IsPanLocked() {
+@@ -1345,11 +1780,11 @@ bool Game_Map::IsPanLocked() {
  }
  
  int Game_Map::GetPanX() {
@@ -4374,10 +5193,10 @@ index 46f570e..20b0311 100644
  
  void Game_Map::UpdateParallax() {
 diff --git a/src/game_map.h b/src/game_map.h
-index 6d39b56..009fc37 100644
+index 6d39b56..bcdc2e6 100644
 --- a/src/game_map.h
 +++ b/src/game_map.h
-@@ -36,6 +36,7 @@ class FileRequestAsync;
+@@ -36,10 +36,12 @@ class FileRequestAsync;
   * Game_Map namespace
   */
  namespace Game_Map {
@@ -4385,7 +5204,29 @@ index 6d39b56..009fc37 100644
  	enum RefreshMode {
  		Refresh_None,
  		Refresh_All,
-@@ -515,6 +516,7 @@ namespace Game_Map {
+-		Refresh_Map
++		Refresh_Map,
++		Refresh_Targeted
+ 	};
+ 
+ 	/**
+@@ -457,6 +459,15 @@ namespace Game_Map {
+ 	 */
+ 	void SetNeedRefresh(RefreshMode refresh_type);
+ 
++	/** Queue only map/common events whose pages depend on the changed switch. */
++	void SetNeedSwitchRefresh(int switch_id);
++
++	/** Queue only map events whose pages depend on the changed variable. */
++	void SetNeedVariableRefresh(int variable_id);
++
++	/** Rebuild cached event update lists before the next regular event pass. */
++	void RequestEventUpdateListRefresh();
++
+ 	/**
+ 	 * Gets lower passages list.
+ 	 *
+@@ -515,6 +526,7 @@ namespace Game_Map {
  	std::vector<Game_CommonEvent>& GetCommonEvents();
  
  	void GetEventsXY(std::vector<Game_Event*>& events, int x, int y);
@@ -4394,10 +5235,34 @@ index 6d39b56..009fc37 100644
  	bool LoopHorizontal();
  	bool LoopVertical();
 diff --git a/src/game_picture.cpp b/src/game_picture.cpp
-index 1ca182b..9d6999f 100644
+index 1ca182b..5c0ec58 100644
 --- a/src/game_picture.cpp
 +++ b/src/game_picture.cpp
-@@ -169,8 +169,12 @@ void Game_Picture::SetWaverEffect(int depth) {
+@@ -95,8 +95,10 @@ void Game_Picture::OnPictureSpriteReady(FileRequestResult*) {
+ 
+ 	BitmapRef bitmap = Cache::Picture(data.name, data.transparency);
+ 
+-	sprite.reset(new Sprite());
++	if (!sprite)
++		sprite.reset(new Sprite());
+ 	sprite->SetBitmap(bitmap);
++	sprite->SetVisible(true);
+ 	UpdateSprite();
+ }
+ 
+@@ -106,7 +108,10 @@ void Game_Picture::Erase() {
+ 	RPG::SavePicture& data = GetData();
+ 
+ 	data.name.clear();
+-	sprite.reset();
++	if (sprite) {
++		sprite->SetVisible(false);
++		sprite->SetBitmap(BitmapRef());
++	}
+ }
+ 
+ void Game_Picture::SetFixedToMap(bool flag) {
+@@ -169,8 +174,12 @@ void Game_Picture::SetWaverEffect(int depth) {
  void Game_Picture::StopEffects() {
  	RPG::SavePicture& data = GetData();
  
@@ -4411,7 +5276,7 @@ index 1ca182b..9d6999f 100644
  }
  
  void Game_Picture::SetTransition(int tenths) {
-@@ -203,35 +207,35 @@ void Game_Picture::Update() {
+@@ -203,35 +212,35 @@ void Game_Picture::Update() {
  	if (data.name.empty())
  		return;
  
@@ -4456,7 +5321,7 @@ index 1ca182b..9d6999f 100644
  		data.current_x			= interpolate(k, data.current_x,			data.finish_x);
  		data.current_y			= interpolate(k, data.current_y,			data.finish_y);
  		data.current_red		= interpolate(k, data.current_red,			data.finish_red);
-@@ -242,11 +246,12 @@ void Game_Picture::Update() {
+@@ -242,11 +251,12 @@ void Game_Picture::Update() {
  		data.current_top_trans	= interpolate(k, data.current_top_trans,	data.finish_top_trans);
  		data.current_bot_trans	= interpolate(k, data.current_bot_trans,	data.finish_bot_trans);
  		data.current_effect		= interpolate(k, data.current_effect,		data.finish_effect);
@@ -4854,10 +5719,18 @@ index 97a50be..f6ed78f 100644
  
  void Game_Vehicle::Refresh() {
 diff --git a/src/graphics.cpp b/src/graphics.cpp
-index e9676df..cd62154 100644
+index e9676df..3c2667c 100644
 --- a/src/graphics.cpp
 +++ b/src/graphics.cpp
-@@ -29,10 +29,14 @@
+@@ -19,7 +19,6 @@
+ #include <algorithm>
+ #include <sstream>
+ #include <vector>
+-#include <list>
+ 
+ #include "graphics.h"
+ #include "bitmap.h"
+@@ -29,10 +28,17 @@
  #include "util_macro.h"
  #include "output.h"
  #include "player.h"
@@ -4869,10 +5742,13 @@ index e9676df..cd62154 100644
  	void UpdateTitle();
  	void DrawFrame();
 +	void DrawFrameContents();
++#ifdef EASYRPG_SYMBIAN
++	void DrawRecordedFrameContents(const Rect& dirty);
++#endif
  	void DrawOverlay();
  
  	int fps;
-@@ -42,6 +46,7 @@ namespace Graphics {
+@@ -42,6 +48,7 @@ namespace Graphics {
  
  	BitmapRef frozen_screen;
  	BitmapRef black_screen;
@@ -4880,15 +5756,24 @@ index e9676df..cd62154 100644
  	BitmapRef screen1;
  	BitmapRef screen2;
  	bool frozen;
-@@ -67,6 +72,7 @@ namespace Graphics {
+@@ -55,7 +62,7 @@ namespace Graphics {
+ 
+ 	struct State {
+ 		State() {}
+-		std::list<Drawable*> drawable_list;
++		std::vector<Drawable*> drawable_list;
+ 		bool zlist_dirty = false;
+ 		bool draw_background = true;
+ 	};
+@@ -67,6 +74,7 @@ namespace Graphics {
  	std::shared_ptr<State> global_state;
  
  	bool SortDrawableList(const Drawable* first, const Drawable* second);
-+	bool IsDrawableListSorted(std::list<Drawable*> const& drawable_list);
++	bool IsDrawableListSorted(std::vector<Drawable*> const& drawable_list);
  }
  
  unsigned SecondToFrame(float const second) {
-@@ -80,6 +86,7 @@ void Graphics::Init() {
+@@ -80,6 +88,7 @@ void Graphics::Init() {
  	transition_frames_left = 0;
  
  	black_screen = Bitmap::Create(DisplayUi->GetWidth(), DisplayUi->GetHeight(), Color(0,0,0,255));
@@ -4896,7 +5781,7 @@ index e9676df..cd62154 100644
  
  	state.reset(new State());
  	global_state.reset(new State());
-@@ -93,6 +100,7 @@ void Graphics::Quit() {
+@@ -93,6 +102,7 @@ void Graphics::Quit() {
  
  	frozen_screen.reset();
  	black_screen.reset();
@@ -4904,7 +5789,7 @@ index e9676df..cd62154 100644
  
  	Cache::Clear();
  }
-@@ -111,7 +119,9 @@ void Graphics::Update(bool time_left) {
+@@ -111,7 +121,9 @@ void Graphics::Update(bool time_left) {
  
  		if (fps == 0) {
  			Output::Debug("Framerate is 0 FPS!");
@@ -4914,7 +5799,7 @@ index e9676df..cd62154 100644
  		}
  
  		fps = 0;
-@@ -127,6 +137,12 @@ void Graphics::Update(bool time_left) {
+@@ -127,6 +139,12 @@ void Graphics::Update(bool time_left) {
  
  		DrawFrame();
  	}
@@ -4927,7 +5812,7 @@ index e9676df..cd62154 100644
  }
  
  void Graphics::UpdateTitle() {
-@@ -150,6 +166,10 @@ void Graphics::UpdateTitle() {
+@@ -150,6 +168,10 @@ void Graphics::UpdateTitle() {
  
  void Graphics::DrawFrame() {
  	if (transition_frames_left > 0) {
@@ -4938,7 +5823,7 @@ index e9676df..cd62154 100644
  		UpdateTransition();
  
  		for (Drawable* drawable : global_state->drawable_list) {
-@@ -163,17 +183,82 @@ void Graphics::DrawFrame() {
+@@ -163,17 +185,82 @@ void Graphics::DrawFrame() {
  	}
  
  	if (screen_erased) {
@@ -4991,7 +5876,7 @@ index e9676df..cd62154 100644
 +					SymbianRenderDamage::BeginPaint(index);
 +					if (!state->draw_background)
 +						surface->FillRect(dirty, Color(0, 0, 0, 255));
-+					DrawFrameContents();
++					DrawRecordedFrameContents(dirty);
 +					SymbianRenderDamage::EndPaint();
 +				}
 +				surface->ClearClipRects();
@@ -5012,27 +5897,84 @@ index e9676df..cd62154 100644
 +		// when the z change did not reorder anything. A linear scan is much
 +		// cheaper than the stable merge sort, so verify the order first.
 +		if (!IsDrawableListSorted(state->drawable_list))
-+			state->drawable_list.sort(SortDrawableList);
++			std::stable_sort(state->drawable_list.begin(), state->drawable_list.end(), SortDrawableList);
  		state->zlist_dirty = false;
  	}
  
  	if (global_state->zlist_dirty) {
 -		global_state->drawable_list.sort(SortDrawableList);
 +		if (!IsDrawableListSorted(global_state->drawable_list))
-+			global_state->drawable_list.sort(SortDrawableList);
++			std::stable_sort(global_state->drawable_list.begin(), global_state->drawable_list.end(), SortDrawableList);
  		global_state->zlist_dirty = false;
  	}
  
-@@ -190,8 +275,6 @@ void Graphics::DrawFrame() {
+@@ -182,17 +269,49 @@ void Graphics::DrawFrame() {
+ 	}
+ 
+ 	for (Drawable* drawable : state->drawable_list) {
++#ifdef EASYRPG_SYMBIAN
++		SymbianRenderDamage::BeginDrawable(drawable);
++#endif
+ 		drawable->Draw();
++#ifdef EASYRPG_SYMBIAN
++		SymbianRenderDamage::EndDrawable();
++#endif
+ 	}
+ 
+ 	for (Drawable* drawable : global_state->drawable_list) {
++#ifdef EASYRPG_SYMBIAN
++		SymbianRenderDamage::BeginDrawable(drawable);
++#endif
+ 		drawable->Draw();
++#ifdef EASYRPG_SYMBIAN
++		SymbianRenderDamage::EndDrawable();
++#endif
  	}
  
  	DrawOverlay();
--
++}
+ 
 -	DisplayUi->UpdateDisplay();
++#ifdef EASYRPG_SYMBIAN
++void Graphics::DrawRecordedFrameContents(const Rect& dirty) {
++	if (!SymbianRenderDamage::RecordedDrawablesValid()) {
++		DrawFrameContents();
++		return;
++	}
++
++	if (state->draw_background)
++		DisplayUi->AddBackground();
++
++	const int count = SymbianRenderDamage::RecordedDrawableCount();
++	for (int index = 0; index < count; ++index) {
++		Drawable* drawable = SymbianRenderDamage::RecordedDrawable(index);
++		if (!drawable || SymbianRenderDamage::RecordedDrawableRect(index).IsOutOfBounds(dirty))
++			continue;
++		drawable->Draw();
++	}
++
++	DrawOverlay();
  }
++#endif
  
  void Graphics::DrawOverlay() {
-@@ -283,24 +366,6 @@ void Graphics::UpdateTransition() {
+ 	if (
+@@ -239,12 +358,12 @@ void Graphics::Transition(TransitionType type, int duration, bool erase) {
+ 		transition_frames_left = transition_duration;
+ 
+ 		if (state->zlist_dirty) {
+-			state->drawable_list.sort(SortDrawableList);
++			std::stable_sort(state->drawable_list.begin(), state->drawable_list.end(), SortDrawableList);
+ 			state->zlist_dirty = false;
+ 		}
+ 
+ 		if (global_state->zlist_dirty) {
+-			global_state->drawable_list.sort(SortDrawableList);
++			std::stable_sort(global_state->drawable_list.begin(), global_state->drawable_list.end(), SortDrawableList);
+ 			global_state->zlist_dirty = false;
+ 		}
+ 
+@@ -283,24 +402,6 @@ void Graphics::UpdateTransition() {
  
  	transition_frames_left--;
  
@@ -5057,7 +5999,7 @@ index e9676df..cd62154 100644
  	switch (transition_type) {
  	case TransitionFadeIn:
  	case TransitionFadeOut:
-@@ -308,11 +373,31 @@ void Graphics::UpdateTransition() {
+@@ -308,11 +409,31 @@ void Graphics::UpdateTransition() {
  		dst->Blit(0, 0, *screen2, screen2->GetRect(), 255 * percentage / 100);
  		break;
  	case TransitionRandomBlocks:
@@ -5092,7 +6034,7 @@ index e9676df..cd62154 100644
  	case TransitionBlindOpen:
  		for (int i = 0; i < h / 8; i++) {
  			dst->Blit(0, i * 8, *screen1, Rect(0, i * 8, w, 8 - 8 * percentage / 100), 255);
-@@ -415,18 +500,55 @@ void Graphics::UpdateTransition() {
+@@ -415,18 +536,55 @@ void Graphics::UpdateTransition() {
  		dst->Blit(w / 2 - (w / 2) * percentage / 100, h / 2 + (h / 2) * percentage / 100, *screen2, Rect(w / 2 - (w / 2) * percentage / 100, h / 2 + (h / 2) * percentage / 100, w * percentage / 100, h / 2 + (h / 2) * percentage / 100), 255);
  		dst->Blit(0, h / 2 - (h / 2) * percentage / 100, *screen2, Rect(0, h / 2 - (h / 2) * percentage / 100, w, h * percentage / 100), 255);
  		break;
@@ -5154,7 +6096,7 @@ index e9676df..cd62154 100644
  	default:
  		DisplayUi->CleanDisplay();
  		break;
-@@ -441,10 +563,11 @@ void Graphics::FrameReset() {
+@@ -441,14 +599,15 @@ void Graphics::FrameReset() {
  void Graphics::RegisterDrawable(Drawable* drawable) {
  	if (drawable->IsGlobal()) {
  		global_state->drawable_list.push_back(drawable);
@@ -5167,7 +6109,12 @@ index e9676df..cd62154 100644
  }
  
  void Graphics::RemoveDrawable(Drawable* drawable) {
-@@ -463,11 +586,28 @@ void Graphics::UpdateZCallback() {
+-	std::list<Drawable*>::iterator it;
++	std::vector<Drawable*>::iterator it;
+ 	if (drawable->IsGlobal()) {
+ 		it = std::find(global_state->drawable_list.begin(), global_state->drawable_list.end(), drawable);
+ 		if (it != global_state->drawable_list.end()) { global_state->drawable_list.erase(it); }
+@@ -463,11 +622,28 @@ void Graphics::UpdateZCallback() {
  	global_state->zlist_dirty = true;
  }
  
@@ -5183,7 +6130,7 @@ index e9676df..cd62154 100644
  	return false;
  }
  
-+bool Graphics::IsDrawableListSorted(std::list<Drawable*> const& drawable_list) {
++bool Graphics::IsDrawableListSorted(std::vector<Drawable*> const& drawable_list) {
 +	const Drawable* previous = NULL;
 +	for (Drawable* drawable : drawable_list) {
 +		if (previous && previous->GetZ() > drawable->GetZ())
@@ -6286,7 +7233,7 @@ index ff56059..35cfad5 100644
  #ifdef EMSCRIPTEN
  	// Save changed file system
 diff --git a/src/sprite.cpp b/src/sprite.cpp
-index eb25431..3aad054 100644
+index eb25431..ab59cd9 100644
 --- a/src/sprite.cpp
 +++ b/src/sprite.cpp
 @@ -16,12 +16,16 @@
@@ -6306,7 +7253,18 @@ index eb25431..3aad054 100644
  
  // Constructor
  Sprite::Sprite() :
-@@ -72,6 +76,55 @@ void Sprite::Draw() {
+@@ -67,11 +71,75 @@ Sprite::~Sprite() {
+ 	Graphics::RemoveDrawable(this);
+ }
+ 
++#ifdef EASYRPG_SYMBIAN
++void Sprite::InvalidateDamageSignature() {
++	symbian_damage_signature_dirty = true;
++}
++#endif
++
+ // Draw
+ void Sprite::Draw() {
  	if (!visible) return;
  	if (GetWidth() <= 0 || GetHeight() <= 0) return;
  
@@ -6326,27 +7284,36 @@ index eb25431..3aad054 100644
 +		if (!SymbianRenderDamage::IsRecording() && !SymbianRenderDamage::IsFullPaintRecording())
 +			goto draw_sprite;
 +
-+		unsigned int signature = SymbianRenderDamage::HashSeed(0x53505254u);
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(reinterpret_cast<std::size_t>(this)));
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(reinterpret_cast<std::size_t>(bitmap.get())));
-+		signature = SymbianRenderDamage::HashValue(signature, bitmap->Revision());
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(rect.x));
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(rect.y));
-+		signature = SymbianRenderDamage::HashValue(signature,
-+			(static_cast<unsigned int>(opacity_top_effect) & 0xffu) |
-+			((static_cast<unsigned int>(opacity_bottom_effect) & 0xffu) << 8) |
-+			((static_cast<unsigned int>(bush_effect) & 0xffffu) << 16));
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.red));
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.green));
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.blue));
-+		signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.gray));
-+		signature = SymbianRenderDamage::HashValue(signature,
-+			(static_cast<unsigned int>(flash_effect.red) & 0xffu) |
-+			((static_cast<unsigned int>(flash_effect.green) & 0xffu) << 8) |
-+			((static_cast<unsigned int>(flash_effect.blue) & 0xffu) << 16) |
-+			((static_cast<unsigned int>(flash_effect.alpha) & 0xffu) << 24));
-+		signature = SymbianRenderDamage::HashValue(signature,
-+			(flipx_effect ? 1u : 0u) | (flipy_effect ? 2u : 0u));
++		const unsigned int bitmap_revision = bitmap->Revision();
++		if (symbian_damage_signature_dirty || symbian_damage_bitmap != bitmap.get() ||
++			symbian_damage_bitmap_revision != bitmap_revision) {
++			unsigned int signature = SymbianRenderDamage::HashSeed(0x53505254u);
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(reinterpret_cast<std::size_t>(this)));
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(reinterpret_cast<std::size_t>(bitmap.get())));
++			signature = SymbianRenderDamage::HashValue(signature, bitmap_revision);
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(rect.x));
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(rect.y));
++			signature = SymbianRenderDamage::HashValue(signature,
++				(static_cast<unsigned int>(opacity_top_effect) & 0xffu) |
++				((static_cast<unsigned int>(opacity_bottom_effect) & 0xffu) << 8) |
++				((static_cast<unsigned int>(bush_effect) & 0xffffu) << 16));
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.red));
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.green));
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.blue));
++			signature = SymbianRenderDamage::HashValue(signature, static_cast<unsigned int>(tone_effect.gray));
++			signature = SymbianRenderDamage::HashValue(signature,
++				(static_cast<unsigned int>(flash_effect.red) & 0xffu) |
++				((static_cast<unsigned int>(flash_effect.green) & 0xffu) << 8) |
++				((static_cast<unsigned int>(flash_effect.blue) & 0xffu) << 16) |
++				((static_cast<unsigned int>(flash_effect.alpha) & 0xffu) << 24));
++			signature = SymbianRenderDamage::HashValue(signature,
++				(flipx_effect ? 1u : 0u) | (flipy_effect ? 2u : 0u));
++			symbian_damage_signature = signature;
++			symbian_damage_bitmap = bitmap.get();
++			symbian_damage_bitmap_revision = bitmap_revision;
++			symbian_damage_signature_dirty = false;
++		}
++		const unsigned int signature = symbian_damage_signature;
 +		SymbianRenderDamage::Record(signature, draw_rect);
 +		if (SymbianRenderDamage::IsRecording())
 +			return;
@@ -6362,7 +7329,7 @@ index eb25431..3aad054 100644
  	BlitScreen();
  }
  
-@@ -94,31 +147,31 @@ void Sprite::BlitScreen() {
+@@ -94,31 +162,31 @@ void Sprite::BlitScreen() {
  void Sprite::BlitScreenIntern(Bitmap const& draw_bitmap,
  								Rect const& src_rect, int opacity_split) const {
  	BitmapRef dst = DisplayUi->GetDisplaySurface();
@@ -6406,17 +7373,142 @@ index eb25431..3aad054 100644
  	bool effects_changed = tone_effect != current_tone ||
  		flash_effect != current_flash ||
  		flipx_effect != current_flip_x ||
-@@ -129,9 +182,6 @@ BitmapRef Sprite::Refresh(Rect& rect) {
+@@ -129,11 +197,12 @@ BitmapRef Sprite::Refresh(Rect& rect) {
  		bitmap_effects_valid = false;
  	}
  
 -	if (no_effects)
 -		return bitmap;
 -
- 	if (bitmap_effects && bitmap_effects_valid)
+-	if (bitmap_effects && bitmap_effects_valid)
++	if (bitmap_effects && bitmap_effects_valid) {
++#ifdef EASYRPG_SYMBIAN
++		rect = Rect(0, 0, rect.width, rect.height);
++#endif
  		return bitmap_effects;
++	}
  
-@@ -290,7 +340,7 @@ int Sprite::GetZ() const {
+ 	BitmapRef src_bitmap;
+ 
+@@ -147,44 +216,57 @@ BitmapRef Sprite::Refresh(Rect& rect) {
+ 		current_flip_x = flipx_effect;
+ 		current_flip_y = flipy_effect;
+ 
++		const Rect source_rect = rect;
++#ifdef EASYRPG_SYMBIAN
++		const Rect effect_rect(0, 0, source_rect.width, source_rect.height);
+ 		if (bitmap_effects &&
+-			bitmap_effects->GetWidth() < rect.x + rect.width &&
+-			bitmap_effects->GetHeight() < rect.y + rect.height) {
+-		bitmap_effects.reset();
+-		}
+-
++			(bitmap_effects->GetWidth() != source_rect.width ||
++			 bitmap_effects->GetHeight() != source_rect.height))
++			bitmap_effects.reset();
++		if (!bitmap_effects)
++			bitmap_effects = Bitmap::Create(source_rect.width, source_rect.height, true);
++#else
++		const Rect effect_rect = source_rect;
++		if (bitmap_effects &&
++			(bitmap_effects->GetWidth() < source_rect.x + source_rect.width ||
++			 bitmap_effects->GetHeight() < source_rect.y + source_rect.height))
++			bitmap_effects.reset();
+ 		if (!bitmap_effects)
+ 			bitmap_effects = Bitmap::Create(bitmap->GetWidth(), bitmap->GetHeight(), true);
++#endif
+ 
+ 		bitmap_effects->Clear();
+ 		if (no_tone && no_flash)
+-			bitmap_effects->FlipBlit(rect.x, rect.y, *bitmap, rect, flipx_effect, flipy_effect, Opacity::opaque);
++			bitmap_effects->FlipBlit(effect_rect.x, effect_rect.y, *bitmap, source_rect, flipx_effect, flipy_effect, Opacity::opaque);
+ 		else if (no_flip && no_flash)
+-			bitmap_effects->ToneBlit(rect.x, rect.y, *bitmap, rect, tone_effect, Opacity::opaque);
++			bitmap_effects->ToneBlit(effect_rect.x, effect_rect.y, *bitmap, source_rect, tone_effect, Opacity::opaque);
+ 		else if (no_flip && no_tone)
+-			bitmap_effects->BlendBlit(rect.x, rect.y, *bitmap, rect, flash_effect, Opacity::opaque);
++			bitmap_effects->BlendBlit(effect_rect.x, effect_rect.y, *bitmap, source_rect, flash_effect, Opacity::opaque);
+ 		else if (no_flash) {
+-			bitmap_effects->ToneBlit(rect.x, rect.y, *bitmap, rect, tone_effect, Opacity::opaque);
+-			bitmap_effects->Flip(rect, flipx_effect, flipy_effect);
++			bitmap_effects->ToneBlit(effect_rect.x, effect_rect.y, *bitmap, source_rect, tone_effect, Opacity::opaque);
++			bitmap_effects->Flip(effect_rect, flipx_effect, flipy_effect);
+ 		}
+ 		else if (no_tone) {
+-			bitmap_effects->BlendBlit(rect.x, rect.y, *bitmap, rect, flash_effect, Opacity::opaque);
+-			bitmap_effects->Flip(rect, flipx_effect, flipy_effect);
++			bitmap_effects->BlendBlit(effect_rect.x, effect_rect.y, *bitmap, source_rect, flash_effect, Opacity::opaque);
++			bitmap_effects->Flip(effect_rect, flipx_effect, flipy_effect);
+ 		}
+ 		else if (no_flip) {
+-			bitmap_effects->BlendBlit(rect.x, rect.y, *bitmap, rect, flash_effect, Opacity::opaque);
+-			bitmap_effects->ToneBlit(rect.x, rect.y, *bitmap_effects, rect, tone_effect, Opacity::opaque);
++			bitmap_effects->BlendBlit(effect_rect.x, effect_rect.y, *bitmap, source_rect, flash_effect, Opacity::opaque);
++			bitmap_effects->ToneBlit(effect_rect.x, effect_rect.y, *bitmap_effects, effect_rect, tone_effect, Opacity::opaque);
+ 		}
+ 		else {
+-			bitmap_effects->BlendBlit(rect.x, rect.y, *bitmap, rect, flash_effect, Opacity::opaque);
+-			bitmap_effects->ToneBlit(rect.x, rect.y, *bitmap_effects, rect, tone_effect, Opacity::opaque);
+-			bitmap_effects->Flip(rect, flipx_effect, flipy_effect);
++			bitmap_effects->BlendBlit(effect_rect.x, effect_rect.y, *bitmap, source_rect, flash_effect, Opacity::opaque);
++			bitmap_effects->ToneBlit(effect_rect.x, effect_rect.y, *bitmap_effects, effect_rect, tone_effect, Opacity::opaque);
++			bitmap_effects->Flip(effect_rect, flipx_effect, flipy_effect);
+ 		}
+ 
+-		bitmap_effects_src_rect = rect;
++		bitmap_effects_src_rect = source_rect;
+ 		bitmap_effects_valid = true;
+ 
+ 		src_bitmap = bitmap_effects;
++#ifdef EASYRPG_SYMBIAN
++		rect = effect_rect;
++#endif
+ 	}
+ 
+ 	return src_bitmap;
+@@ -230,6 +312,9 @@ void Sprite::SetFlashEffect(const Color &color) {
+ 	if (flash_effect != color) {
+ 		flash_effect = color;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ }
+ 
+@@ -249,6 +334,9 @@ void Sprite::SetBitmap(BitmapRef const& nbitmap) {
+ 
+ 	needs_refresh = true;
+ 	bitmap_changed = true;
++#ifdef EASYRPG_SYMBIAN
++	InvalidateDamageSignature();
++#endif
+ }
+ 
+ Rect const& Sprite::GetSrcRect() const {
+@@ -256,12 +344,20 @@ Rect const& Sprite::GetSrcRect() const {
+ }
+ 
+ void Sprite::SetSrcRect(Rect const& nsrc_rect) {
+-	src_rect = nsrc_rect;
++	if (src_rect != nsrc_rect) {
++		src_rect = nsrc_rect;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
++	}
+ }
+ void Sprite::SetSpriteRect(Rect const& nsprite_rect) {
+ 	if (src_rect_effect != nsprite_rect) {
+ 		src_rect_effect = nsprite_rect;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ }
+ 
+@@ -290,7 +386,7 @@ int Sprite::GetZ() const {
  	return z;
  }
  void Sprite::SetZ(int nz) {
@@ -6425,8 +7517,67 @@ index eb25431..3aad054 100644
  	z = nz;
  }
  
+@@ -338,6 +434,9 @@ void Sprite::SetFlipX(bool flipx) {
+ 	if (flipx_effect != flipx) {
+ 		flipx_effect = flipx;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ }
+ 
+@@ -349,6 +448,9 @@ void Sprite::SetFlipY(bool flipy) {
+ 	if (flipy_effect != flipy) {
+ 		flipy_effect = flipy;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ }
+ 
+@@ -360,6 +462,9 @@ void Sprite::SetBushDepth(int bush_depth) {
+ 	if (bush_effect != bush_depth) {
+ 		bush_effect = bush_depth;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ }
+ 
+@@ -371,12 +476,18 @@ void Sprite::SetOpacity(int opacity_top, int opacity_bottom) {
+ 	if (opacity_top_effect != opacity_top) {
+ 		opacity_top_effect = opacity_top;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ 	if (opacity_bottom == -1)
+ 		opacity_bottom = (opacity_top + 1) / 2;
+ 	if (opacity_bottom_effect != opacity_bottom) {
+ 		opacity_bottom_effect = opacity_bottom;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ }
+ 
+@@ -404,6 +515,9 @@ void Sprite::SetTone(Tone tone) {
+ 	if (tone_effect != tone) {
+ 		tone_effect = tone;
+ 		needs_refresh = true;
++#ifdef EASYRPG_SYMBIAN
++		InvalidateDamageSignature();
++#endif
+ 	}
+ }
+ 
 diff --git a/src/sprite.h b/src/sprite.h
-index 911573b..d0650ea 100644
+index 911573b..79bce1a 100644
 --- a/src/sprite.h
 +++ b/src/sprite.h
 @@ -85,6 +85,9 @@ public:
@@ -6439,19 +7590,26 @@ index 911573b..d0650ea 100644
  private:
  	DrawableType type;
  
-@@ -135,7 +138,6 @@ private:
+@@ -135,7 +138,13 @@ private:
  	void BlitScreenIntern(Bitmap const& draw_bitmap,
  							Rect const& src_rect, int opacity_split) const;
  	BitmapRef Refresh(Rect& rect);
 -	void SetFlashEffect(const Color &color);
++#ifdef EASYRPG_SYMBIAN
++	void InvalidateDamageSignature();
++	unsigned int symbian_damage_signature = 0;
++	unsigned int symbian_damage_bitmap_revision = 0;
++	const Bitmap* symbian_damage_bitmap = NULL;
++	bool symbian_damage_signature_dirty = true;
++#endif
  };
  
  #endif
 diff --git a/src/sprite_character.cpp b/src/sprite_character.cpp
-index c7e84d9..ac46a8a 100644
+index c7e84d9..5804775 100644
 --- a/src/sprite_character.cpp
 +++ b/src/sprite_character.cpp
-@@ -1,21 +1,3 @@
+@@ -1,25 +1,8 @@
 -/*
 - * This file is part of EasyRPG Player.
 - *
@@ -6473,7 +7631,42 @@ index c7e84d9..ac46a8a 100644
  #include "sprite_character.h"
  #include "cache.h"
  #include "game_map.h"
-@@ -43,14 +25,12 @@ void Sprite_Character::Update() {
+ #include "bitmap.h"
++#include "options.h"
+ 
+ Sprite_Character::Sprite_Character(Game_Character* character) :
+ 	character(character),
+@@ -31,6 +14,29 @@ Sprite_Character::Sprite_Character(Game_Character* character) :
+ }
+ 
+ void Sprite_Character::Update() {
++#ifdef EASYRPG_SYMBIAN
++	const int screen_x = character->GetScreenX();
++	const int screen_y = character->GetScreenY();
++	const int margin = 64;
++	if (screen_x < -margin || screen_x > SCREEN_TARGET_WIDTH + margin ||
++		screen_y < -margin || screen_y > SCREEN_TARGET_HEIGHT + margin) {
++		int flash_time = character->GetFlashTimeLeft();
++		if (flash_time > 0) {
++			double level = character->GetFlashLevel();
++			if (level <= 0.0)
++				level = 128.0;
++			level -= level / flash_time;
++			--flash_time;
++			character->SetFlashLevel(flash_time > 0 ? level : 0.0);
++			character->SetFlashTimeLeft(flash_time);
++		}
++		SetVisible(false);
++		SetX(screen_x);
++		SetY(screen_y);
++		SetZ(character->GetScreenZ());
++		return;
++	}
++#endif
+ 	Sprite::Update();
+ 	Rect r;
+ 	if (tile_id != character->GetTileId() ||
+@@ -43,14 +49,12 @@ void Sprite_Character::Update() {
  			FileRequestAsync* tile_request = AsyncHandler::RequestFile("ChipSet", Game_Map::GetChipsetName());
  			request_id = tile_request->Bind(&Sprite_Character::OnTileSpriteReady, this);
  			tile_request->Start();
@@ -6493,7 +7686,7 @@ index c7e84d9..ac46a8a 100644
  		}
  	}
  
-@@ -60,24 +40,35 @@ void Sprite_Character::Update() {
+@@ -60,24 +64,35 @@ void Sprite_Character::Update() {
  		SetSrcRect(r);
  	}
  
@@ -6538,7 +7731,7 @@ index c7e84d9..ac46a8a 100644
  	int bush_split = 4 - character->GetBushDepth();
  	SetBushDepth(bush_split > 3 ? 0 : GetHeight() / bush_split);
  }
-@@ -85,35 +76,29 @@ void Sprite_Character::Update() {
+@@ -85,35 +100,29 @@ void Sprite_Character::Update() {
  Game_Character* Sprite_Character::GetCharacter() {
  	return character;
  }
@@ -6577,7 +7770,7 @@ index c7e84d9..ac46a8a 100644
  	SetOx(chara_width / 2);
  	SetOy(chara_height);
  	int sx = (character_index % 4) * chara_width * 3;
-@@ -121,6 +106,5 @@ void Sprite_Character::OnCharSpriteReady(FileRequestResult*) {
+@@ -121,6 +130,5 @@ void Sprite_Character::OnCharSpriteReady(FileRequestResult*) {
  	Rect r;
  	r.Set(sx, sy, chara_width * 3, chara_height * 4);
  	SetSpriteRect(r);
@@ -6598,10 +7791,10 @@ index f8bcce6..470a3ed 100644
  #    endif
  #  endif
 diff --git a/src/tilemap.cpp b/src/tilemap.cpp
-index 1e06df0..3f3d019 100644
+index 1e06df0..7cd3918 100644
 --- a/src/tilemap.cpp
 +++ b/src/tilemap.cpp
-@@ -34,8 +34,14 @@ BitmapRef const& Tilemap::GetChipset() const {
+@@ -34,32 +34,38 @@ BitmapRef const& Tilemap::GetChipset() const {
  	return layer_down.GetChipset();
  }
  void Tilemap::SetChipset(BitmapRef const& chipset) {
@@ -6616,8 +7809,58 @@ index 1e06df0..3f3d019 100644
  }
  
  std::vector<short> Tilemap::GetMapDataDown() const {
+ 	return layer_down.GetMapData();
+ }
+-void Tilemap::SetMapDataDown(std::vector<short> down) {
++void Tilemap::SetMapDataDown(const std::vector<short>& down) {
+ 	layer_down.SetMapData(down);
+ }
+ std::vector<short> Tilemap::GetMapDataUp() const {
+ 	return layer_up.GetMapData();
+ }
+-void Tilemap::SetMapDataUp(std::vector<short> up) {
++void Tilemap::SetMapDataUp(const std::vector<short>& up) {
+ 	layer_up.SetMapData(up);
+ }
+ std::vector<unsigned char> Tilemap::GetPassableDown() const {
+ 	return layer_down.GetPassable();
+ }
+-void Tilemap::SetPassableDown(std::vector<unsigned char> down) {
++void Tilemap::SetPassableDown(const std::vector<unsigned char>& down) {
+ 	layer_down.SetPassable(down);
+ }
+ std::vector<unsigned char> Tilemap::GetPassableUp() const {
+ 	return layer_up.GetPassable();
+ }
+-void Tilemap::SetPassableUp(std::vector<unsigned char> up) {
++void Tilemap::SetPassableUp(const std::vector<unsigned char>& up) {
+ 	layer_up.SetPassable(up);
+ }
+ bool Tilemap::GetVisible() const {
+diff --git a/src/tilemap.h b/src/tilemap.h
+index 66af800..5a7b3a5 100644
+--- a/src/tilemap.h
++++ b/src/tilemap.h
+@@ -36,13 +36,13 @@ public:
+ 	BitmapRef const& GetChipset() const;
+ 	void SetChipset(BitmapRef const& nchipset);
+ 	std::vector<short> GetMapDataDown() const;
+-	void SetMapDataDown(std::vector<short> down);
++	void SetMapDataDown(const std::vector<short>& down);
+ 	std::vector<short> GetMapDataUp() const;
+-	void SetMapDataUp(std::vector<short> up);
++	void SetMapDataUp(const std::vector<short>& up);
+ 	std::vector<unsigned char> GetPassableUp() const;
+-	void SetPassableUp(std::vector<unsigned char> up);
++	void SetPassableUp(const std::vector<unsigned char>& up);
+ 	std::vector<unsigned char> GetPassableDown() const;
+-	void SetPassableDown(std::vector<unsigned char> down);
++	void SetPassableDown(const std::vector<unsigned char>& down);
+ 	bool GetVisible() const;
+ 	void SetVisible(bool nvisible);
+ 	int GetOx() const;
 diff --git a/src/tilemap_layer.cpp b/src/tilemap_layer.cpp
-index b5226f4..e17814d 100644
+index b5226f4..215bdb4 100644
 --- a/src/tilemap_layer.cpp
 +++ b/src/tilemap_layer.cpp
 @@ -16,14 +16,26 @@
@@ -6648,7 +7891,20 @@ index b5226f4..e17814d 100644
  
  // Blocks subtiles IDs
  // Mess with this code and you will die in 3 days...
-@@ -159,160 +171,483 @@ TilemapLayer::TilemapLayer(int ilayer) :
+@@ -150,6 +162,12 @@ TilemapLayer::TilemapLayer(int ilayer) :
+ 
+ 	memset(autotiles_ab, 0, sizeof(autotiles_ab));
+ 	memset(autotiles_d, 0, sizeof(autotiles_d));
++#ifdef EASYRPG_SYMBIAN
++	memset(&symbian_empty_tile, 0, sizeof(symbian_empty_tile));
++	symbian_empty_tile.ID = -1;
++	symbian_empty_tile.z = -127;
++	memset(symbian_empty_tile.opacity, Bitmap::Transparent, sizeof(symbian_empty_tile.opacity));
++#endif
+ 
+ 	// SubLayer for the tiles with Wall or Above passability
+ 	// Its z-value should be between the z of the events in the upper layer and the hero
+@@ -159,160 +177,483 @@ TilemapLayer::TilemapLayer(int ilayer) :
  	sublayers.push_back(std::make_shared<TilemapSubLayer>(this, -2+layer));
  }
  
@@ -7032,7 +8288,7 @@ index b5226f4..e17814d 100644
 +				int map_y = first_map_y;
 +				int map_draw_y = -offset_y;
 +				for (int y = 0; y < tiles_y; ++y) {
-+					const TileData& tile = data_cache[map_x][map_y];
++					const TileData& tile = CachedTile(map_x, map_y);
 +					if (tile.z == z_order &&
 +						((dirty_ab && tile.source == SourceAutotileAB) ||
 +						 (dirty_c && tile.source == SourceChipsetAnimatedC))) {
@@ -7179,7 +8435,7 @@ index b5226f4..e17814d 100644
 +			map_y -= height;
 +		int map_draw_y = -offset_y + first_tile_y * TILE_SIZE;
 +		for (int y = first_tile_y; y < last_tile_y; ++y) {
-+			TileData& tile = data_cache[map_x][map_y];
++			TileData& tile = CachedTile(map_x, map_y);
 +			if (z_order == tile.z) {
 +				int frame = 0;
 +				const BitmapRef* source = NULL;
@@ -7255,8 +8511,74 @@ index b5226f4..e17814d 100644
  	}
  }
  
-@@ -335,11 +670,12 @@ void TilemapLayer::CreateTileCache(const std::vector<short>& nmap_data) {
- 		data_cache[x].resize(height);
+@@ -330,16 +671,76 @@ TilemapLayer::TileXY TilemapLayer::GetCachedAutotileD(short ID) {
+ }
+ 
+ void TilemapLayer::CreateTileCache(const std::vector<short>& nmap_data) {
+-	data_cache.resize(width);
++	if (width <= 0 || height <= 0 ||
++		static_cast<size_t>(width) * static_cast<size_t>(height) > nmap_data.size()) {
++		data_cache.clear();
++#ifdef EASYRPG_SYMBIAN
++		symbian_tile_descriptor_index.clear();
++#endif
++		return;
++	}
++#ifdef EASYRPG_SYMBIAN
++	data_cache.clear();
++	int max_id = -1;
++	for (std::vector<short>::const_iterator it = nmap_data.begin(); it != nmap_data.end(); ++it) {
++		if (*it > max_id)
++			max_id = *it;
++	}
++	symbian_tile_descriptor_index.assign(max_id >= 0 ? static_cast<size_t>(max_id + 1) : 0, -1);
++	data_cache.reserve(std::min<size_t>(nmap_data.size(), symbian_tile_descriptor_index.size()));
++	for (std::vector<short>::const_iterator it = nmap_data.begin(); it != nmap_data.end(); ++it) {
++		const int id = *it;
++		if (id < 0 || id >= static_cast<int>(symbian_tile_descriptor_index.size()) ||
++			symbian_tile_descriptor_index[id] >= 0)
++			continue;
++
++		TileData tile;
++		tile.ID = static_cast<short>(id);
++		tile.z = 0;
++		tile.source = SourceNone;
++		memset(tile.source_x, 0, sizeof(tile.source_x));
++		memset(tile.source_y, 0, sizeof(tile.source_y));
++		memset(tile.opacity, Bitmap::Partial, sizeof(tile.opacity));
++
++		if (!passable.empty()) {
++			if (tile.ID >= BLOCK_F) {
++				const int index = tile.ID - BLOCK_F;
++				if (index >= 0 && index < static_cast<int>(substitutions.size()) &&
++					substitutions[index] < passable.size() &&
++					(passable[substitutions[index]] & Passable::Above) != 0)
++					tile.z = 99;
++				else
++					tile.z = -1;
++			} else {
++				int chip_index =
++					tile.ID >= BLOCK_E ?
++						((tile.ID - BLOCK_E < static_cast<int>(substitutions.size()))
++							? substitutions[tile.ID - BLOCK_E] + 18 : -1) :
++					tile.ID >= BLOCK_D ? (tile.ID - BLOCK_D) / 50 + 6 :
++					tile.ID >= BLOCK_C ? (tile.ID - BLOCK_C) / 50 + 3 :
++					tile.ID / 1000;
++				if (chip_index >= 0 && chip_index < static_cast<int>(passable.size()) &&
++					(passable[chip_index] & (Passable::Wall | Passable::Above)) != 0)
++					tile.z = 98;
++				else
++					tile.z = -2;
++			}
++		}
++
++		symbian_tile_descriptor_index[id] = static_cast<int>(data_cache.size());
++		data_cache.push_back(tile);
++	}
++#else
++	data_cache.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+ 	for (int x = 0; x < width; x++) {
+-		data_cache[x].resize(height);
  		for (int y = 0; y < height; y++) {
  			TileData tile;
 -
@@ -7271,20 +8593,30 @@ index b5226f4..e17814d 100644
  
  			// Calculate the tile Z
  			if (!passable.empty()) {
-@@ -367,6 +703,105 @@ void TilemapLayer::CreateTileCache(const std::vector<short>& nmap_data) {
- 	}
- }
+@@ -362,9 +763,116 @@ void TilemapLayer::CreateTileCache(const std::vector<short>& nmap_data) {
  
+ 				}
+ 			}
+-			data_cache[x][y] = tile;
++			CachedTile(x, y) = tile;
++		}
++	}
++#endif
++}
++
 +void TilemapLayer::PrepareTileDrawCache() {
 +#ifdef EASYRPG_SYMBIAN
 +	symbian_has_animated_ab[0] = false;
 +	symbian_has_animated_ab[1] = false;
 +	symbian_has_animated_c[0] = false;
 +	symbian_has_animated_c[1] = false;
-+#endif
++	for (size_t descriptor_index = 0; descriptor_index < data_cache.size(); ++descriptor_index) {
++		TileData& tile = data_cache[descriptor_index];
++#else
 +	for (int x = 0; x < width; ++x) {
 +		for (int y = 0; y < height; ++y) {
-+			TileData& tile = data_cache[x][y];
++			TileData& tile = CachedTile(x, y);
++#endif
 +			tile.source = SourceNone;
 +			memset(tile.source_x, 0, sizeof(tile.source_x));
 +			memset(tile.source_y, 0, sizeof(tile.source_y));
@@ -7370,14 +8702,16 @@ index b5226f4..e17814d 100644
 +				for (int frame = 0; frame < frames; ++frame)
 +					tile.opacity[frame] = static_cast<uint8_t>((*source)->GetTileOpacity(tile.source_y[frame], tile.source_x[frame]));
 +			}
-+		}
++#ifdef EASYRPG_SYMBIAN
 +	}
-+}
-+
++#else
+ 		}
+ 	}
++#endif
+ }
+ 
  void TilemapLayer::GenerateAutotileAB(short ID, short animID) {
- 	// Calculate the block to use
- 	//	1: A1 + Upper B (Grass + Coast)
-@@ -534,7 +969,7 @@ void TilemapLayer::GenerateAutotileD(short ID) {
+@@ -534,7 +1042,7 @@ void TilemapLayer::GenerateAutotileD(short ID) {
  
  BitmapRef TilemapLayer::GenerateAutotiles(int count, const std::map<uint32_t, TileXY>& map) {
  	int rows = (count + TILES_PER_ROW - 1) / TILES_PER_ROW;
@@ -7386,7 +8720,7 @@ index b5226f4..e17814d 100644
  	tiles->Clear();
  	Rect rect(0, 0, TILE_SIZE/2, TILE_SIZE/2);
  
-@@ -597,21 +1032,33 @@ BitmapRef const& TilemapLayer::GetChipset() const {
+@@ -597,30 +1105,56 @@ BitmapRef const& TilemapLayer::GetChipset() const {
  	return chipset;
  }
  
@@ -7426,17 +8760,31 @@ index b5226f4..e17814d 100644
  }
  
  std::vector<short> TilemapLayer::GetMapData() const {
-@@ -619,6 +1066,9 @@ std::vector<short> TilemapLayer::GetMapData() const {
+-	return map_data;
++	return MapDataRef();
  }
  
  void TilemapLayer::SetMapData(const std::vector<short>& nmap_data) {
 +#ifdef EASYRPG_SYMBIAN
 +	SymbianTouch();
++	symbian_map_data = &nmap_data;
 +#endif
  	// Create the tiles data cache
++#ifdef EASYRPG_SYMBIAN
++	// During map setup SetMapData is immediately followed by SetPassable.
++	// Defer the expensive full-map cache build until passability is known so
++	// large maps are not processed twice.
++	if (!passable.empty())
++		CreateTileCache(nmap_data);
++	else
++		data_cache.clear();
++#else
  	CreateTileCache(nmap_data);
++#endif
  	memset(autotiles_ab, 0, sizeof(autotiles_ab));
-@@ -629,33 +1079,43 @@ void TilemapLayer::SetMapData(const std::vector<short>& nmap_data) {
+ 	memset(autotiles_d, 0, sizeof(autotiles_d));
+ 
+@@ -629,33 +1163,46 @@ void TilemapLayer::SetMapData(const std::vector<short>& nmap_data) {
  		autotiles_d_map.clear();
  		autotiles_ab_next = 0;
  		autotiles_d_next = 0;
@@ -7493,14 +8841,20 @@ index b5226f4..e17814d 100644
  		autotiles_d_screen_tone_tiles.clear();
  	}
  
++#ifndef EASYRPG_SYMBIAN
  	map_data = nmap_data;
-+	PrepareTileDrawCache();
++#endif
++	if (!data_cache.empty())
++		PrepareTileDrawCache();
  }
  
  std::vector<unsigned char> TilemapLayer::GetPassable() const {
-@@ -664,6 +1124,9 @@ std::vector<unsigned char> TilemapLayer::GetPassable() const {
+@@ -663,17 +1210,24 @@ std::vector<unsigned char> TilemapLayer::GetPassable() const {
+ }
  
  void TilemapLayer::SetPassable(const std::vector<unsigned char>& npassable) {
++	if (passable == npassable && !data_cache.empty())
++		return;
  	passable = npassable;
 +#ifdef EASYRPG_SYMBIAN
 +	SymbianTouch();
@@ -7508,15 +8862,22 @@ index b5226f4..e17814d 100644
  
  	if (substitutions.size() < passable.size())
  	{
-@@ -674,6 +1137,7 @@ void TilemapLayer::SetPassable(const std::vector<unsigned char>& npassable) {
++		const size_t old_size = substitutions.size();
+ 		substitutions.resize(passable.size());
+-		for (uint8_t i = 0; i < substitutions.size(); i++)
+-			substitutions[i] = i;
++		for (size_t i = old_size; i < substitutions.size(); ++i)
++			substitutions[i] = static_cast<uint8_t>(i);
+ 	}
  
  	// Recalculate z values of all tiles
- 	CreateTileCache(map_data);
+-	CreateTileCache(map_data);
++	CreateTileCache(MapDataRef());
 +	PrepareTileDrawCache();
  }
  
  bool TilemapLayer::GetVisible() const {
-@@ -689,6 +1153,10 @@ int TilemapLayer::GetOx() const {
+@@ -689,6 +1243,10 @@ int TilemapLayer::GetOx() const {
  }
  
  void TilemapLayer::SetOx(int nox) {
@@ -7527,7 +8888,7 @@ index b5226f4..e17814d 100644
  	ox = nox;
  }
  
-@@ -697,6 +1165,10 @@ int TilemapLayer::GetOy() const {
+@@ -697,6 +1255,10 @@ int TilemapLayer::GetOy() const {
  }
  
  void TilemapLayer::SetOy(int noy) {
@@ -7538,7 +8899,7 @@ index b5226f4..e17814d 100644
  	oy = noy;
  }
  
-@@ -705,6 +1177,10 @@ int TilemapLayer::GetWidth() const {
+@@ -705,6 +1267,10 @@ int TilemapLayer::GetWidth() const {
  }
  
  void TilemapLayer::SetWidth(int nwidth) {
@@ -7549,7 +8910,7 @@ index b5226f4..e17814d 100644
  	width = nwidth;
  }
  
-@@ -713,6 +1189,10 @@ int TilemapLayer::GetHeight() const {
+@@ -713,6 +1279,10 @@ int TilemapLayer::GetHeight() const {
  }
  
  void TilemapLayer::SetHeight(int nheight) {
@@ -7560,15 +8921,34 @@ index b5226f4..e17814d 100644
  	height = nheight;
  }
  
-@@ -743,12 +1223,20 @@ void TilemapLayer::Substitute(int old_id, int new_id) {
+@@ -734,6 +1304,16 @@ void TilemapLayer::SetAnimationType(int type) {
+ 
+ void TilemapLayer::Substitute(int old_id, int new_id) {
+ 	int subst_count = 0;
++	bool z_may_change = true;
++	if (old_id >= 0 && new_id >= 0) {
++		const int old_passable = layer == 0 ? old_id + 18 : old_id;
++		const int new_passable = layer == 0 ? new_id + 18 : new_id;
++		if (old_passable < static_cast<int>(passable.size()) &&
++			new_passable < static_cast<int>(passable.size())) {
++			const int mask = layer == 0 ? (Passable::Wall | Passable::Above) : Passable::Above;
++			z_may_change = (passable[old_passable] & mask) != (passable[new_passable] & mask);
++		}
++	}
+ 
+ 	for (size_t i = 0; i < substitutions.size(); ++i) {
+ 		if (substitutions[i] == old_id) {
+@@ -743,12 +1323,20 @@ void TilemapLayer::Substitute(int old_id, int new_id) {
  	}
  
  	if (subst_count > 0) {
+-		// Recalculate z values of all tiles
+-		CreateTileCache(map_data);
 +#ifdef EASYRPG_SYMBIAN
 +		SymbianTouch();
 +#endif
- 		// Recalculate z values of all tiles
- 		CreateTileCache(map_data);
++		if (z_may_change)
++			CreateTileCache(MapDataRef());
 +		PrepareTileDrawCache();
  	}
  }
@@ -7581,7 +8961,7 @@ index b5226f4..e17814d 100644
  	fast_blit = fast;
  }
  
-@@ -786,17 +1274,23 @@ void TilemapLayer::SetTone(Tone tone) {
+@@ -786,17 +1374,23 @@ void TilemapLayer::SetTone(Tone tone) {
  	}
  
  	this->tone = tone;
@@ -7605,6 +8985,8 @@ index b5226f4..e17814d 100644
  		chipset_tone_tiles.clear();
 +		return;
  	}
+-}
+\ No newline at end of file
 +#endif
 +
 +	if (autotiles_d_screen_effect)
@@ -7613,10 +8995,9 @@ index b5226f4..e17814d 100644
 +		std::fill(autotiles_ab_screen_tone_tiles.begin(), autotiles_ab_screen_tone_tiles.end(), 0);
 +	if (chipset_effect)
 +		std::fill(chipset_tone_tiles.begin(), chipset_tone_tiles.end(), 0);
- }
-\ No newline at end of file
++}
 diff --git a/src/tilemap_layer.h b/src/tilemap_layer.h
-index a1fea28..87ee70c 100644
+index a1fea28..7136edd 100644
 --- a/src/tilemap_layer.h
 +++ b/src/tilemap_layer.h
 @@ -21,11 +21,11 @@
@@ -7648,7 +9029,7 @@ index a1fea28..87ee70c 100644
  	std::vector<short> GetMapData() const;
  	void SetMapData(const std::vector<short>& nmap_data);
  	std::vector<unsigned char> GetPassable() const;
-@@ -94,8 +94,11 @@ public:
+@@ -94,10 +94,16 @@ public:
  
  private:
  	BitmapRef chipset;
@@ -7660,8 +9041,13 @@ index a1fea28..87ee70c 100644
 +	std::vector<uint8_t> chipset_tone_tiles;
  
  	std::vector<short> map_data;
++#ifdef EASYRPG_SYMBIAN
++	const std::vector<short>* symbian_map_data = nullptr;
++#endif
  	std::vector<uint8_t> passable;
-@@ -114,6 +117,9 @@ private:
+ 	std::vector<uint8_t> substitutions;
+ 	bool visible;
+@@ -114,6 +120,9 @@ private:
  	bool fast_blit = false;
  
  	void CreateTileCache(const std::vector<short>& nmap_data);
@@ -7671,7 +9057,7 @@ index a1fea28..87ee70c 100644
  	void GenerateAutotileAB(short ID, short animID);
  	void GenerateAutotileD(short ID);
  
-@@ -132,11 +138,17 @@ private:
+@@ -132,11 +141,17 @@ private:
  	TileXY GetCachedAutotileAB(short ID, short animID);
  	TileXY GetCachedAutotileD(short ID);
  	BitmapRef autotiles_ab_screen;
@@ -7691,7 +9077,7 @@ index a1fea28..87ee70c 100644
  
  	int autotiles_ab_next = -1;
  	int autotiles_d_next = -1;
-@@ -147,14 +159,53 @@ private:
+@@ -147,14 +162,91 @@ private:
  	std::map<uint32_t, TileXY> autotiles_ab_map;
  	std::map<uint32_t, TileXY> autotiles_d_map;
  
@@ -7705,13 +9091,53 @@ index a1fea28..87ee70c 100644
 +
  	struct TileData {
  		short ID;
- 		int z;
+-		int z;
++		int8_t z;
 +		uint8_t source;
 +		uint8_t source_x[4];
 +		uint8_t source_y[4];
 +		uint8_t opacity[4];
  	};
- 	std::vector<std::vector<TileData> > data_cache;
+-	std::vector<std::vector<TileData> > data_cache;
++#ifdef EASYRPG_SYMBIAN
++	// map_data already stores every cell's tile ID. Keep render metadata once
++	// per distinct ID instead of duplicating ~16 bytes for every map cell.
++	std::vector<TileData> data_cache;
++	std::vector<int> symbian_tile_descriptor_index;
++	TileData symbian_empty_tile;
++	const std::vector<short>& MapDataRef() const {
++		return symbian_map_data ? *symbian_map_data : map_data;
++	}
++	TileData& CachedTile(int x, int y) {
++		const std::vector<short>& cells = MapDataRef();
++		const size_t cell = static_cast<size_t>(x) + static_cast<size_t>(y) * width;
++		if (cell >= cells.size())
++			return symbian_empty_tile;
++		const int id = cells[cell];
++		if (id < 0 || id >= static_cast<int>(symbian_tile_descriptor_index.size()))
++			return symbian_empty_tile;
++		const int descriptor = symbian_tile_descriptor_index[id];
++		return descriptor >= 0 && descriptor < static_cast<int>(data_cache.size())
++			? data_cache[descriptor] : symbian_empty_tile;
++	}
++	const TileData& CachedTile(int x, int y) const {
++		const std::vector<short>& cells = MapDataRef();
++		const size_t cell = static_cast<size_t>(x) + static_cast<size_t>(y) * width;
++		if (cell >= cells.size())
++			return symbian_empty_tile;
++		const int id = cells[cell];
++		if (id < 0 || id >= static_cast<int>(symbian_tile_descriptor_index.size()))
++			return symbian_empty_tile;
++		const int descriptor = symbian_tile_descriptor_index[id];
++		return descriptor >= 0 && descriptor < static_cast<int>(data_cache.size())
++			? data_cache[descriptor] : symbian_empty_tile;
++	}
++#else
++	const std::vector<short>& MapDataRef() const { return map_data; }
++	std::vector<TileData> data_cache;
++	TileData& CachedTile(int x, int y) { return data_cache[static_cast<size_t>(x) * height + y]; }
++	const TileData& CachedTile(int x, int y) const { return data_cache[static_cast<size_t>(x) * height + y]; }
++#endif
  	std::vector<std::shared_ptr<TilemapSubLayer> > sublayers;
  
  	Tone tone;

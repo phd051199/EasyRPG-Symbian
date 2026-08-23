@@ -1,9 +1,13 @@
 #include <e32base.h>
+#include <f32file.h>
 #include <mda/common/resource.h>
 #include <mdaaudiosampleplayer.h>
 
 #include "NativeAudio.h"
 #include "DirentBridge.h"
+#include "AppConfig.h"
+#include "AppPaths.h"
+#include "Encoding.h"
 
 namespace TNativeAudio
 {
@@ -48,6 +52,65 @@ namespace
 const TInt KNativeSeVoiceCount = 4;
 const TInt KNativeAudioMaxFileBytes = 8 * 1024 * 1024;
 
+void CloseEasyRpgAudioFile(TAny* aFile)
+{
+    if (aFile)
+        EasyRpgFclose(static_cast<FILE*>(aFile));
+}
+
+void BuildAudioTempPathL(const TDesC& aSource, const TAny* aOwner, TDes& aPath)
+{
+    RFs fs;
+    User::LeaveIfError(fs.Connect());
+    CleanupClosePushL(fs);
+    TFileName directory;
+    EasyRpgPaths::BuildL(directory, EasyRpgApp::KAudioDirectorySuffix);
+    const TInt mkdirError = fs.MkDirAll(directory);
+    if (mkdirError != KErrNone && mkdirError != KErrAlreadyExists)
+        User::Leave(mkdirError);
+
+    TBuf<32> base;
+    base.Format(_L("audio_%08x"), static_cast<TUint>(reinterpret_cast<unsigned long>(aOwner)));
+    if (directory.Length() + base.Length() + 8 > aPath.MaxLength())
+        User::Leave(KErrOverflow);
+    aPath.Copy(directory);
+    aPath.Append(base);
+    const TInt dot = aSource.LocateReverse('.');
+    if (dot >= 0 && aSource.Length() - dot <= 8)
+        aPath.Append(aSource.Mid(dot));
+    CleanupStack::PopAndDestroy(&fs);
+}
+
+void CopyVirtualAudioFileL(const TDesC& aSource, const TDesC& aDestination)
+{
+    TBuf8<KMaxFileName * 4 + 1> path8;
+    TEncoding::UnicodeToUtf8CStringL(aSource, path8);
+    FILE* input = EasyRpgFopen(reinterpret_cast<const char*>(path8.Ptr()), "rb");
+    if (!input)
+        User::Leave(KErrNotFound);
+    CleanupStack::PushL(TCleanupItem(CloseEasyRpgAudioFile, input));
+
+    RFs fs;
+    User::LeaveIfError(fs.Connect());
+    CleanupClosePushL(fs);
+    RFile output;
+    User::LeaveIfError(output.Replace(fs, aDestination, EFileWrite | EFileShareExclusive));
+    CleanupClosePushL(output);
+
+    TUint8 buffer[8192];
+    for (;;)
+    {
+        const size_t count = EasyRpgFread(buffer, 1, sizeof(buffer), input);
+        if (count == 0)
+            break;
+        User::LeaveIfError(output.Write(TPtrC8(buffer, static_cast<TInt>(count))));
+    }
+
+    CleanupStack::PopAndDestroy(&output);
+    CleanupStack::PopAndDestroy(&fs);
+    CleanupStack::PopAndDestroy();
+}
+
 class CNativeBgmPlayer;
 class CNativeSeVoice;
 
@@ -82,6 +145,7 @@ public:
     ~CNativeBgmPlayer()
     {
         Stop();
+        DeleteCachedVirtualFile();
         delete iAudio;
         iAudio = NULL;
     }
@@ -106,6 +170,32 @@ public:
         if (error != KErrNone)
         {
             Stop();
+            User::Leave(error);
+        }
+    }
+
+    void PlaySampledVirtualFileL(const TDesC& aPath, TInt aVolume, TInt aFadeIn, TBool aRepeat = ETrue)
+    {
+        if (aPath.Length() == 0)
+            User::Leave(KErrArgument);
+        Stop();
+        TFileName tempPath;
+        if (iCachedVirtualSource.Compare(aPath) == 0 && CachedVirtualFileValid())
+        {
+            tempPath.Copy(iCachedVirtualPath);
+        }
+        else
+        {
+            DeleteCachedVirtualFile();
+            BuildAudioTempPathL(aPath, this, tempPath);
+            CopyVirtualAudioFileL(aPath, tempPath);
+            iCachedVirtualSource.Copy(aPath);
+            iCachedVirtualPath.Copy(tempPath);
+        }
+        TRAPD(error, PlaySampledFileL(tempPath, aVolume, aFadeIn, aRepeat));
+        if (error != KErrNone)
+        {
+            DeleteCachedVirtualFile();
             User::Leave(error);
         }
     }
@@ -273,6 +363,34 @@ private:
         iSource = NULL;
     }
 
+    TBool CachedVirtualFileValid() const
+    {
+        if (iCachedVirtualPath.Length() == 0)
+            return EFalse;
+        RFs fs;
+        if (fs.Connect() != KErrNone)
+            return EFalse;
+        TEntry entry;
+        const TInt error = fs.Entry(iCachedVirtualPath, entry);
+        fs.Close();
+        return error == KErrNone && entry.iSize > 0;
+    }
+
+    void DeleteCachedVirtualFile()
+    {
+        if (iCachedVirtualPath.Length() > 0)
+        {
+            RFs fs;
+            if (fs.Connect() == KErrNone)
+            {
+                fs.Delete(iCachedVirtualPath);
+                fs.Close();
+            }
+        }
+        iCachedVirtualSource.Zero();
+        iCachedVirtualPath.Zero();
+    }
+
     void MapcInitComplete(TInt aError, const TTimeIntervalMicroSeconds& aDuration)
     {
         if (!iActive || !iPending)
@@ -307,6 +425,8 @@ private:
 private:
     CMdaAudioPlayerUtility* iAudio;
     HBufC8* iSource;
+    TFileName iCachedVirtualSource;
+    TFileName iCachedVirtualPath;
     TBool iActive;
     TInt iVolume;
     TInt iFadeIn;
@@ -477,10 +597,11 @@ void PlaySampledL(CNativeBgmPlayer& aPlayer,
         return;
     }
 
-    aPlayer.Stop();
-    HBufC8* data = TNativeAudio::ReadAudioFileLC(aPath, KNativeAudioMaxFileBytes);
-    CleanupStack::Pop(data);
-    aPlayer.PlaySampledDesL(data, aVolume, aFadeIn, aRepeat);
+    // Long BGM/BGS/ME assets from ZIPs can exceed both the descriptor limit
+    // and the practical E72 heap headroom. Spool them once to the app drive
+    // and let MMF stream from a native file instead of pinning the whole
+    // compressed track in process memory for the duration of playback.
+    aPlayer.PlaySampledVirtualFileL(aPath, aVolume, aFadeIn, aRepeat);
 }
 }
 

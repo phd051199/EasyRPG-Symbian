@@ -48,10 +48,12 @@ void RunRuntimeL()
     CleanupStack::PushL(runtime);
     RProcess::Rendezvous(KErrNone);
     runtime->Run();
+    const TBool returnToLauncher = runtime->ReturnToLauncher();
     CleanupStack::PopAndDestroy(runtime);
 
     CleanupStack::PopAndDestroy();
-    TRAP_IGNORE(LaunchMainL());
+    if (returnToLauncher)
+        TRAP_IGNORE(LaunchMainL());
     CActiveScheduler::Install(NULL);
     CleanupStack::PopAndDestroy(scheduler);
 }

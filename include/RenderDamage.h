@@ -3,6 +3,8 @@
 
 #include "rect.h"
 
+class Drawable;
+
 namespace SymbianRenderDamage {
 
 inline unsigned int HashValue(unsigned int aHash, unsigned int aValue)
@@ -26,6 +28,8 @@ bool PendingScroll(int& aShiftX, int& aShiftY);
 void DiscardScroll();
 void BeginRecord(int aWidth, int aHeight);
 void BeginFullPaintRecord(int aWidth, int aHeight);
+void BeginDrawable(Drawable* aDrawable);
+void EndDrawable();
 bool IsRecording();
 bool UseAdaptiveFullPaint();
 void SetAdaptiveFullPaintActive(bool aActive);
@@ -75,6 +79,10 @@ const Rect& DirtyRect(int aIndex);
 void BeginPaint();
 void BeginPaint(int aDirtyIndex);
 void EndPaint();
+bool RecordedDrawablesValid();
+int RecordedDrawableCount();
+Drawable* RecordedDrawable(int aIndex);
+const Rect& RecordedDrawableRect(int aIndex);
 
 }
 

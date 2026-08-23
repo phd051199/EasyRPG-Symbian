@@ -25,6 +25,7 @@ public:
     static CRuntimeEngine* NewL();
     ~CRuntimeEngine();
     void Run();
+    TBool ReturnToLauncher() const;
     void HandleWindowEvent(const TWsEvent& aEvent);
 
 private:
@@ -36,6 +37,7 @@ private:
     void PresentDirectL(TBool aForceFull);
     void RaisePriority();
     void RestorePriority();
+    void RequestExit(TBool aReturnToLauncher);
     void HandleKeyEvent(TInt aType, const TKeyEvent& aKey);
     void SetPlayerKeyMask(TUint32 aMask, TBool aPressed);
     void ClearPlayerInput();
@@ -43,7 +45,6 @@ private:
     TUint32 GameMenuFeatures() const;
     void GameMenuSetSoundEnabledL(TBool aEnabled);
     void GameMenuSetVolumeL(TInt aVolume);
-    void GameMenuSetFrameSkipEnabledL(TBool aEnabled);
     void GameMenuSetFpsEnabledL(TBool aEnabled);
     void GameMenuPauseL(TBool aPaused);
     void GameMenuExitL();
@@ -70,6 +71,7 @@ private:
     TBool iNeedsFullRedraw;
     TBool iForeground;
     TBool iPaused;
+    TBool iReturnToLauncher;
     TBool iRightSoftHeld;
     TUint32 iHeldPlayerKeys;
     TUint32 iPendingPlayerPulses;

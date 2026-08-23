@@ -25,9 +25,7 @@ CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
       iElapsedCounter(0),
       iNextDeadlineCounter(0),
       iLogicFrame(0),
-      iRunning(EFalse),
-      iFrameSkipEnabled(EFalse),
-      iRenderPending(EFalse)
+      iRunning(EFalse)
 {
 }
 
@@ -61,7 +59,6 @@ void CFrameTimer::Start()
     iElapsedCounter = 0;
     iLastCounter = User::FastCounter();
     iNextDeadlineCounter = 0;
-    iRenderPending = EFalse;
     AdvanceDeadline();
     ScheduleNext();
     CActiveScheduler::Start();
@@ -79,16 +76,6 @@ void CFrameTimer::Stop()
 TBool CFrameTimer::Running() const
 {
     return iRunning;
-}
-
-void CFrameTimer::SetFrameSkipEnabled(TBool aEnabled)
-{
-    iFrameSkipEnabled = aEnabled;
-}
-
-TBool CFrameTimer::FrameSkipEnabled() const
-{
-    return iFrameSkipEnabled;
 }
 
 void CFrameTimer::AdvanceDeadline()
@@ -177,19 +164,8 @@ void CFrameTimer::RunL()
     ++iLogicFrame;
     const TBool scheduledRender =
         (iLogicFrame % EasyRpgPlayerConfig::KLogicTicksPerRender) == 0;
-    if (scheduledRender)
-        iRenderPending = ETrue;
 
-    const TBool stillBehind = iElapsedCounter >= iNextDeadlineCounter;
-    TBool renderFrame = EFalse;
-    if (!iFrameSkipEnabled)
-        renderFrame = scheduledRender;
-    else if (iRenderPending && !stillBehind)
-        renderFrame = ETrue;
-    if (renderFrame)
-        iRenderPending = EFalse;
-
-    TRAPD(error, iObserver.FrameTickL(iLogicFrame, renderFrame));
+    TRAPD(error, iObserver.FrameTickL(iLogicFrame, scheduledRender));
     if (error != KErrNone)
     {
         iObserver.FrameError(error);

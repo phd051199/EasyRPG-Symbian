@@ -45,6 +45,7 @@ SDK_LIBRARY_DIR="$SDK_ROOT/epoc32/release/ARMV5/$SDK_CFG"
 WIN_BUILD_DIR="C:\\work\\EasyRPG\\build\\player\\$SDK_CFG"
 GENERATED_DIR="$PROJECT_DIR/build/generated"
 GENERATED_CP932="$GENERATED_DIR/CoreCp932Table.cpp"
+GENERATED_GBK="$GENERATED_DIR/CoreGbkTable.cpp"
 GENERATED_READER_STRUCT="$GENERATED_DIR/reader_struct.cpp"
 WORK_ROOT="$PROJECT_DIR/build/work/third-party"
 LIBLCF_ROOT="$WORK_ROOT/liblcf-0.5.0/src"
@@ -53,9 +54,11 @@ LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/include/compat/libcxx"
 LIBCXX_ROOT="$WORK_ROOT/libcxx-4.0.1/include"
 PLAYER_ROOT="$WORK_ROOT/easyrpg-player-0.5.0/src"
 PIXMAN_ROOT="$WORK_ROOT/pixman-0.34.0/pixman"
+UCHARDET_ROOT="$WORK_ROOT/uchardet-0.0.8/src"
 if [[ ! -f "$PLAYER_ROOT/bitmap.cpp" || ! -f "$PLAYER_ROOT/scene_battle.cpp" ||
       ! -f "$PIXMAN_ROOT/pixman.c" || ! -f "$PIXMAN_ROOT/pixman-fast-path.c" ||
-      ! -f "$LIBLCF_ROOT/reader_lcf.cpp" || ! -f "$LIBCXX_ROOT/vector" ]]; then
+      ! -f "$LIBLCF_ROOT/reader_lcf.cpp" || ! -f "$LIBCXX_ROOT/vector" ||
+      ! -f "$UCHARDET_ROOT/nsSJISProber.cpp" ]]; then
     echo "Missing prepared dependencies. Run tools/prepare_third_party.sh." >&2
     exit 1
 fi
@@ -81,7 +84,8 @@ SOURCES=(
     "$LIBLCF_ROOT/writer_xml.cpp"
     "$GENERATED_READER_STRUCT"
     "$PROJECT_DIR/src/core/LibcxxSharedPtrRuntime.cpp"
-    "$PROJECT_DIR/src/core/LiblcfReaderUtil.cpp"
+    "$PROJECT_DIR/src/core/CharsetDetector.cpp"
+    "$PROJECT_DIR/src/core/EncodingPipeline.cpp"
     "$PROJECT_DIR/src/core/LiblcfXmlReader.cpp"
     "$PROJECT_DIR/src/core/Ui.cpp"
     "$PLAYER_ROOT/scene.cpp"
@@ -228,6 +232,14 @@ SOURCES=(
     "$PLAYER_ROOT/frame.cpp"
     "$PLAYER_ROOT/rtp_table.cpp"
     "$GENERATED_CP932"
+    "$GENERATED_GBK"
+    "$UCHARDET_ROOT/CharDistribution.cpp"
+    "$UCHARDET_ROOT/JpCntx.cpp"
+    "$UCHARDET_ROOT/nsBig5Prober.cpp"
+    "$UCHARDET_ROOT/nsGB2312Prober.cpp"
+    "$UCHARDET_ROOT/nsMBCSSM.cpp"
+    "$UCHARDET_ROOT/nsSJISProber.cpp"
+    "$UCHARDET_ROOT/nsUTF8Prober.cpp"
 )
 
 while IFS= read -r generated_source; do
@@ -292,6 +304,7 @@ fi
 
 mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR" "$GENERATED_DIR"
 python3 "$PROJECT_DIR/tools/generate_cp932_table.py" --output "$GENERATED_CP932"
+python3 "$PROJECT_DIR/tools/generate_gbk_table.py" --output "$GENERATED_GBK"
 python3 "$PROJECT_DIR/tools/generate_reader_struct.py" "$GENERATED_READER_STRUCT"
 rm -f "$LIBRARY"
 
@@ -386,6 +399,7 @@ for source in "${SOURCES[@]}"; do
         -I "$PROJECT_DIR/include" \
         -I "$PLAYER_ROOT" \
         -I "$PIXMAN_ROOT" \
+        -I "$UCHARDET_ROOT" \
         -I "$LIBLCF_ROOT" \
         -I "$LIBLCF_GENERATED_ROOT" \
         -S "$source" \
@@ -432,7 +446,7 @@ done
 
 symbol_output=$(WINEPREFIX="$WINE_PREFIX" WINEDEBUG=-all \
     "$WINE_BIN" "$NM" -g "$WIN_LIBRARY")
-for required_symbol in EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgMidiLiteCreate EasyRpgMidiLiteRender EasyRpgMidiLiteDestroy _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
+for required_symbol in EasyRpgCoreCp932ToUtf16 EasyRpgCoreUtf16ToCp932 EasyRpgCoreGbkToUtf16 EasyRpgCoreUtf16ToGbk EasyRpgMidiLiteCreate EasyRpgMidiLiteRender EasyRpgMidiLiteDestroy _ZN10ReaderUtil6Recode _ZN9LcfReaderC1 _ZN10LMU_Reader4Load; do
     if ! grep -q "$required_symbol" <<<"$symbol_output"; then
         echo "EasyRPG Player archive does not export $required_symbol." >&2
         printf '%s\n' "$symbol_output" >&2
@@ -447,5 +461,5 @@ mv -f "$SDK_LIBRARY_TMP" "$SDK_LIBRARY"
 
 printf 'EasyRPG Player: %s (%s bytes, %s objects)\n' \
     "$LIBRARY" "$(stat -f %z "$LIBRARY")" "${#objects[@]}"
-printf 'Verified symbols: upstream LDB/LMT/LMU read path + CP932/ZIP platform adapters\n'
+printf 'Verified symbols: upstream LDB/LMT/LMU read path + core CP932/GBK codecs\n'
 printf 'Installed for ABLD: %s\n' "$SDK_LIBRARY"

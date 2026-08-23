@@ -47,6 +47,7 @@ components=(
     pixman-0.34.0
     liblcf-0.5.0
     libcxx-4.0.1
+    uchardet-0.0.8
 )
 for component in "${components[@]}"; do
     prepare_component "$component"

@@ -1,0 +1,111 @@
+diff --git a/src/player.h b/src/player.h
+--- a/src/player.h
++++ b/src/player.h
+@@ -114,7 +114,7 @@ namespace Player {
+ 	 *
+ 	 * @param save_file Savegame file to load
+ 	 */
+-	void LoadSavegame(const std::string& save_file);
++	bool LoadSavegame(const std::string& save_file);
+ 
+ 	/**
+ 	 * Moves the player to the start map.
+diff --git a/src/player.cpp b/src/player.cpp
+--- a/src/player.cpp
++++ b/src/player.cpp
+@@ -827,17 +827,38 @@ static void OnMapSaveFileReady(FileRequestResult*) {
+ 	Game_System::BgmPlay(current_music);
+ }
+ 
+-void Player::LoadSavegame(const std::string& save_name) {
++bool Player::LoadSavegame(const std::string& save_name) {
++	if (save_name.empty()) {
++		Output::Warning("Cannot load savegame: empty filename");
++		return false;
++	}
++
+ 	std::unique_ptr<RPG::Save> save = LSD_Reader::Load(save_name, encoding);
+ 
+ 	if (!save.get()) {
+-		Output::Error("%s", LcfReader::GetError().c_str());
++		Output::Warning("Cannot load savegame: %s", LcfReader::GetError().c_str());
++		return false;
+ 	}
+ 
+-	Main_Data::game_data = *save.get();
+-	Main_Data::game_data.system.Fixup();
++	const int map_id = save->party_location.map_id;
++	if (map_id <= 0 || Game_Map::GetMapIndex(map_id) < 0) {
++		Output::Warning("Cannot load savegame: invalid map id %d", map_id);
++		return false;
++	}
+ 
+-	int map_id = save->party_location.map_id;
++	std::stringstream map_name;
++	map_name << "Map" << std::setfill('0') << std::setw(4) << map_id << ".emu";
++	if (FileFinder::FindDefault(map_name.str()).empty()) {
++		map_name.str("");
++		map_name << "Map" << std::setfill('0') << std::setw(4) << map_id << ".lmu";
++		if (FileFinder::FindDefault(map_name.str()).empty()) {
++			Output::Warning("Cannot load savegame: map %d is missing", map_id);
++			return false;
++		}
++	}
++
++	Main_Data::game_data = *save.get();
++	Main_Data::game_data.system.Fixup();
+ 
+ 	FileRequestAsync* map = Game_Map::RequestMap(map_id);
+ 	save_request_id = map->Bind(&OnMapSaveFileReady);
+@@ -849,4 +870,5 @@ void Player::LoadSavegame(const std::string& save_name) {
+ 
+ 	map->Start();
+ 	system->Start();
++	return true;
+ }
+diff --git a/src/scene_load.cpp b/src/scene_load.cpp
+--- a/src/scene_load.cpp
++++ b/src/scene_load.cpp
+@@ -18,6 +18,7 @@
+ // Headers
+ #include <sstream>
+ #include "filefinder.h"
++#include "game_system.h"
+ #include "output.h"
+ #include "player.h"
+ #include "scene_load.h"
+@@ -37,7 +38,12 @@ void Scene_Load::Action(int index) {
+ 
+ 	std::string save_name = FileFinder::FindDefault(*tree, ss.str());
+ 
+-	Player::LoadSavegame(save_name);
++	if (!Player::LoadSavegame(save_name)) {
++		file_windows[index]->SetCorrupted(true);
++		file_windows[index]->Refresh();
++		Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Buzzer));
++		return;
++	}
+ 
+ 	Scene::Push(std::make_shared<Scene_Map>(true), true);
+ }
+diff --git a/src/scene_save.cpp b/src/scene_save.cpp
+--- a/src/scene_save.cpp
++++ b/src/scene_save.cpp
+@@ -116,6 +116,17 @@ void Scene_Save::Action(int index) {
+ 		return;
+ 	}
+ 
++	std::unique_ptr<RPG::Save> verify = LSD_Reader::Load(filename, Player::encoding);
++	if (!verify || verify->party_location.map_id != Main_Data::game_data.party_location.map_id ||
++		verify->system.save_slot != index + 1) {
++		Main_Data::game_data.title = old_title;
++		Main_Data::game_data.system.save_slot = old_save_slot;
++		Main_Data::game_data.system.save_count = old_save_count;
++		Game_System::SePlay(Game_System::GetSystemSE(Game_System::SFX_Buzzer));
++		Output::Warning("Save verification failed: %s", filename.c_str());
++		return;
++	}
++
+ #ifdef EMSCRIPTEN
+ 	// Save changed file system
+ 	EM_ASM(

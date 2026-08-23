@@ -71,31 +71,6 @@ TInt CoreEncodingStatus(TInt aError)
     return -1;
 }
 
-TUint CodepageForCharacterSet(TUint aIdentifier)
-{
-    switch (aIdentifier)
-    {
-    case KCharacterSetIdentifierShiftJis: return 932;
-    case KCharacterSetIdentifierGbk: return 936;
-    case KCharacterSetIdentifierBig5: return 950;
-    case KCharacterSetIdentifierUtf8: return 65001;
-    default: return 0;
-    }
-}
-
-void DetectLegacyEncodingL(const TDesC8& aSample,
-                           unsigned int& aCodepage,
-                           int& aConfidence)
-{
-    EnsureLegacyEncodingL();
-    TUint identifier = 0;
-    TInt confidence = 0;
-    CCnvCharacterSetConverter::AutoDetectCharacterSetL(
-        confidence, identifier, *gLegacyEncodingCharsets, aSample);
-    aCodepage = CodepageForCharacterSet(identifier);
-    aConfidence = confidence;
-}
-
 void LegacyToUtf16L(TUint aCodepage,
                     const unsigned char* aSource,
                     TUint aSourceLength,
@@ -191,31 +166,6 @@ TUint16 ComposeJapaneseKana(TUint16 aBase, TUint16 aMark)
 }
 
 #ifndef EASYRPG_LAUNCHER_PROCESS
-extern "C" int EasyRpgPlatformDetectLegacyEncoding(const unsigned char* aSample,
-                                                     unsigned int aSampleLength,
-                                                     unsigned int* aCodepage,
-                                                     int* aConfidence)
-{
-    if (!aCodepage || !aConfidence || (!aSample && aSampleLength != 0))
-        return -1;
-    *aCodepage = 0;
-    *aConfidence = 0;
-    if (aSampleLength == 0)
-        return 0;
-
-    const TPtrC8 sample(reinterpret_cast<const TUint8*>(aSample), static_cast<TInt>(aSampleLength));
-    unsigned int codepage = 0;
-    int confidence = 0;
-    TInt error = KErrNone;
-    TRAP(error, DetectLegacyEncodingL(sample, codepage, confidence));
-    if (error == KErrNone)
-    {
-        *aCodepage = codepage;
-        *aConfidence = confidence;
-    }
-    return CoreEncodingStatus(error);
-}
-
 extern "C" int EasyRpgPlatformLegacyToUtf16(unsigned int aCodepage,
                                              const unsigned char* aSource,
                                              unsigned int aSourceLength,

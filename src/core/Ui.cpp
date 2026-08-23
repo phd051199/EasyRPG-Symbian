@@ -136,8 +136,12 @@ void PushInitialGameScene() {
 
     std::stringstream ss;
     ss << "Save" << (Player::load_game_id <= 9 ? "0" : "") << Player::load_game_id << ".lsd";
-    Player::LoadSavegame(FileFinder::FindDefault(ss.str()));
-    Scene::Push(std::make_shared<Scene_Map>(true));
+    std::shared_ptr<FileFinder::DirectoryTree> saveTree = FileFinder::CreateSaveDirectoryTree();
+    if (!saveTree)
+        return;
+    const std::string saveName = FileFinder::FindDefault(*saveTree, ss.str());
+    if (Player::LoadSavegame(saveName))
+        Scene::Push(std::make_shared<Scene_Map>(true));
 }
 }
 
