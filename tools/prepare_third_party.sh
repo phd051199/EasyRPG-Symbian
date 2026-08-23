@@ -17,13 +17,29 @@ prepare_component() {
     cp -Rp "$source" "$destination"
 }
 
-apply_component_patch() {
-    local component=$1 patch_file=$2
-    local destination="$WORK_DIR/$component"
-    if ! patch --batch --forward -p1 -d "$destination" < "$patch_file"; then
-        echo "Unable to apply $patch_file" >&2
-        exit 1
-    fi
+apply_patch_series() {
+    local series="$PROJECT_DIR/patches/series.conf"
+    [[ -f $series ]] || { echo "Missing patch series: $series" >&2; exit 1; }
+
+    while IFS='|' read -r group component expected_sha relative_path || [[ -n ${group:-} ]]; do
+        [[ -n ${group:-} && ${group:0:1} != '#' ]] || continue
+        local patch_file="$PROJECT_DIR/$relative_path"
+        local destination="$WORK_DIR/$component"
+        [[ -d $destination ]] || { echo "Unknown patch component: $component" >&2; exit 1; }
+        [[ -f $patch_file ]] || { echo "Missing patch: $relative_path" >&2; exit 1; }
+
+        local actual_sha
+        actual_sha=$(shasum -a 256 "$patch_file" | awk '{print $1}')
+        [[ $actual_sha == "$expected_sha" ]] || {
+            echo "Patch SHA-256 mismatch: $relative_path" >&2
+            exit 1
+        }
+
+        if ! patch --batch --forward -p1 -d "$destination" < "$patch_file"; then
+            echo "Unable to apply $relative_path" >&2
+            exit 1
+        fi
+    done < "$series"
 }
 
 components=(
@@ -36,11 +52,6 @@ for component in "${components[@]}"; do
     prepare_component "$component"
 done
 
-apply_component_patch easyrpg-player-0.5.0 \
-    "$PROJECT_DIR/patches/easyrpg-player-0.5.0-symbian.patch"
-apply_component_patch pixman-0.34.0 \
-    "$PROJECT_DIR/patches/pixman-0.34.0-symbian.patch"
-apply_component_patch libcxx-4.0.1 \
-    "$PROJECT_DIR/patches/libcxx-4.0.1-symbian.patch"
+apply_patch_series
 
 echo "Prepared patched build-only dependency trees under $WORK_DIR"

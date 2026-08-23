@@ -50,7 +50,7 @@ done < <(find "$LIBLCF_GEN" -maxdepth 1 -type f -name '*.cpp' | sort)
 BIN="$WORK/encoding_detection_test"
 echo "Compiling host test (${#SOURCES[@]} sources)..."
 "$CXX" -std=c++11 -O0 -g \
-    -I "$LIBLCF_SRC" -I "$LIBLCF_GEN" -I "$GENERATED_DIR" -I "$PROJECT_DIR/inc/core" \
+    -I "$LIBLCF_SRC" -I "$LIBLCF_GEN" -I "$GENERATED_DIR" -I "$PROJECT_DIR/include" \
     -o "$BIN" "${SOURCES[@]}"
 echo "Built $BIN"
 

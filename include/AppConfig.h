@@ -5,8 +5,8 @@
 
 namespace EasyRpgApp
 {
-// 0xE31EA5A1 must stay in sync with _UID3 in inc/launcher/App.hrh,
-// group/EasyRPG.mmp and sis/EasyRPG.pkg (Symbian requires the UID
+// 0xE31EA5A1 must stay in sync with _UID3 in include/App.hrh,
+// target/group/Launcher.mmp and target/package/App.pkg (Symbian requires the UID
 // literally in each of those; no shared include reaches all of them).
 const TUid KLauncherUid = { 0xE31EA5A1 };
 _LIT(KLauncherExecutable, "EasyRPG.exe");

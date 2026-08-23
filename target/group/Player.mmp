@@ -6,7 +6,7 @@ EPOCHEAPSIZE      0x100000 0x2000000
 EPOCSTACKSIZE     0x10000
 OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti -mtune=arm1136jf-s
 
-SOURCEPATH        ..\src\player
+SOURCEPATH        ..\..\src\player
 SOURCE            RuntimeMain.cpp
 SOURCE            RuntimeEngine.cpp
 SOURCE            GameMenu.cpp
@@ -23,9 +23,7 @@ SOURCE            Encoding.cpp
 SOURCE            Dirent.cpp
 SOURCE            PlayerRuntime.cpp
 
-USERINCLUDE       ..\inc\player
-USERINCLUDE       ..\inc\core
-USERINCLUDE       ..\inc\shared
+USERINCLUDE       ..\..\include
 SYSTEMINCLUDE     \epoc32\include
 SYSTEMINCLUDE     \epoc32\include\stdapis
 SYSTEMINCLUDE     \epoc32\include\libc

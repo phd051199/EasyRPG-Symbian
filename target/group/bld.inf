@@ -2,5 +2,5 @@ PRJ_PLATFORMS
 WINSCW ARMV5 GCCE
 
 PRJ_MMPFILES
-EasyRPG.mmp
-EasyRPGPlayer.mmp
+Launcher.mmp
+Player.mmp

@@ -49,7 +49,7 @@ GENERATED_READER_STRUCT="$GENERATED_DIR/reader_struct.cpp"
 WORK_ROOT="$PROJECT_DIR/build/work/third-party"
 LIBLCF_ROOT="$WORK_ROOT/liblcf-0.5.0/src"
 LIBLCF_GENERATED_ROOT="$LIBLCF_ROOT/generated"
-LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/inc/libcxx_compat"
+LIBCXX_COMPAT_INCLUDE="$PROJECT_DIR/include/compat/libcxx"
 LIBCXX_ROOT="$WORK_ROOT/libcxx-4.0.1/include"
 PLAYER_ROOT="$WORK_ROOT/easyrpg-player-0.5.0/src"
 PIXMAN_ROOT="$WORK_ROOT/pixman-0.34.0/pixman"
@@ -343,7 +343,7 @@ for source in "${SOURCES[@]}"; do
     fi
     language_flag=-xc++
     standard_flag=-std=c++11
-    preinclude_flag="-include $PROJECT_DIR/inc/core/UpstreamCompat.h"
+    preinclude_flag="-include $PROJECT_DIR/include/UpstreamCompat.h"
     pixman_define=
     if [[ $source == *.c ]]; then
         language_flag=-xc
@@ -382,10 +382,8 @@ for source in "${SOURCES[@]}"; do
         -nostdinc++ \
         -I "$LIBCXX_COMPAT_INCLUDE" \
         -I "$LIBCXX_ROOT" \
-        -I "$PROJECT_DIR/inc/libc_compat" \
-        -I "$PROJECT_DIR/inc/core" \
-        -I "$PROJECT_DIR/inc/player" \
-        -I "$PROJECT_DIR/inc/shared" \
+        -I "$PROJECT_DIR/include/compat/libc" \
+        -I "$PROJECT_DIR/include" \
         -I "$PLAYER_ROOT" \
         -I "$PIXMAN_ROOT" \
         -I "$LIBLCF_ROOT" \

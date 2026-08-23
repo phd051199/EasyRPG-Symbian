@@ -1,23 +1,54 @@
+# Build and package output
+/build/
+/dist/
+/target/group/ABLD.BAT
+/target/group/*.make
+/target/group/*.MAKE
+
+# Compiler/linker artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.exe
+*.dll
+*.dylib
+*.dSYM/
+*.sis
+*.sisx
+*.map
+*.sym
+*.elf
+*.log
+
 # Local game/test data
 /games/
 
-# Build/package outputs
-/build/
-/group/ABLD.BAT
-/sis/stage/
-/sis/*.sis
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Local tooling state
+# Local agents, indexes and editor state
 /.claude/
 /.code-review-graph/
 /.omc/
-/.agents/skills/symbian-s60-fp2-development/SKILL.md
-
-# Editor/OS/cache noise
-.DS_Store
-._*
-__pycache__/
-*.py[cod]
+.vscode/
+.idea/
 *.swp
 *.swo
 *~
+
+# macOS / Windows noise
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+*.rej
