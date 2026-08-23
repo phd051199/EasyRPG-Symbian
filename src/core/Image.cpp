@@ -591,7 +591,8 @@ bool ReadPNG(FILE* stream, const void* buffer, bool transparent, int& width, int
     width = 0;
     height = 0;
     pixels = 0;
-    return buffer ? false : false;
+    (void)buffer; // ponytail: memory-buffer path unsupported, signature kept for upstream ABI
+    return false;
 }
 
 unsigned int Crc32(const unsigned char* data, unsigned length) {

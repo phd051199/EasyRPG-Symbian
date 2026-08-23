@@ -30,13 +30,9 @@ public:
     TInt StreamFreeFrames(TStreamBus aBus) const;
     TInt StreamQueuedFrames(TStreamBus aBus) const;
     void CommitStreams();
-    void ClearAll();
-    TInt CachedBytes() const;
     void TrimCache(TInt aByteLimit);
-    TBool IsReady() const;
     TInt ConsumeError();
     static TInt OutputSampleRate();
-    static TInt OutputChannels();
 
 private:
     enum

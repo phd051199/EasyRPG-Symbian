@@ -127,7 +127,6 @@ TBool ResolveUpstreamKey(TUint32 aKey, TInt& aWord, TUint32& aMask)
     case CPlayerRuntime::EKeyMinus: aWord = 2; aMask = 1u << 15; break;
     case CPlayerRuntime::EKeyPeriod: aWord = 2; aMask = 1u << 16; break;
     case CPlayerRuntime::EKeyDivide: aWord = 2; aMask = 1u << 17; break;
-    case CPlayerRuntime::EKeyDebug: aWord = 2; aMask = 1u << 26; break;
     default: return EFalse;
     }
     return ETrue;

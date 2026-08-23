@@ -143,12 +143,11 @@ CZipVfs::CZipVfs(RFs& aFs)
 
 void CZipVfs::ConstructL(const TDesC& aArchivePath)
 {
-    if (aArchivePath.Length() == 0 || aArchivePath.Length() > iArchivePath.MaxLength())
+    if (aArchivePath.Length() == 0 || aArchivePath.Length() > KMaxArchivePathChars)
         User::Leave(KErrArgument);
 
-    iArchivePath.Copy(aArchivePath);
     User::LeaveIfError(iArchive.Open(iFs,
-                                     iArchivePath,
+                                     aArchivePath,
                                      EFileRead | EFileShareReadersOnly));
     BuildIndexL();
     ResolveProjectRootL();
@@ -574,16 +573,6 @@ void CZipVfs::ReadStoredFileL(TInt aDataOffset,
     User::LeaveIfError(iArchive.Read(aDataOffset + aPosition, aBuffer, count));
     if (aBuffer.Length() != count)
         User::Leave(KErrEof);
-}
-
-const TDesC& CZipVfs::ArchivePath() const
-{
-    return iArchivePath;
-}
-
-const TDesC& CZipVfs::ProjectPrefix() const
-{
-    return iProjectPrefix ? static_cast<const TDesC&>(*iProjectPrefix) : KNullDesC();
 }
 
 TInt CZipVfs::EntryCount() const

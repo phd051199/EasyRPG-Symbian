@@ -42,20 +42,8 @@ RESOURCE MENU_PANE r_menu
         },
         MENU_ITEM
         {
-            command = EEasyRpgCmdLauncherDelete;
-            flags = EEikMenuItemDimmed;
-            txt = qtn_delete;
-        },
-        MENU_ITEM
-        {
             command = EEasyRpgCmdLauncherAbout;
             txt = qtn_about;
-        },
-        MENU_ITEM
-        {
-            command = EEasyRpgCmdLauncherHomepage;
-            flags = EEikMenuItemDimmed;
-            txt = qtn_homepage;
         },
         MENU_ITEM
         {

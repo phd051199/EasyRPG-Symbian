@@ -778,19 +778,6 @@ void CAudioMixer::ResetOutputQueue()
     iQueuedOutputBufferCount = 0;
 }
 
-void CAudioMixer::ClearAll()
-{
-    StopSe();
-    TInt bus;
-    for (bus = 0; bus < EStreamBusCount; ++bus)
-        ClearStream(static_cast<TStreamBus>(bus));
-}
-
-TInt CAudioMixer::CachedBytes() const
-{
-    return iCachedBytes;
-}
-
 void CAudioMixer::TrimCache(TInt aByteLimit)
 {
     if (aByteLimit < 0)
@@ -807,11 +794,6 @@ void CAudioMixer::TrimCache(TInt aByteLimit)
     }
 }
 
-TBool CAudioMixer::IsReady() const
-{
-    return iReady;
-}
-
 TInt CAudioMixer::ConsumeError()
 {
     const TInt error = iLastError;
@@ -822,11 +804,6 @@ TInt CAudioMixer::ConsumeError()
 TInt CAudioMixer::OutputSampleRate()
 {
     return KOutputSampleRate;
-}
-
-TInt CAudioMixer::OutputChannels()
-{
-    return KOutputChannels;
 }
 
 void CAudioMixer::MaoscOpenComplete(TInt aError)

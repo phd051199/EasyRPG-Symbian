@@ -37,8 +37,6 @@ public:
                          TInt aPosition,
                          TDes8& aBuffer) const;
 
-    const TDesC& ArchivePath() const;
-    const TDesC& ProjectPrefix() const;
     TInt EntryCount() const;
     void EntryRelativePathL(TInt aIndex, TDes& aPath) const;
 
@@ -74,7 +72,6 @@ private:
 private:
     RFs& iFs;
     RFile iArchive;
-    TFileName iArchivePath;
     HBufC* iProjectPrefix;
     HBufC8* iCentralDirectory;
     TInt iArchiveSize;
