@@ -83,6 +83,66 @@ void TestFullDependencyFallsBackToFullFrame()
     assert(SymbianRenderDamage::IsFullFrameDirty());
 }
 
+void TestFullPaintRebuildsCommandBaseline()
+{
+    const Rect rects[] = {
+        Rect(8, 8, 16, 16),
+        Rect(40, 40, 16, 16)
+    };
+    SeedFrame(rects, 2);
+
+    SymbianRenderDamage::BeginFullPaintRecord(320, 240);
+    SymbianRenderDamage::Record(100u, rects[0]);
+    SymbianRenderDamage::Record(101u, rects[1]);
+    SymbianRenderDamage::EndFullPaintRecord();
+    SymbianRenderDamage::ConsumeDamage();
+
+    RecordFrame(100u, rects, 2, false);
+    assert(SymbianRenderDamage::DirtyCount() == 0);
+}
+
+void TestLargeDamageEntersAdaptiveFullMode()
+{
+    const Rect full(0, 0, 320, 240);
+    SymbianRenderDamage::Reset();
+
+    SymbianRenderDamage::BeginRecord(320, 240);
+    SymbianRenderDamage::Record(100u, full);
+    SymbianRenderDamage::EndRecord();
+    SymbianRenderDamage::ConsumeDamage();
+
+    SymbianRenderDamage::BeginRecord(320, 240);
+    SymbianRenderDamage::Record(200u, full);
+    SymbianRenderDamage::EndRecord();
+    SymbianRenderDamage::ConsumeDamage();
+
+    SymbianRenderDamage::BeginRecord(320, 240);
+    SymbianRenderDamage::Record(300u, full);
+    SymbianRenderDamage::EndRecord();
+    assert(SymbianRenderDamage::UseAdaptiveFullPaint());
+}
+
+void TestFullPaintNestedRecordingSuppressed()
+{
+    const Rect outer(8, 8, 16, 16);
+    const Rect nested(12, 12, 8, 8);
+    SymbianRenderDamage::Reset();
+
+    SymbianRenderDamage::BeginFullPaintRecord(320, 240);
+    SymbianRenderDamage::Record(100u, outer);
+    {
+        SymbianRenderDamage::ScopedRecordSuppression suppress(true);
+        SymbianRenderDamage::Record(200u, nested);
+    }
+    SymbianRenderDamage::EndFullPaintRecord();
+    SymbianRenderDamage::ConsumeDamage();
+
+    SymbianRenderDamage::BeginRecord(320, 240);
+    SymbianRenderDamage::Record(100u, outer);
+    SymbianRenderDamage::EndRecord();
+    assert(SymbianRenderDamage::DirtyCount() == 0);
+}
+
 }
 
 int main()
@@ -91,5 +151,8 @@ int main()
     TestNearbyDamageUsesOnePaintRegion();
     TestScatteredDamageCapsPaintRegions();
     TestFullDependencyFallsBackToFullFrame();
+    TestFullPaintRebuildsCommandBaseline();
+    TestLargeDamageEntersAdaptiveFullMode();
+    TestFullPaintNestedRecordingSuppressed();
     return 0;
 }

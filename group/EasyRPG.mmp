@@ -4,21 +4,19 @@ UID               0x100039CE 0xE31EA5A1
 
 EPOCHEAPSIZE      0x40000 0x00800000
 EPOCSTACKSIZE     0x10000
-OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti
+OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti -mtune=arm1136jf-s
 MACRO             EASYRPG_LAUNCHER_PROCESS
 
-SOURCEPATH        ..\src\platform\symbian
+SOURCEPATH        ..\src\launcher
 SOURCE            Main.cpp
 SOURCE            Application.cpp
 SOURCE            Document.cpp
 SOURCE            AppUi.cpp
 SOURCE            LauncherView.cpp
+SOURCE            GameLaunchWatcher.cpp
 SOURCE            GameLocator.cpp
-SOURCE            GameMetadata.cpp
-SOURCE            ZipVfs.cpp
-SOURCE            Encoding.cpp
 
-SOURCEPATH        ..\platform\symbian\resources
+SOURCEPATH        ..\resources
 
 START RESOURCE    Resources.rss
 HEADER
@@ -31,8 +29,9 @@ TARGET            EasyRPG_reg
 TARGETPATH        \private\10003a3f\apps
 END
 
-USERINCLUDE       ..\inc
-USERINCLUDE       ..\platform\symbian\resources
+USERINCLUDE       ..\inc\launcher
+USERINCLUDE       ..\inc\shared
+USERINCLUDE       ..\resources
 SYSTEMINCLUDE     \epoc32\include
 SYSTEMINCLUDE     \epoc32\include\stdapis
 SYSTEMINCLUDE     \epoc32\include\libc
@@ -47,7 +46,6 @@ LIBRARY           eikctl.lib
 LIBRARY           avkon.lib
 LIBRARY           bafl.lib
 LIBRARY           efsrv.lib
-LIBRARY           charconv.lib
 LIBRARY           form.lib
 
 LANG              SC

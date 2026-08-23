@@ -15,6 +15,10 @@ const int KMaximumDirtyRegions = 2;
 const int KFullRedrawAreaPercent = 88;
 const int KDirtyRegionFixedCostDivisor = 4;
 const int KCommandResyncLookahead = 8;
+const int KAdaptiveEnterAreaPercent = 72;
+const int KAdaptiveEnterScore = 4;
+const int KAdaptiveScoreIncrease = 2;
+const int KAdaptiveFullFrames = 6;
 
 struct TCommand {
     unsigned int signature;
@@ -40,6 +44,10 @@ Rect gPaintRect;
 Rect gDirty[KDirtyCapacity];
 int gDirtyCount = 0;
 int gPaintRegion = -1;
+int gAdaptiveScore = 0;
+int gAdaptiveFullFrames = 0;
+bool gAdaptiveFullPaintActive = false;
+int gRecordSuppressionDepth = 0;
 
 int Area(const Rect& aRect) {
     return aRect.width > 0 && aRect.height > 0 ? aRect.width * aRect.height : 0;
@@ -179,6 +187,30 @@ void OptimizeDirty() {
         ForceFull();
 }
 
+void UpdateAdaptiveMode() {
+    const int frameArea = Area(gFrameRect);
+    if (frameArea <= 0) {
+        gAdaptiveScore = 0;
+        return;
+    }
+
+    const bool expensiveDamage =
+        (gDirtyCount == 1 && SameRect(gDirty[0], gFrameRect)) ||
+        DirtyArea() * 100 >= frameArea * KAdaptiveEnterAreaPercent;
+    if (expensiveDamage) {
+        gAdaptiveScore += KAdaptiveScoreIncrease;
+        if (gAdaptiveScore > KAdaptiveEnterScore)
+            gAdaptiveScore = KAdaptiveEnterScore;
+    } else if (gAdaptiveScore > 0) {
+        --gAdaptiveScore;
+    }
+
+    if (gAdaptiveScore >= KAdaptiveEnterScore) {
+        gAdaptiveFullFrames = KAdaptiveFullFrames;
+        gAdaptiveScore = KAdaptiveEnterScore / 2;
+    }
+}
+
 }
 
 namespace SymbianRenderDamage {
@@ -198,6 +230,10 @@ void Reset() {
     gScrollY = 0;
     gDirtyCount = 0;
     gPaintRegion = -1;
+    gAdaptiveScore = 0;
+    gAdaptiveFullFrames = 0;
+    gAdaptiveFullPaintActive = false;
+    gRecordSuppressionDepth = 0;
     gFrameRect = Rect();
     gPaintRect = Rect();
     gPaintClipRect = nullptr;
@@ -282,12 +318,41 @@ bool IsRecording() {
     return gPhase == ERecording;
 }
 
+bool UseAdaptiveFullPaint() {
+    if (gAdaptiveFullFrames <= 0)
+        return false;
+    --gAdaptiveFullFrames;
+    return true;
+}
+
+void SetAdaptiveFullPaintActive(bool aActive) {
+    gAdaptiveFullPaintActive = aActive;
+}
+
+bool AdaptiveFullPaintActive() {
+    return gAdaptiveFullPaintActive;
+}
+
+void PushRecordSuppression() {
+    ++gRecordSuppressionDepth;
+}
+
+void PopRecordSuppression() {
+    if (gRecordSuppressionDepth > 0)
+        --gRecordSuppressionDepth;
+}
+
+bool IsRecordSuppressed() {
+    return gRecordSuppressionDepth > 0;
+}
+
 bool IsFullPaintRecording() {
     return gPhase == EFullPaintRecording;
 }
 
 void Record(unsigned int aSignature, const Rect& aInput) {
-    if (gPhase != ERecording || gOverflow)
+    if (gRecordSuppressionDepth > 0 ||
+        (gPhase != ERecording && gPhase != EFullPaintRecording) || gOverflow)
         return;
 
     Rect rect = aInput;
@@ -394,6 +459,8 @@ void EndRecord() {
         OptimizeDirty();
     }
 
+    UpdateAdaptiveMode();
+
     if (gFullDependency && gDirtyCount > 0)
         ForceFull();
 
@@ -417,8 +484,16 @@ void EndFullPaintRecord() {
     if (gPhase != EFullPaintRecording)
         return;
 
-    gPreviousCount = 0;
-    gPreviousValid = false;
+    if (!gOverflow) {
+        TCommand* completed = gCurrent;
+        gCurrent = gPrevious;
+        gPrevious = completed;
+        gPreviousCount = gCurrentCount;
+        gPreviousValid = true;
+    } else {
+        gPreviousCount = 0;
+        gPreviousValid = false;
+    }
     gDamageValid = true;
     gPaintRegion = -1;
     gPaintClipRect = nullptr;

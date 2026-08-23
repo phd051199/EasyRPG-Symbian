@@ -168,6 +168,63 @@ bool HasStrongTcvn3Evidence(const Tcvn3Evidence& evidence) {
     return evidence.mapped_bytes >= 2u && HasTcvn3Evidence(evidence);
 }
 
+bool IsVietnameseLetter(unsigned int codepoint) {
+    return (codepoint >= 0x00c0u && codepoint <= 0x00c3u) ||
+           (codepoint >= 0x00c8u && codepoint <= 0x00cau) ||
+           (codepoint >= 0x00ccu && codepoint <= 0x00cdu) ||
+           (codepoint >= 0x00d2u && codepoint <= 0x00d5u) ||
+           (codepoint >= 0x00d9u && codepoint <= 0x00dau) ||
+           codepoint == 0x00ddu ||
+           (codepoint >= 0x00e0u && codepoint <= 0x00e3u) ||
+           (codepoint >= 0x00e8u && codepoint <= 0x00eau) ||
+           (codepoint >= 0x00ecu && codepoint <= 0x00edu) ||
+           (codepoint >= 0x00f2u && codepoint <= 0x00f5u) ||
+           (codepoint >= 0x00f9u && codepoint <= 0x00fau) ||
+           codepoint == 0x00fdu ||
+           (codepoint >= 0x0102u && codepoint <= 0x0103u) ||
+           (codepoint >= 0x0110u && codepoint <= 0x0111u) ||
+           (codepoint >= 0x0128u && codepoint <= 0x0129u) ||
+           (codepoint >= 0x0168u && codepoint <= 0x0169u) ||
+           (codepoint >= 0x01a0u && codepoint <= 0x01a1u) ||
+           (codepoint >= 0x01afu && codepoint <= 0x01b0u) ||
+           (codepoint >= 0x1ea0u && codepoint <= 0x1ef9u);
+}
+
+bool LooksLikeVietnameseLatinText(const std::string& input,
+                                  const Tcvn3Evidence& evidence) {
+    if (!HasTcvn3Evidence(evidence))
+        return false;
+
+    unsigned int letters = 0;
+    unsigned int vietnamese_letters = 0;
+    unsigned int spaces = 0;
+    for (std::string::size_type index = 0; index < input.size(); ++index) {
+        const unsigned char value = static_cast<unsigned char>(input[index]);
+        if (IsAsciiLetter(value)) {
+            ++letters;
+            continue;
+        }
+        if (value == ' ' || value == '\t') {
+            ++spaces;
+            continue;
+        }
+        const unsigned int codepoint = EasyRpgTcvn3DecodeByte(value);
+        if (IsVietnameseLetter(codepoint)) {
+            ++letters;
+            ++vietnamese_letters;
+            continue;
+        }
+        if ((value >= '0' && value <= '9') || value == '-' || value == '_' ||
+            value == '.' || value == ',' || value == ':' || value == ';' ||
+            value == '!' || value == '?' || value == '/' || value == '\\' ||
+            value == '(' || value == ')' || value == '[' || value == ']')
+            continue;
+        return false;
+    }
+    return vietnamese_letters != 0u && letters >= 3u &&
+           (spaces != 0u || evidence.mapped_bytes >= 2u);
+}
+
 MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
     const Tcvn3Evidence tcvn3 = InspectTcvn3(input);
     const Cp932Evidence cp932 = InspectCp932(input);
@@ -177,6 +234,8 @@ MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
     if (cp932.longest_multibyte_run >= 2u)
         return MixedLegacyEncoding::Cp932;
     if (HasStrongTcvn3Evidence(tcvn3))
+        return MixedLegacyEncoding::Tcvn3;
+    if (cp932.multibyte_chars <= 1u && LooksLikeVietnameseLatinText(input, tcvn3))
         return MixedLegacyEncoding::Tcvn3;
     if (cp932.multibyte_chars != 0u)
         return MixedLegacyEncoding::Cp932;
@@ -200,8 +259,6 @@ unsigned int CountTcvn3Lines(const std::string& input) {
     return tcvn3_lines;
 }
 
-// Vietnamese patches keep most strings Japanese; count lines the classifier
-// reads as TCVN3 instead of relying on ASCII letter ratios.
 bool IsMixedVietnameseSample(const std::string& input) {
     if (input.size() < 64u)
         return false;
@@ -450,7 +507,6 @@ void PushEncoding(std::vector<std::string>& encodings, const std::string& encodi
     encodings.push_back(encoding);
 }
 
-// Some patches translate only map dialogue, leaving the database Japanese.
 void AppendMapDetectionSamples(std::string& sample, const std::string& database_file) {
     if (sample.size() >= 65536u)
         return;
@@ -514,11 +570,6 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
     if (IsMixedVietnameseSample(detection_sample)) {
         PushEncoding(encodings, "EASYRPG_VI_CP932");
     }
-    if (getenv("EASYRPG_ENCODING_DEBUG")) {
-        fprintf(stderr, "[encdbg] ldb_sample=%zu full_sample=%zu tcvn3_lines=%u\n",
-                sample.size(), detection_sample.size(), CountTcvn3Lines(detection_sample));
-    }
-
     unsigned int codepage = 0;
     int confidence = 0;
     if (EasyRpgPlatformDetectLegacyEncoding(

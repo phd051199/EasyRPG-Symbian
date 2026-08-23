@@ -1,4 +1,4 @@
-#include "../../inc/AudioBridge.h"
+#include "AudioBridge.h"
 #include "audio.h"
 #include "output.h"
 
@@ -60,18 +60,6 @@ public:
 
     void BGM_Pitch(int pitch) override {
         EasyRpgAudioSetBgmPitch(pitch);
-    }
-
-    void SE_Preload(std::string const& file, int pitch) override {
-        const int result = EasyRpgAudioPreloadSe(file.c_str(), pitch);
-        if (result != 0)
-            Output::Warning("SE preload failed: %s (%d)", file.c_str(), result);
-    }
-
-    void SE_Warm(std::string const& file, int pitch) override {
-        const int result = EasyRpgAudioWarmSe(file.c_str(), pitch);
-        if (result != 0)
-            Output::Warning("SE warm failed: %s (%d)", file.c_str(), result);
     }
 
     void SE_Play(std::string const& file, int volume, int pitch) override {

@@ -1,0 +1,23 @@
+# Local game/test data
+/games/
+
+# Build/package outputs
+/build/
+/group/ABLD.BAT
+/sis/stage/
+/sis/*.sis
+
+# Local tooling state
+/.claude/
+/.code-review-graph/
+/.omc/
+/.agents/skills/symbian-s60-fp2-development/SKILL.md
+
+# Editor/OS/cache noise
+.DS_Store
+._*
+__pycache__/
+*.py[cod]
+*.swp
+*.swo
+*~

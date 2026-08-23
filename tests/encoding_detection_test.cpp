@@ -1,7 +1,3 @@
-// Host regression test for encoding detection. Run: bash tools/test_encoding_detection.sh
-// Exercises the real ReaderUtil::DetectEncodings/Recode against game data;
-// platform hooks (Symbian charconv) are stubbed.
-
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -61,9 +57,7 @@ std::string HexDump(const std::string& value) {
     return out;
 }
 
-// "Chào cậu, dạo này vẫn khỏe chứ?" in TCVN3.
 const char kVietnameseTcvn3[] = "Ch\xB5o c\xCBu, d\xB9o n\xB5y v\xC9n kh\xE1" "e ch\xF8?";
-// "こんにちは" in Shift-JIS.
 const char kJapaneseCp932[] = "\x82\xB1\x82\xF1\x82\xC9\x82\xBF\x82\xCD";
 
 void TestRecode() {
@@ -76,6 +70,15 @@ void TestRecode() {
     const std::string recoded_jp = ReaderUtil::Recode(japanese, "EASYRPG_VI_CP932");
     Check(recoded_jp == "\xE3\x81\x93\xE3\x82\x93\xE3\x81\xAB\xE3\x81\xA1\xE3\x81\xAF",
           "Mixed mode still decodes Japanese correctly");
+
+    Check(ReaderUtil::Recode("K\xFC n\xA8ng", "EASYRPG_VI_CP932") == "Kỹ năng",
+          "Short Vietnamese menu term: Kỹ năng");
+    Check(ReaderUtil::Recode("Sinh l\xF9" "c", "EASYRPG_VI_CP932") == "Sinh lực",
+          "Ambiguous TCVN3 byte pair does not become Shift-JIS: Sinh lực");
+    Check(ReaderUtil::Recode("Ma l\xF9" "c", "EASYRPG_VI_CP932") == "Ma lực",
+          "Ambiguous short Vietnamese term does not become Shift-JIS: Ma lực");
+    Check(ReaderUtil::Recode("HP\x8B\x5A", "EASYRPG_VI_CP932") == "HP技",
+          "Single Japanese glyph beside ASCII remains Shift-JIS");
     if (g_failures && !recoded_vn.empty()) {
         std::printf("    VN recode bytes: %s\n", HexDump(recoded_vn).c_str());
     }
@@ -102,7 +105,7 @@ int TestDetection(const char* game_dir, const char* expected_first, bool expect_
     return 0;
 }
 
-} // namespace
+}
 
 int main(int argc, char** argv) {
     if (argc < 2) {

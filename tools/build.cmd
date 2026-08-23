@@ -27,8 +27,8 @@ set "SIS_DIR=%PROJECT_DIR%\sis"
 set "PACKAGE_DEF=%SIS_DIR%\EasyRPG.pkg"
 set "STAGE_DIR=%SIS_DIR%\stage"
 set "DEVICE_EXE=EasyRPG.exe"
-set "RUNTIME_EXE=EasyRPGGame.exe"
-set "ICON_SOURCE=%PROJECT_DIR%\platform\symbian\resources\EasyRPG.svg"
+set "RUNTIME_EXE=EasyRPGPlayer.exe"
+set "ICON_SOURCE=%PROJECT_DIR%\resources\EasyRPG.svg"
 set "ICON_TARGET=%SDK_ROOT%\epoc32\data\z\resource\apps\EasyRPG.mif"
 set "ICON_TEMP=%PROJECT_DIR%\build\mif-temp"
 
@@ -114,6 +114,8 @@ set "RESULT=%ERRORLEVEL%"
 popd
 if not "%RESULT%"=="0" goto makesis_build_error
 if not exist "%SIS_OUTPUT%" goto makesis_output_error
+if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
+if exist "%GROUP_DIR%\ABLD.BAT" del /q "%GROUP_DIR%\ABLD.BAT" >nul 2>&1
 
 for %%F in ("%SIS_OUTPUT%") do echo SIS: %%~fF ^(%%~zF bytes^)
 echo Build completed.

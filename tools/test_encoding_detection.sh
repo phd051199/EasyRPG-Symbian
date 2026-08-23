@@ -50,7 +50,7 @@ done < <(find "$LIBLCF_GEN" -maxdepth 1 -type f -name '*.cpp' | sort)
 BIN="$WORK/encoding_detection_test"
 echo "Compiling host test (${#SOURCES[@]} sources)..."
 "$CXX" -std=c++11 -O0 -g \
-    -I "$LIBLCF_SRC" -I "$LIBLCF_GEN" -I "$GENERATED_DIR" -I "$PROJECT_DIR/inc" \
+    -I "$LIBLCF_SRC" -I "$LIBLCF_GEN" -I "$GENERATED_DIR" -I "$PROJECT_DIR/inc/core" \
     -o "$BIN" "${SOURCES[@]}"
 echo "Built $BIN"
 
@@ -80,12 +80,28 @@ run_case() {
     "$BIN" "$(dirname "$ldb"):$expect"
 }
 
+resolve_game_archive() {
+    local stem=$1
+    local plain="$PROJECT_DIR/games/$stem.zip"
+    local legacy="$PROJECT_DIR/games/$stem.store.zip"
+    if [[ -f $plain ]]; then
+        printf '%s\n' "$plain"
+        return
+    fi
+    if [[ -f $legacy ]]; then
+        printf '%s\n' "$legacy"
+        return
+    fi
+    echo "Missing game archive: $stem(.zip|.store.zip)" >&2
+    return 1
+}
+
 echo
 echo "=== Unit + real games (expect: VH = mixed; Doraemon II, WitchsHeart = Japanese) ==="
 STATUS=0
-run_case "games/Nobihaza VH.store.zip" "vh" "EASYRPG_VI_CP932:mixed" || STATUS=1
+run_case "$(resolve_game_archive 'Nobihaza VH')" "vh" "EASYRPG_VI_CP932:mixed" || STATUS=1
 # Doraemon II ships under the Nobihaza brand but contains no Vietnamese text.
-run_case "games/Nobihaza Code Doraemon II.store.zip" "doraemon2" "SHIFT_JIS:!mixed" || STATUS=1
-run_case "games/WitchsHeart203.store.zip" "witchheart" "SHIFT_JIS:!mixed" || STATUS=1
+run_case "$(resolve_game_archive 'Nobihaza Code Doraemon II')" "doraemon2" "SHIFT_JIS:!mixed" || STATUS=1
+run_case "$(resolve_game_archive 'WitchsHeart203')" "witchheart" "SHIFT_JIS:!mixed" || STATUS=1
 
 exit $STATUS

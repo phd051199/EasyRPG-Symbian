@@ -8,7 +8,7 @@
 [0x101F7961], 0, 0, 0, {"Series60ProductID"}
 
 "stage\EasyRPG.exe" - "!:\sys\bin\EasyRPG.exe"
-"stage\EasyRPGGame.exe" - "!:\sys\bin\EasyRPGGame.exe"
+"stage\EasyRPGPlayer.exe" - "!:\sys\bin\EasyRPGPlayer.exe"
 "stage\EasyRPG.rsc" - "!:\resource\apps\EasyRPG.rsc"
 "stage\EasyRPG.mif" - "!:\resource\apps\EasyRPG.mif"
 "stage\EasyRPG_reg.rsc" - "!:\private\10003a3f\import\apps\EasyRPG_reg.rsc"

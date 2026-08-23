@@ -113,5 +113,11 @@ if [[ $PROFILE != clean ]]; then
         bash "$PROJECT_DIR/tools/build_player.sh" "$PROFILE"
 fi
 
-exec "$WINE_BIN" cmd.exe /d /s /c \
-    "set EASYRPG_SYMBIAN_SDK_ROOT=${SDK_WINDOWS_ROOT}&& ${PROJECT_WINDOWS_ROOT}\\tools\\build.cmd ${PROFILE}"
+WINDOWS_BUILD_COMMAND="set EASYRPG_SYMBIAN_SDK_ROOT=${SDK_WINDOWS_ROOT}&& ${PROJECT_WINDOWS_ROOT}\\tools\\build.cmd ${PROFILE}"
+if [[ $PROFILE == clean ]]; then
+    "$WINE_BIN" cmd.exe /d /s /c "$WINDOWS_BUILD_COMMAND"
+    rm -rf "$PROJECT_DIR/build"
+    exit 0
+fi
+
+"$WINE_BIN" cmd.exe /d /s /c "$WINDOWS_BUILD_COMMAND"

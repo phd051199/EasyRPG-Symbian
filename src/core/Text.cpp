@@ -51,6 +51,8 @@ bool SkipTextDraw(Bitmap& aDestination, unsigned int aSignature, const Rect& aRe
         SymbianRenderDamage::Record(aSignature, aRect);
         return true;
     }
+    if (SymbianRenderDamage::IsFullPaintRecording())
+        SymbianRenderDamage::Record(aSignature, aRect);
     const Rect* paintClip = SymbianRenderDamage::PaintClipRect();
     return paintClip &&
         (aRect.x >= paintClip->x + paintClip->width || paintClip->x >= aRect.x + aRect.width ||
@@ -441,7 +443,7 @@ void Text::Draw(Bitmap& aDestination,
         return;
 
     unsigned int signature = 0;
-    if (SymbianRenderDamage::IsRecording())
+    if (SymbianRenderDamage::IsRecording() || SymbianRenderDamage::IsFullPaintRecording())
     {
         signature = SymbianRenderDamage::HashSeed(1);
         signature = HashValue(signature, reinterpret_cast<std::size_t>(font.get()));
@@ -454,6 +456,9 @@ void Text::Draw(Bitmap& aDestination,
     const Rect drawRect(lineX - 1, aY - 1, size.width + 2, size.height + 2);
     if (SkipTextDraw(aDestination, signature, drawRect))
         return;
+
+    SymbianRenderDamage::ScopedRecordSuppression suppressNestedRecording(
+        SymbianRenderDamage::IsFullPaintRecording());
 
     const std::u32string text = Utils::DecodeUTF32(aText);
     int x = lineX;
@@ -501,7 +506,7 @@ void Text::Draw(Bitmap& aDestination,
     FontRef font = aDestination.GetFont();
     Rect size = MeasureText(font, aText, false);
     unsigned int signature = 0;
-    if (SymbianRenderDamage::IsRecording())
+    if (SymbianRenderDamage::IsRecording() || SymbianRenderDamage::IsFullPaintRecording())
     {
         signature = SymbianRenderDamage::HashSeed(2);
         signature = HashValue(signature, reinterpret_cast<std::size_t>(font.get()));
@@ -514,6 +519,9 @@ void Text::Draw(Bitmap& aDestination,
     const Rect drawRect(aX - 1, aY - 1, size.width + 2, size.height + 2);
     if (SkipTextDraw(aDestination, signature, drawRect))
         return;
+
+    SymbianRenderDamage::ScopedRecordSuppression suppressNestedRecording(
+        SymbianRenderDamage::IsFullPaintRecording());
 
     const std::u32string text = Utils::DecodeUTF32(aText);
     int x = aX;

@@ -3,8 +3,14 @@ set -Eeuo pipefail
 
 PROFILE=${1:-build}
 case "$PROFILE" in
-    build) SDK_CFG=UREL ;;
-    debug) SDK_CFG=UDEB ;;
+    build)
+        SDK_CFG=UREL
+        PLAYER_OPT_FLAGS=(-O3 -DNDEBUG)
+        ;;
+    debug)
+        SDK_CFG=UDEB
+        PLAYER_OPT_FLAGS=(-O1)
+        ;;
     *) echo "Usage: build_player.sh [build|debug]" >&2; exit 2 ;;
 esac
 
@@ -337,7 +343,7 @@ for source in "${SOURCES[@]}"; do
     fi
     language_flag=-xc++
     standard_flag=-std=c++11
-    preinclude_flag="-include $PROJECT_DIR/inc/UpstreamCompat.h"
+    preinclude_flag="-include $PROJECT_DIR/inc/core/UpstreamCompat.h"
     pixman_define=
     if [[ $source == *.c ]]; then
         language_flag=-xc
@@ -355,8 +361,7 @@ for source in "${SOURCES[@]}"; do
         -fshort-wchar \
         $language_flag \
         $standard_flag \
-        -O3 \
-        -DNDEBUG \
+        "${PLAYER_OPT_FLAGS[@]}" \
         -fomit-frame-pointer \
         -ffreestanding \
         -fno-exceptions \
@@ -378,7 +383,9 @@ for source in "${SOURCES[@]}"; do
         -I "$LIBCXX_COMPAT_INCLUDE" \
         -I "$LIBCXX_ROOT" \
         -I "$PROJECT_DIR/inc/libc_compat" \
-        -I "$PROJECT_DIR/inc" \
+        -I "$PROJECT_DIR/inc/core" \
+        -I "$PROJECT_DIR/inc/player" \
+        -I "$PROJECT_DIR/inc/shared" \
         -I "$PLAYER_ROOT" \
         -I "$PIXMAN_ROOT" \
         -I "$LIBLCF_ROOT" \

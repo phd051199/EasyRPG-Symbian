@@ -5,6 +5,7 @@
 #include "audio.h"
 #include "baseui.h"
 #include "bitmap.h"
+#include "cache.h"
 #include "color.h"
 #include "filefinder.h"
 #include "graphics.h"
@@ -331,6 +332,12 @@ extern "C" void EasyRpgUpstreamPlayerRefreshAudio(void) {
     if (current.name.empty() || current.name == "(OFF)" || current.name == "(Brak)")
         return;
     Game_System::BgmPlay(current);
+}
+
+extern "C" int EasyRpgUpstreamPlayerTrimMemory(int pressure_level) {
+    if (gPlayerStarted && DisplayUi)
+        return Cache::TrimUnused(pressure_level);
+    return 0;
 }
 
 extern "C" int EasyRpgUpstreamPlayerDirtyRegionCount(void) {
