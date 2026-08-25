@@ -46,7 +46,7 @@ void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
     case EEasyRpgCmdLauncherAbout:
         {
             CAknInformationNote* note = new (ELeave) CAknInformationNote;
-            note->ExecuteLD(_L("EasyRPG for Symbian\nRPG Maker 2000/2003 player\nOriginal project: EasyRPG Team\nSymbian port: Duy Pham"));
+            note->ExecuteLD(_L("EasyRPG\nSymbian port: Duy Pham"));
         }
         break;
     case EEikCmdExit:

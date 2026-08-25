@@ -14,12 +14,6 @@ namespace
 {
 _LIT(KMovieTempBase, "movie");
 
-void CloseEasyRpgFile(TAny* aFile)
-{
-    if (aFile)
-        EasyRpgFclose(static_cast<FILE*>(aFile));
-}
-
 class CMovieBridge : public CBase,
                      public MVideoPlayerUtilityObserver
 {
@@ -55,8 +49,10 @@ public:
 
         if (EasyRpgIsVirtualPath(aPath))
         {
-            BuildTempPathL(aPath, iPath);
-            CopyFileL(aPath, iPath);
+            EasyRpgPaths::SpoolVirtualFileL(aPath,
+                                            EasyRpgApp::KMovieDirectorySuffix,
+                                            KMovieTempBase,
+                                            iPath);
             iDeleteFile = ETrue;
         }
         else
@@ -187,68 +183,6 @@ private:
         if (right <= left || bottom <= top)
             User::Leave(KErrArgument);
         return TRect(left, top, right, bottom);
-    }
-
-    void BuildTempPathL(const TDesC& aSource, TDes& aDestination)
-    {
-        RFs fs;
-        User::LeaveIfError(fs.Connect());
-        CleanupClosePushL(fs);
-        TFileName tempDirectory;
-        EasyRpgPaths::BuildL(tempDirectory, EasyRpgApp::KMovieDirectorySuffix);
-        const TInt directoryError = fs.MkDirAll(tempDirectory);
-        if (directoryError != KErrNone && directoryError != KErrAlreadyExists)
-            User::Leave(directoryError);
-
-        if (tempDirectory.Length() + KMovieTempBase().Length() > aDestination.MaxLength())
-            User::Leave(KErrOverflow);
-        aDestination.Copy(tempDirectory);
-        aDestination.Append(KMovieTempBase);
-        const TInt dot = aSource.LocateReverse('.');
-        if (dot >= 0 && aSource.Length() - dot <= 8)
-            aDestination.Append(aSource.Mid(dot));
-        CleanupStack::PopAndDestroy(&fs);
-    }
-
-    void CopyFileL(const TDesC& aSource, const TDesC& aDestination)
-    {
-        TBuf8<KMaxFileName * 4 + 1> path8;
-        TEncoding::UnicodeToUtf8CStringL(aSource, path8);
-
-        FILE* input = EasyRpgFopen(reinterpret_cast<const char*>(path8.Ptr()), "rb");
-        if (!input)
-            User::Leave(KErrNotFound);
-        CleanupStack::PushL(TCleanupItem(CloseEasyRpgFile, input));
-
-        RFs fs;
-        User::LeaveIfError(fs.Connect());
-        CleanupClosePushL(fs);
-
-        RFile output;
-        User::LeaveIfError(output.Replace(fs, aDestination, EFileWrite | EFileShareExclusive));
-        CleanupClosePushL(output);
-        TInt error = KErrNone;
-        TUint8 buffer[8192];
-        for (;;)
-        {
-            const size_t count = EasyRpgFread(buffer, 1, sizeof(buffer), input);
-            if (count == 0)
-                break;
-            const TPtrC8 chunk(buffer, static_cast<TInt>(count));
-            error = output.Write(chunk);
-            if (error != KErrNone)
-                break;
-        }
-        if (error == KErrNone && EasyRpgFerror(input))
-            error = KErrCorrupt;
-        if (error == KErrNone)
-            error = output.Flush();
-
-        CleanupStack::PopAndDestroy(&output);
-        CleanupStack::PopAndDestroy(&fs);
-        CleanupStack::PopAndDestroy();
-        if (error != KErrNone)
-            User::Leave(error);
     }
 
     void CleanupTempFile()

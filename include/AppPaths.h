@@ -35,6 +35,14 @@ inline void BuildL(TDes& aPath, const TDesC& aSuffix)
     User::LeaveIfError(Build(aPath, aSuffix));
 }
 
+// Spool a virtual (archive) file into a private temp file below the given
+// directory suffix so platform media players can open it by path.
+// Implemented in NativeAudio.cpp.
+void SpoolVirtualFileL(const TDesC& aVirtualSource,
+                       const TDesC& aDirectorySuffix,
+                       const TDesC& aBaseName,
+                       TDes& aSpoolPath);
+
 }
 
 #endif

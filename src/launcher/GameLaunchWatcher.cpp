@@ -32,6 +32,7 @@ CGameLaunchWatcher::CGameLaunchWatcher(CLauncherView& aOwner)
       iOwner(aOwner),
       iState(EIdle),
       iCreated(EFalse),
+      iResumed(EFalse),
       iFailureStage(ELaunchStageNone),
       iExitReason(0)
 {
@@ -86,6 +87,7 @@ void CGameLaunchWatcher::StartProcessL()
     iFailureStage = ELaunchStageCreate;
     User::LeaveIfError(iProcess.Create(iExecutablePath, iArchivePath));
     iCreated = ETrue;
+    iResumed = EFalse;
 
     iFailureStage = ELaunchStageRendezvous;
     iProcess.Rendezvous(iStatus);
@@ -97,6 +99,7 @@ void CGameLaunchWatcher::StartProcessL()
         iProcess.Kill(error);
         iProcess.Close();
         iCreated = EFalse;
+        iResumed = EFalse;
         User::Leave(error);
     }
 
@@ -105,6 +108,7 @@ void CGameLaunchWatcher::StartProcessL()
     iOwner.UpdateLoadingProgress(70);
     SetActive();
     iProcess.Resume();
+    iResumed = ETrue;
 }
 
 void CGameLaunchWatcher::RunL()
@@ -126,6 +130,7 @@ void CGameLaunchWatcher::RunL()
         iProcess.Close();
     }
     iCreated = EFalse;
+    iResumed = EFalse;
     iState = EIdle;
     iOwner.GameLaunchCompleted(error);
 }
@@ -134,9 +139,18 @@ TInt CGameLaunchWatcher::RunError(TInt aError)
 {
     if (iCreated)
     {
-        iProcess.Kill(aError);
+        if (iResumed)
+        {
+            iProcess.RendezvousCancel(iStatus);
+            User::WaitForRequest(iStatus);
+        }
+        else
+        {
+            iProcess.Kill(aError);
+        }
         iProcess.Close();
         iCreated = EFalse;
+        iResumed = EFalse;
     }
     iState = EIdle;
     iOwner.GameLaunchCompleted(aError);
@@ -145,12 +159,20 @@ TInt CGameLaunchWatcher::RunError(TInt aError)
 
 void CGameLaunchWatcher::DoCancel()
 {
-    if (iState == EWaitingForRuntime && iCreated)
+    if (iCreated)
     {
-        iProcess.Kill(KErrCancel);
-        User::WaitForRequest(iStatus);
+        if (iResumed)
+        {
+            iProcess.RendezvousCancel(iStatus);
+            User::WaitForRequest(iStatus);
+        }
+        else
+        {
+            iProcess.Kill(KErrCancel);
+        }
         iProcess.Close();
         iCreated = EFalse;
+        iResumed = EFalse;
     }
     iState = EIdle;
 }

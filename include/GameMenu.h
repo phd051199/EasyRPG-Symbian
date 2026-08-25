@@ -40,9 +40,6 @@ public:
     ~CGameMenu();
 
     TBool IsOpen() const;
-    TInt Selection() const;
-    TInt Volume() const;
-    TBool SoundEnabled() const;
     void OpenL();
     void CloseL();
     void ResetInputState();
@@ -89,6 +86,7 @@ private:
     TInt iSelection;
     TBool iLeftSoftHeld;
     TBool iRightSoftHeld;
+    TBool iRightSoftCaptured;
     TUint32 iHeldMenuKeys;
     TInt iVolume;
     TBool iSoundEnabled;

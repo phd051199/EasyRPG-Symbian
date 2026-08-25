@@ -39,7 +39,7 @@ SOURCES=(
     "$LIBLCF_SRC/reader_flags.cpp"
     "$LIBLCF_SRC/writer_lcf.cpp"
     "$LIBLCF_SRC/writer_xml.cpp"
-    "$GENERATED_DIR/reader_struct.cpp"
+    "$LIBLCF_SRC/reader_struct.cpp"
     "$GENERATED_DIR/CoreCp932Table.cpp"
     "$GENERATED_DIR/CoreGbkTable.cpp"
     "$PROJECT_DIR/src/core/CharsetDetector.cpp"

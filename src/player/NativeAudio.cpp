@@ -57,59 +57,65 @@ void CloseEasyRpgAudioFile(TAny* aFile)
     if (aFile)
         EasyRpgFclose(static_cast<FILE*>(aFile));
 }
+}
 
-void BuildAudioTempPathL(const TDesC& aSource, const TAny* aOwner, TDes& aPath)
+void EasyRpgPaths::SpoolVirtualFileL(const TDesC& aVirtualSource,
+                                     const TDesC& aDirectorySuffix,
+                                     const TDesC& aBaseName,
+                                     TDes& aSpoolPath)
 {
     RFs fs;
     User::LeaveIfError(fs.Connect());
     CleanupClosePushL(fs);
     TFileName directory;
-    EasyRpgPaths::BuildL(directory, EasyRpgApp::KAudioDirectorySuffix);
+    EasyRpgPaths::BuildL(directory, aDirectorySuffix);
     const TInt mkdirError = fs.MkDirAll(directory);
     if (mkdirError != KErrNone && mkdirError != KErrAlreadyExists)
         User::Leave(mkdirError);
 
-    TBuf<32> base;
-    base.Format(_L("audio_%08x"), static_cast<TUint>(reinterpret_cast<unsigned long>(aOwner)));
-    if (directory.Length() + base.Length() + 8 > aPath.MaxLength())
+    if (directory.Length() + aBaseName.Length() + 8 > aSpoolPath.MaxLength())
         User::Leave(KErrOverflow);
-    aPath.Copy(directory);
-    aPath.Append(base);
-    const TInt dot = aSource.LocateReverse('.');
-    if (dot >= 0 && aSource.Length() - dot <= 8)
-        aPath.Append(aSource.Mid(dot));
-    CleanupStack::PopAndDestroy(&fs);
-}
+    aSpoolPath.Copy(directory);
+    aSpoolPath.Append(aBaseName);
+    const TInt dot = aVirtualSource.LocateReverse('.');
+    if (dot >= 0 && aVirtualSource.Length() - dot <= 8)
+        aSpoolPath.Append(aVirtualSource.Mid(dot));
 
-void CopyVirtualAudioFileL(const TDesC& aSource, const TDesC& aDestination)
-{
     TBuf8<KMaxFileName * 4 + 1> path8;
-    TEncoding::UnicodeToUtf8CStringL(aSource, path8);
+    TEncoding::UnicodeToUtf8CStringL(aVirtualSource, path8);
     FILE* input = EasyRpgFopen(reinterpret_cast<const char*>(path8.Ptr()), "rb");
     if (!input)
         User::Leave(KErrNotFound);
     CleanupStack::PushL(TCleanupItem(CloseEasyRpgAudioFile, input));
 
-    RFs fs;
-    User::LeaveIfError(fs.Connect());
-    CleanupClosePushL(fs);
     RFile output;
-    User::LeaveIfError(output.Replace(fs, aDestination, EFileWrite | EFileShareExclusive));
+    User::LeaveIfError(output.Replace(fs, aSpoolPath, EFileWrite | EFileShareExclusive));
     CleanupClosePushL(output);
-
+    TInt error = KErrNone;
     TUint8 buffer[8192];
     for (;;)
     {
         const size_t count = EasyRpgFread(buffer, 1, sizeof(buffer), input);
         if (count == 0)
             break;
-        User::LeaveIfError(output.Write(TPtrC8(buffer, static_cast<TInt>(count))));
+        error = output.Write(TPtrC8(buffer, static_cast<TInt>(count)));
+        if (error != KErrNone)
+            break;
     }
+    if (error == KErrNone && EasyRpgFerror(input))
+        error = KErrCorrupt;
+    if (error == KErrNone)
+        error = output.Flush();
 
     CleanupStack::PopAndDestroy(&output);
-    CleanupStack::PopAndDestroy(&fs);
     CleanupStack::PopAndDestroy();
+    CleanupStack::PopAndDestroy(&fs);
+    if (error != KErrNone)
+        User::Leave(error);
 }
+
+namespace
+{
 
 class CNativeBgmPlayer;
 class CNativeSeVoice;
@@ -187,8 +193,9 @@ public:
         else
         {
             DeleteCachedVirtualFile();
-            BuildAudioTempPathL(aPath, this, tempPath);
-            CopyVirtualAudioFileL(aPath, tempPath);
+            TBuf<32> base;
+            base.Format(_L("audio_%08x"), static_cast<TUint>(reinterpret_cast<unsigned long>(this)));
+            EasyRpgPaths::SpoolVirtualFileL(aPath, EasyRpgApp::KAudioDirectorySuffix, base, tempPath);
             iCachedVirtualSource.Copy(aPath);
             iCachedVirtualPath.Copy(tempPath);
         }
@@ -196,34 +203,6 @@ public:
         if (error != KErrNone)
         {
             DeleteCachedVirtualFile();
-            User::Leave(error);
-        }
-    }
-
-    void PlaySampledDesL(HBufC8* aData, TInt aVolume, TInt aFadeIn, TBool aRepeat = ETrue)
-    {
-        if (!aData || aData->Length() == 0)
-        {
-            delete aData;
-            User::Leave(KErrArgument);
-        }
-        Stop();
-        if (!iAudio)
-            iAudio = CMdaAudioPlayerUtility::NewL(*this,
-                                                  EMdaPriorityNormal,
-                                                  EMdaPriorityPreferenceTime);
-        iSource = aData;
-        iActive = ETrue;
-        iVolume = TNativeAudio::ClampVolume(aVolume);
-        iFadeIn = aFadeIn;
-        iRepeat = aRepeat;
-        iLastPosition = 0;
-        iLoopCount = 0;
-        iPending = ETrue;
-        TRAPD(error, iAudio->OpenDesL(*iSource));
-        if (error != KErrNone)
-        {
-            Stop();
             User::Leave(error);
         }
     }

@@ -46,7 +46,6 @@ WIN_BUILD_DIR="C:\\work\\EasyRPG\\build\\player\\$SDK_CFG"
 GENERATED_DIR="$PROJECT_DIR/build/generated"
 GENERATED_CP932="$GENERATED_DIR/CoreCp932Table.cpp"
 GENERATED_GBK="$GENERATED_DIR/CoreGbkTable.cpp"
-GENERATED_READER_STRUCT="$GENERATED_DIR/reader_struct.cpp"
 WORK_ROOT="$PROJECT_DIR/build/work/third-party"
 LIBLCF_ROOT="$WORK_ROOT/liblcf-0.5.0/src"
 LIBLCF_GENERATED_ROOT="$LIBLCF_ROOT/generated"
@@ -82,7 +81,7 @@ SOURCES=(
     "$LIBLCF_ROOT/reader_flags.cpp"
     "$LIBLCF_ROOT/writer_lcf.cpp"
     "$LIBLCF_ROOT/writer_xml.cpp"
-    "$GENERATED_READER_STRUCT"
+    "$LIBLCF_ROOT/reader_struct.cpp"
     "$PROJECT_DIR/src/core/LibcxxSharedPtrRuntime.cpp"
     "$PROJECT_DIR/src/core/CharsetDetector.cpp"
     "$PROJECT_DIR/src/core/EncodingPipeline.cpp"
@@ -303,7 +302,6 @@ fi
 mkdir -p "$BUILD_DIR" "$SDK_LIBRARY_DIR" "$GENERATED_DIR"
 python3 "$PROJECT_DIR/tools/generate_cp932_table.py" --output "$GENERATED_CP932"
 python3 "$PROJECT_DIR/tools/generate_gbk_table.py" --output "$GENERATED_GBK"
-python3 "$PROJECT_DIR/tools/generate_reader_struct.py" "$GENERATED_READER_STRUCT"
 rm -f "$LIBRARY"
 
 objects=()
@@ -349,7 +347,7 @@ for source in "${SOURCES[@]}"; do
             $source == "$PROJECT_DIR/src/core/Text.cpp" ||
             $source == "$PROJECT_DIR/src/core/Font.cpp" ]]; then
         source_define="-DUSE_SDL -DNO_SDL_MIXER -DEASYRPG_SYMBIAN $stdio_read_define"
-    elif [[ $source == "$LIBLCF_ROOT/"* || $source == "$GENERATED_READER_STRUCT" ]]; then
+    elif [[ $source == "$LIBLCF_ROOT/"* ]]; then
         source_define="$stdio_read_define"
     fi
     language_flag=-xc++

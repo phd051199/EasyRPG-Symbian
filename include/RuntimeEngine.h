@@ -80,8 +80,6 @@ private:
     TThreadPriority iPreviousThreadPriority;
     TInt iFrameError;
     TInt iMemoryPressureLevel;
-    TUint32 iNextMemoryTrimFrame;
-    TUint32 iNextHeapCompressFrame;
 };
 
 #endif

@@ -1,67 +1,17 @@
 #include <hal.h>
 #include <hal_data.h>
 
+#include "GohuFont.h"
 #include "PerfOverlay.h"
 
 namespace
 {
 const TInt KOverlayWidth = 104;
-const TInt KOverlayHeight = 19;
+const TInt KOverlayHeight = 26;
 const TInt KSampleIntervalUs = 1000000;
 const TUint16 KTextColor = 0xffffu;
-
-const TUint8 KGlyph0[7] = {14, 17, 19, 21, 25, 17, 14};
-const TUint8 KGlyph1[7] = {4, 12, 4, 4, 4, 4, 14};
-const TUint8 KGlyph2[7] = {14, 17, 1, 2, 4, 8, 31};
-const TUint8 KGlyph3[7] = {30, 1, 1, 14, 1, 1, 30};
-const TUint8 KGlyph4[7] = {2, 6, 10, 18, 31, 2, 2};
-const TUint8 KGlyph5[7] = {31, 16, 16, 30, 1, 1, 30};
-const TUint8 KGlyph6[7] = {14, 16, 16, 30, 17, 17, 14};
-const TUint8 KGlyph7[7] = {31, 1, 2, 4, 8, 8, 8};
-const TUint8 KGlyph8[7] = {14, 17, 17, 14, 17, 17, 14};
-const TUint8 KGlyph9[7] = {14, 17, 17, 15, 1, 1, 14};
-const TUint8 KGlyphA[7] = {14, 17, 17, 31, 17, 17, 17};
-const TUint8 KGlyphC[7] = {14, 17, 16, 16, 16, 17, 14};
-const TUint8 KGlyphF[7] = {31, 16, 16, 30, 16, 16, 16};
-const TUint8 KGlyphM[7] = {17, 27, 21, 21, 17, 17, 17};
-const TUint8 KGlyphP[7] = {30, 17, 17, 30, 16, 16, 16};
-const TUint8 KGlyphR[7] = {30, 17, 17, 30, 20, 18, 17};
-const TUint8 KGlyphS[7] = {15, 16, 16, 14, 1, 1, 30};
-const TUint8 KGlyphU[7] = {17, 17, 17, 17, 17, 17, 14};
-const TUint8 KGlyphPercent[7] = {25, 25, 2, 4, 8, 19, 19};
-const TUint8 KGlyphDot[7] = {0, 0, 0, 0, 0, 6, 6};
-const TUint8 KGlyphDash[7] = {0, 0, 0, 14, 0, 0, 0};
-const TUint8 KGlyphSlash[7] = {1, 1, 2, 4, 8, 16, 16};
-
-const TUint8* GlyphData(TUint8 aCharacter)
-{
-    switch (aCharacter)
-    {
-    case '0': return KGlyph0;
-    case '1': return KGlyph1;
-    case '2': return KGlyph2;
-    case '3': return KGlyph3;
-    case '4': return KGlyph4;
-    case '5': return KGlyph5;
-    case '6': return KGlyph6;
-    case '7': return KGlyph7;
-    case '8': return KGlyph8;
-    case '9': return KGlyph9;
-    case 'A': return KGlyphA;
-    case 'C': return KGlyphC;
-    case 'F': return KGlyphF;
-    case 'M': return KGlyphM;
-    case 'P': return KGlyphP;
-    case 'R': return KGlyphR;
-    case 'S': return KGlyphS;
-    case 'U': return KGlyphU;
-    case '%': return KGlyphPercent;
-    case '.': return KGlyphDot;
-    case '-': return KGlyphDash;
-    case '/': return KGlyphSlash;
-    default: return NULL;
-    }
-}
+const TInt KGlyphWidth = 6;
+const TInt KGlyphHeight = 11;
 }
 
 CPerfOverlay* CPerfOverlay::NewL()
@@ -75,7 +25,6 @@ CPerfOverlay* CPerfOverlay::NewL()
 
 CPerfOverlay::CPerfOverlay()
     : iBitmap(NULL),
-      iPixels(NULL),
       iCounterPeriodUs(0),
       iUseNanoCounter(ETrue),
       iCpuAvailable(EFalse),
@@ -94,8 +43,6 @@ void CPerfOverlay::ConstructL()
 {
     iBitmap = new (ELeave) CFbsBitmap;
     User::LeaveIfError(iBitmap->Create(TSize(KOverlayWidth, KOverlayHeight), EColor64K));
-    iPixels = HBufC8::NewL(KOverlayWidth * KOverlayHeight * 2);
-    iPixels->Des().SetLength(KOverlayWidth * KOverlayHeight * 2);
 
     TInt period = 0;
     if (HAL::Get(HALData::ENanoTickPeriod, period) == KErrNone && period > 0)
@@ -133,8 +80,6 @@ void CPerfOverlay::ConstructL()
 CPerfOverlay::~CPerfOverlay()
 {
     iThread.Close();
-    delete iPixels;
-    iPixels = NULL;
     delete iBitmap;
     iBitmap = NULL;
 }
@@ -214,7 +159,7 @@ void CPerfOverlay::Compose(const CFbsBitmap& aFrameBitmap,
                            TInt aX,
                            TInt aY)
 {
-    if (!iBitmap || !iPixels)
+    if (!iBitmap)
         return;
 
     const TSize frameSize = aFrameBitmap.SizeInPixels();
@@ -223,52 +168,24 @@ void CPerfOverlay::Compose(const CFbsBitmap& aFrameBitmap,
         aY + KOverlayHeight > frameSize.iHeight)
         return;
 
-    TUint8* pixels = const_cast<TUint8*>(iPixels->Ptr());
-    const TInt stride = KOverlayWidth * 2;
+    // One shared FBS heap lock covers both bitmaps' addresses: copy the
+    // frame backdrop straight into the overlay bitmap and draw on top,
+    // with no intermediate staging buffer.
     aFrameBitmap.LockHeap();
+    TUint8* overlayPixels = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
     const TUint8* framePixels = reinterpret_cast<const TUint8*>(aFrameBitmap.DataAddress());
+    const TInt overlayStride = iBitmap->DataStride();
     const TInt frameStride = aFrameBitmap.DataStride();
-    if (!framePixels || frameStride <= 0)
-    {
-        aFrameBitmap.UnlockHeap();
-        return;
-    }
-    for (TInt y = 0; y < KOverlayHeight; ++y)
-    {
-        Mem::Copy(pixels + y * stride,
-                  framePixels + (aY + y) * frameStride + aX * 2,
-                  stride);
-    }
-    aFrameBitmap.UnlockHeap();
-
-    DrawMetrics();
-
-    iBitmap->LockHeap();
-    TUint8* bitmapPixels = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
-    const TInt bitmapStride = iBitmap->DataStride();
-    if (bitmapPixels && bitmapStride > 0)
+    if (overlayPixels && framePixels && overlayStride > 0 && frameStride > 0)
     {
         for (TInt y = 0; y < KOverlayHeight; ++y)
-            Mem::Copy(bitmapPixels + y * bitmapStride, pixels + y * stride, stride);
+        {
+            Mem::Copy(overlayPixels + y * overlayStride,
+                      framePixels + (aY + y) * frameStride + aX * 2,
+                      KOverlayWidth * 2);
+        }
+        DrawMetricsTo(overlayPixels, overlayStride, 0, 0);
     }
-    iBitmap->UnlockHeap();
-}
-
-void CPerfOverlay::DrawInPlace(CFbsBitmap& aFrameBitmap,
-                               TInt aX,
-                               TInt aY)
-{
-    const TSize frameSize = aFrameBitmap.SizeInPixels();
-    if (aX < 0 || aY < 0 ||
-        aX + KOverlayWidth > frameSize.iWidth ||
-        aY + KOverlayHeight > frameSize.iHeight)
-        return;
-
-    aFrameBitmap.LockHeap();
-    TUint8* framePixels = reinterpret_cast<TUint8*>(aFrameBitmap.DataAddress());
-    const TInt frameStride = aFrameBitmap.DataStride();
-    if (framePixels && frameStride > 0)
-        DrawMetricsTo(framePixels, frameStride, aX, aY);
     aFrameBitmap.UnlockHeap();
 }
 
@@ -303,13 +220,6 @@ void CPerfOverlay::ReadRam()
     }
 }
 
-void CPerfOverlay::DrawMetrics()
-{
-    if (!iPixels)
-        return;
-    DrawMetricsTo(const_cast<TUint8*>(iPixels->Ptr()), KOverlayWidth * 2, 0, 0);
-}
-
 void CPerfOverlay::DrawMetricsTo(TUint8* aPixels,
                                  TInt aStride,
                                  TInt aX,
@@ -338,15 +248,7 @@ void CPerfOverlay::DrawMetricsTo(TUint8* aPixels,
     {
         line.Copy(_L8("RAM --.-/--.-M"));
     }
-    DrawText(aPixels, aStride, aX + 2, aY + 10, line);
-}
-
-TUint8 CPerfOverlay::GlyphRow(TUint8 aCharacter, TInt aRow)
-{
-    if (aRow < 0 || aRow >= 7)
-        return 0;
-    const TUint8* glyph = GlyphData(aCharacter);
-    return glyph ? glyph[aRow] : 0;
+    DrawText(aPixels, aStride, aX + 2, aY + 15, line);
 }
 
 void CPerfOverlay::DrawText(TUint8* aPixels,
@@ -360,14 +262,17 @@ void CPerfOverlay::DrawText(TUint8* aPixels,
         const TUint8 character = aText[index];
         if (character == ' ')
             continue;
-        for (TInt row = 0; row < 7; ++row)
+        const TUint8* rows = EasyRpgGohuGlyphRows(character);
+        if (!rows)
+            continue;
+        for (TInt row = 0; row < KGlyphHeight; ++row)
         {
-            const TUint8 bits = GlyphRow(character, row);
+            const TUint8 bits = rows[row];
             TUint16* destination = reinterpret_cast<TUint16*>(
-                aPixels + (aY + row) * aStride) + aX + index * 6;
-            for (TInt column = 0; column < 5; ++column)
+                aPixels + (aY + row) * aStride) + aX + index * KGlyphWidth;
+            for (TInt column = 0; column < KGlyphWidth; ++column)
             {
-                if ((bits & (1u << (4 - column))) != 0)
+                if ((bits & (1u << column)) != 0)
                     destination[column] = KTextColor;
             }
         }

@@ -122,7 +122,7 @@ void PushInitialGameScene() {
     if (!tree)
         Output::Error("%s is not a valid path", Main_Data::GetProjectPath().c_str());
 
-    if (!tree || !FileFinder::IsValidProject(*tree)) {
+    if (!FileFinder::IsValidProject(*tree)) {
         Scene::Push(std::make_shared<Scene_GameBrowser>());
         return;
     }
@@ -341,6 +341,12 @@ extern "C" void EasyRpgUpstreamPlayerRefreshAudio(void) {
 extern "C" int EasyRpgUpstreamPlayerTrimMemory(int pressure_level) {
     if (gPlayerStarted && DisplayUi)
         return Cache::TrimUnused(pressure_level);
+    return 0;
+}
+
+extern "C" int EasyRpgUpstreamPlayerIdleMaintenance(int pressure_level) {
+    if (gPlayerStarted && DisplayUi)
+        return Cache::TrimUnusedIdle(pressure_level);
     return 0;
 }
 

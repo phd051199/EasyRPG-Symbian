@@ -25,8 +25,12 @@ int EasyRpgUpstreamPlayerTick(unsigned int ticks,
 int EasyRpgUpstreamPlayerShouldRender(void);
 void EasyRpgUpstreamPlayerRefreshAudio(void);
 int EasyRpgUpstreamPlayerTrimMemory(int pressure_level);
+int EasyRpgUpstreamPlayerIdleMaintenance(int pressure_level);
 int EasyRpgPlatformFreeRamBytes(void);
 int EasyRpgPlatformPrepareAllocation(int bytes);
+unsigned int EasyRpgPlatformFastCounter(void);
+unsigned int EasyRpgPlatformFastCounterFrequency(void);
+int EasyRpgPlatformFastCounterCountsUp(void);
 enum EasyRpgDirectImageFormat
 {
     EEasyRpgDirectImageNone = 0,

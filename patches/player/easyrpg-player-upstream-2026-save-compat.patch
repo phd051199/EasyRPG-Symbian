@@ -1,0 +1,50 @@
+--- a/src/game_map.h
++++ b/src/game_map.h
+@@ -566,7 +566,7 @@
+ 	 *
+ 	 * @param id new chipset ID.
+ 	 */
+-	void SetChipset(int id);
++	void SetChipset(int id, bool reset_substitutions = true);
+ 
+ 	Game_Vehicle* GetVehicle(Game_Vehicle::Type which);
+ 	void SubstituteDown(int old_id, int new_id);
+--- a/src/game_map.cpp
++++ b/src/game_map.cpp
+@@ -490,7 +490,11 @@
+ 			pending.push_back(vehicles[i].get());
+ 
+ 	map_info.Fixup(*map.get());
+-	SetChipset(map_info.chipset_id);
++	if (Player::IsRPG2k3E()) {
++		SetChipset(map_info.chipset_id, false);
++	} else {
++		SetChipset(map->chipset_id);
++	}
+ 
+ 	pan_locked = location.pan_state == 0;
+ 	pan_speed = 0;
+@@ -1689,7 +1693,7 @@
+ 	return "";
+ }
+ 
+-void Game_Map::SetChipset(int id) {
++void Game_Map::SetChipset(int id, bool reset_substitutions) {
+ 	map_info.chipset_id = id;
+ 	RPG::Chipset &chipset = Data::chipsets[map_info.chipset_id - 1];
+ 	chipset_name = chipset.chipset_name;
+@@ -1701,9 +1705,11 @@
+ 		passages_down.resize(162, (unsigned char) 0x0F);
+ 	if (passages_up.size() < 144)
+ 		passages_up.resize(144, (unsigned char) 0x0F);
+-	for (uint8_t i = 0; i < 144; i++) {
+-		map_info.lower_tiles[i] = i;
+-		map_info.upper_tiles[i] = i;
++	if (reset_substitutions) {
++		for (uint8_t i = 0; i < 144; i++) {
++			map_info.lower_tiles[i] = i;
++			map_info.upper_tiles[i] = i;
++		}
+ 	}
+ }
+ 

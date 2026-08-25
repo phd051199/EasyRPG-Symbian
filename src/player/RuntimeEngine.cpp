@@ -43,6 +43,21 @@ TBool RectsOverlap(const TRect& aFirst, const TRect& aSecond)
         aSecond.iTl.iY < aFirst.iBr.iY;
 }
 
+TRect ShiftedRect(const TRect& aRect, TInt aShiftX, TInt aShiftY)
+{
+    return TRect(aRect.iTl + TPoint(aShiftX, aShiftY),
+                 aRect.iBr + TPoint(aShiftX, aShiftY));
+}
+
+TBool ClipRect(TRect& aRect, const TRect& aBounds)
+{
+    aRect.iTl.iX = Max(aRect.iTl.iX, aBounds.iTl.iX);
+    aRect.iTl.iY = Max(aRect.iTl.iY, aBounds.iTl.iY);
+    aRect.iBr.iX = Min(aRect.iBr.iX, aBounds.iBr.iX);
+    aRect.iBr.iY = Min(aRect.iBr.iY, aBounds.iBr.iY);
+    return aRect.iBr.iX > aRect.iTl.iX && aRect.iBr.iY > aRect.iTl.iY;
+}
+
 TBool IsShutdownSystemEvent(const TWsEvent& aEvent)
 {
     const TInt type = aEvent.Type();
@@ -147,6 +162,9 @@ public:
         if (!iAccess || iActive)
             return;
         iAccess->StartL();
+        CFbsScreenDevice* screen = iAccess->ScreenDevice();
+        if (screen)
+            screen->SetAutoUpdate(EFalse);
         iActive = ETrue;
     }
 
@@ -196,6 +214,12 @@ private:
     void Restart(RDirectScreenAccess::TTerminationReasons)
     {
         TRAPD(error, iAccess->StartL());
+        if (error == KErrNone)
+        {
+            CFbsScreenDevice* screen = iAccess->ScreenDevice();
+            if (screen)
+                screen->SetAutoUpdate(EFalse);
+        }
         iActive = error == KErrNone;
     }
 
@@ -238,9 +262,7 @@ CRuntimeEngine::CRuntimeEngine()
       iGameplayPriorityRaised(EFalse),
       iPreviousThreadPriority(EPriorityNormal),
       iFrameError(KErrNone),
-      iMemoryPressureLevel(0),
-      iNextMemoryTrimFrame(0),
-      iNextHeapCompressFrame(0)
+      iMemoryPressureLevel(0)
 {
 }
 
@@ -403,16 +425,19 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
     }
 
     TBool fullScreenUpdate = EFalse;
+    TBool fullGameUpdate = EFalse;
     TRegionFix<EasyRpgPlayerConfig::KMaximumScreenUpdateRegions> updateRegion;
     const CFbsBitmap& frameBitmap = iDisplaySurface->Bitmap();
     frameBitmap.Begin();
 
-    if (aForceFull || iNeedsFullRedraw)
+    const TBool menuOpen = iGameMenu && iGameMenu->IsOpen();
+    if (aForceFull || iNeedsFullRedraw || menuOpen)
     {
         gc->BitBlt(destination,
                    &frameBitmap,
                    TRect(TPoint(0, 0), bitmapSize));
         updateRegion.AddRect(TRect(destination, bitmapSize));
+        fullGameUpdate = ETrue;
         iDisplaySurface->ClearDirtyRegions();
         iNeedsFullRedraw = EFalse;
         overlayNeedsDraw = iPerfOverlay != NULL;
@@ -422,11 +447,60 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
         const TBool presentScroll = iDisplaySurface->HasPresentScroll();
         if (presentScroll)
         {
-            gc->BitBlt(destination,
-                       &frameBitmap,
-                       TRect(TPoint(0, 0), bitmapSize));
+            TInt shiftX = 0;
+            TInt shiftY = 0;
+            iDisplaySurface->PresentScroll(shiftX, shiftY);
+            const TInt absShiftX = Abs(shiftX);
+            const TInt absShiftY = Abs(shiftY);
+            if (absShiftX >= bitmapSize.iWidth || absShiftY >= bitmapSize.iHeight)
+            {
+                gc->BitBlt(destination,
+                           &frameBitmap,
+                           TRect(TPoint(0, 0), bitmapSize));
+                fullGameUpdate = ETrue;
+            }
+            else
+            {
+                TRect copySource(TPoint(0, 0), bitmapSize);
+                if (shiftX > 0)
+                    copySource.iBr.iX -= shiftX;
+                else if (shiftX < 0)
+                    copySource.iTl.iX -= shiftX;
+                if (shiftY > 0)
+                    copySource.iBr.iY -= shiftY;
+                else if (shiftY < 0)
+                    copySource.iTl.iY -= shiftY;
+
+                gc->CopyRect(TPoint(shiftX, shiftY),
+                             TRect(destination + copySource.iTl, copySource.Size()));
+
+                const TInt dirtyCount = iDisplaySurface->DirtyRegionCount();
+                for (TInt index = 0; index < dirtyCount; ++index)
+                {
+                    const TRect& dirty = iDisplaySurface->DirtyRegion(index);
+                    gc->BitBlt(destination + dirty.iTl,
+                               &frameBitmap,
+                               dirty);
+                }
+
+                if (iPerfOverlay)
+                {
+                    // The scroll copy moved the old overlay pixels; restore the
+                    // frame underneath and let the tail below redraw the overlay
+                    // at its anchored position. Recomposing the small overlay
+                    // bitmap each scroll frame is cheaper than clipping the
+                    // CopyRect around it.
+                    TRect shiftedOverlay = ShiftedRect(overlayRect, shiftX, shiftY);
+                    const TRect frameRect(TPoint(0, 0), bitmapSize);
+                    if (ClipRect(shiftedOverlay, frameRect))
+                        gc->BitBlt(destination + shiftedOverlay.iTl,
+                                   &frameBitmap,
+                                   shiftedOverlay);
+                    overlayNeedsDraw = ETrue;
+                }
+            }
             updateRegion.AddRect(TRect(destination, bitmapSize));
-            overlayNeedsDraw = iPerfOverlay != NULL;
+            fullGameUpdate = ETrue;
         }
         else
         {
@@ -459,7 +533,8 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
                    &overlayBitmap,
                    TRect(TPoint(0, 0), overlaySize));
         overlayBitmap.End();
-        updateRegion.AddRect(TRect(destination + overlayPosition, overlaySize));
+        if (!fullGameUpdate)
+            updateRegion.AddRect(TRect(destination + overlayPosition, overlaySize));
         iPerfOverlay->ClearDirty();
     }
 
@@ -476,7 +551,8 @@ void CRuntimeEngine::PresentDirectL(TBool aForceFull)
     else if (updateRegion.CheckError())
     {
         // Fixed-region overflow should not happen: DisplaySurface caps frame
-        // damage at four rectangles and the overlay contributes at most one.
+        // damage at four rectangles; scroll-copy and overlay add only a few
+        // more rectangles under KMaximumScreenUpdateRegions.
         // Fall back to a full update rather than risk dropping pixels.
         screen->Update();
     }
@@ -642,7 +718,9 @@ const TKeyMapEntry KKeyMap[] =
 
 const TInt KKeyMapCount = sizeof(KKeyMap) / sizeof(KKeyMap[0]);
 
-TUint32 PlayerKeyForScanCode(TInt aScanCode)
+} // namespace
+
+TUint32 EasyRpgPlayerKeyForScanCode(TInt aScanCode)
 {
     for (TInt index = 0; index < KKeyMapCount; ++index)
         if (KKeyMap[index].iScanCode == aScanCode)
@@ -650,14 +728,12 @@ TUint32 PlayerKeyForScanCode(TInt aScanCode)
     return 0;
 }
 
-TUint32 PlayerKeyForCharCode(TInt aCode)
+TUint32 EasyRpgPlayerKeyForCharCode(TInt aCode)
 {
     for (TInt index = 0; index < KKeyMapCount; ++index)
         if (KKeyMap[index].iCharCode == aCode)
             return KKeyMap[index].iPlayerKey;
     return 0;
-}
-
 }
 
 void CRuntimeEngine::ClearPlayerInput()
@@ -671,40 +747,23 @@ void CRuntimeEngine::ClearPlayerInput()
 
 void CRuntimeEngine::MaintainMemory(TUint32 aLogicFrame)
 {
-    TInt freedVfsBytes = 0;
-    if ((aLogicFrame % 60u) == 0u)
-    {
-        const TInt freeRam = EasyRpgPlatformFreeRamBytes();
-        const TInt memoryPressure = MemoryPressureLevel(freeRam, iMemoryPressureLevel);
-        const TBool pressureChanged = memoryPressure != iMemoryPressureLevel;
-        if (pressureChanged)
-        {
-            iMemoryPressureLevel = memoryPressure;
-            EasyRpgAudioSetMemoryPressure(memoryPressure);
-            freedVfsBytes = EasyRpgSetVirtualFileMemoryPressure(memoryPressure);
-            iNextMemoryTrimFrame = aLogicFrame;
-        }
-    }
-
-    TInt cacheFreedBytes = 0;
-    if (iMemoryPressureLevel > 0 && aLogicFrame >= iNextMemoryTrimFrame)
-    {
-        cacheFreedBytes = EasyRpgUpstreamPlayerTrimMemory(iMemoryPressureLevel);
-        const TUint32 interval = iMemoryPressureLevel >= 2
-            ? EasyRpgPlayerConfig::KCriticalMemoryTrimFrames
-            : EasyRpgPlayerConfig::KLowMemoryTrimFrames;
-        iNextMemoryTrimFrame = aLogicFrame + interval;
-    }
-
-    const TInt freedBytes = freedVfsBytes > KMaxTInt - cacheFreedBytes
-        ? KMaxTInt
-        : freedVfsBytes + cacheFreedBytes;
-    if (aLogicFrame < iNextHeapCompressFrame ||
-        (iMemoryPressureLevel < 2 && freedBytes < EasyRpgPlayerConfig::KHeapCompressMinFreedBytes))
+    if ((aLogicFrame % 120u) != 0u)
         return;
 
-    User::Heap().Compress();
-    iNextHeapCompressFrame = aLogicFrame + EasyRpgPlayerConfig::KHeapCompressFrames;
+    const TInt freeRam = EasyRpgPlatformFreeRamBytes();
+    const TInt memoryPressure = MemoryPressureLevel(freeRam, iMemoryPressureLevel);
+    if (memoryPressure == iMemoryPressureLevel)
+        return;
+
+    // Keep steady gameplay free from synchronous cache sweeps and heap
+    // compaction. Cache loading already performs bounded pressure-aware
+    // eviction, scene changes trim stale bitmaps, and allocation failure uses
+    // EasyRpgPlatformPrepareAllocation() as the last-resort compaction path.
+    // Repeating TrimUnused()/RHeap::Compress() here caused visible stop-the-
+    // world stalls even when average CPU usage was low.
+    iMemoryPressureLevel = memoryPressure;
+    EasyRpgAudioSetMemoryPressure(memoryPressure);
+    EasyRpgSetVirtualFileMemoryPressure(memoryPressure);
 }
 
 void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
@@ -747,9 +806,9 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
         return;
     }
 
-    TUint32 playerKey = PlayerKeyForScanCode(aKey.iScanCode);
+    TUint32 playerKey = EasyRpgPlayerKeyForScanCode(aKey.iScanCode);
     if (playerKey == 0 && aKey.iCode != 0)
-        playerKey = PlayerKeyForCharCode(aKey.iCode);
+        playerKey = EasyRpgPlayerKeyForCharCode(aKey.iCode);
 
     if (aType == EEventKeyDown && playerKey != 0)
     {
@@ -917,6 +976,13 @@ void CRuntimeEngine::FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame)
 
     if (iRuntime->IsRunning())
         MaintainMemory(aLogicFrame);
+
+    if (iRuntime->IsRunning() && iFrameTimer &&
+        (aLogicFrame % EasyRpgPlayerConfig::KIdleMaintenanceIntervalFrames) == 0u &&
+        iFrameTimer->TimeUntilNextTickMicroseconds() >= EasyRpgPlayerConfig::KIdleMaintenanceMinSlackUs)
+    {
+        EasyRpgUpstreamPlayerIdleMaintenance(iMemoryPressureLevel);
+    }
 
     if (!iRuntime->IsRunning())
         iFrameTimer->Stop();

@@ -1,89 +1,104 @@
 --- a/src/color.h
 +++ b/src/color.h
-@@ -30,7 +30,7 @@
+@@ -21,6 +21,12 @@
+ // Headers
+ #include "system.h"
+ 
++#if defined(EASYRPG_SYMBIAN) && (defined(__GNUC__) || defined(__clang__))
++#define EASYRPG_COLOR_INLINE inline __attribute__((always_inline))
++#else
++#define EASYRPG_COLOR_INLINE inline
++#endif
++
+ /**
+  * Color class.
+  */
+@@ -30,7 +36,7 @@
  	 * Constructor. All components are set to 0, but alpha
  	 * that is set to 255.
  	 */
 -	Color();
-+	inline Color();
++	EASYRPG_COLOR_INLINE Color();
  
  	/**
  	 * Constructor.
-@@ -40,7 +40,7 @@
+@@ -40,7 +46,7 @@
  	 * @param blue blue component.
  	 * @param alpha alpha component.
  	 */
 -	Color(unsigned red, unsigned green, unsigned blue, unsigned alpha);
-+	inline Color(unsigned red, unsigned green, unsigned blue, unsigned alpha);
++	EASYRPG_COLOR_INLINE Color(unsigned red, unsigned green, unsigned blue, unsigned alpha);
  
  	/**
  	 * Constructor.
-@@ -50,17 +50,17 @@
+@@ -50,17 +56,17 @@
  	 * @param blue blue component.
  	 * @param alpha alpha component.
  	 */
 -	Color(int red, int green, int blue, int alpha);
-+	inline Color(int red, int green, int blue, int alpha);
++	EASYRPG_COLOR_INLINE Color(int red, int green, int blue, int alpha);
  
  	/**
  	 * Equality operator.
  	 */
 -	bool operator==(const Color &other) const;
-+	inline bool operator==(const Color &other) const;
++	EASYRPG_COLOR_INLINE bool operator==(const Color &other) const;
  
  	/**
  	 * Inequality operator.
  	 */
 -	bool operator!=(const Color &other) const;
-+	inline bool operator!=(const Color &other) const;
++	EASYRPG_COLOR_INLINE bool operator!=(const Color &other) const;
  
  	/**
  	 * Sets all color properties.
-@@ -70,7 +70,7 @@
+@@ -70,7 +76,7 @@
  	 * @param blue blue component.
  	 * @param alpha alpha component.
  	 */
 -	void Set(unsigned red, unsigned green, unsigned blue, unsigned alpha);
-+	inline void Set(unsigned red, unsigned green, unsigned blue, unsigned alpha);
++	EASYRPG_COLOR_INLINE void Set(unsigned red, unsigned green, unsigned blue, unsigned alpha);
  
  	/** Red component. */
  	uint8_t red;
-@@ -85,4 +85,37 @@
+@@ -85,4 +91,39 @@
  	uint8_t alpha;
  };
  
-+inline Color::Color() :
++EASYRPG_COLOR_INLINE Color::Color() :
 +	red(0), green(0), blue(0), alpha(0) {
 +}
 +
-+inline Color::Color(unsigned red, unsigned green, unsigned blue, unsigned alpha) :
++EASYRPG_COLOR_INLINE Color::Color(unsigned red, unsigned green, unsigned blue, unsigned alpha) :
 +	red(static_cast<uint8_t>(red)),
 +	green(static_cast<uint8_t>(green)),
 +	blue(static_cast<uint8_t>(blue)),
 +	alpha(static_cast<uint8_t>(alpha)) {
 +}
 +
-+inline Color::Color(int red, int green, int blue, int alpha) :
++EASYRPG_COLOR_INLINE Color::Color(int red, int green, int blue, int alpha) :
 +	red(static_cast<uint8_t>(red)),
 +	green(static_cast<uint8_t>(green)),
 +	blue(static_cast<uint8_t>(blue)),
 +	alpha(static_cast<uint8_t>(alpha)) {
 +}
 +
-+inline bool Color::operator==(const Color &other) const {
++EASYRPG_COLOR_INLINE bool Color::operator==(const Color &other) const {
 +	return red == other.red && green == other.green && blue == other.blue && alpha == other.alpha;
 +}
 +
-+inline bool Color::operator!=(const Color &other) const {
++EASYRPG_COLOR_INLINE bool Color::operator!=(const Color &other) const {
 +	return !(*this == other);
 +}
 +
-+inline void Color::Set(unsigned nred, unsigned ngreen, unsigned nblue, unsigned nalpha) {
++EASYRPG_COLOR_INLINE void Color::Set(unsigned nred, unsigned ngreen, unsigned nblue, unsigned nalpha) {
 +	red = static_cast<uint8_t>(nred);
 +	green = static_cast<uint8_t>(ngreen);
 +	blue = static_cast<uint8_t>(nblue);
 +	alpha = static_cast<uint8_t>(nalpha);
 +}
++
++#undef EASYRPG_COLOR_INLINE
 +
  #endif
 --- a/src/color.cpp
@@ -132,78 +147,93 @@
 -}
 --- a/src/tone.h
 +++ b/src/tone.h
-@@ -26,7 +26,7 @@
+@@ -18,6 +18,12 @@
+ #ifndef _TONE_H_
+ #define _TONE_H_
+ 
++#if defined(EASYRPG_SYMBIAN) && (defined(__GNUC__) || defined(__clang__))
++#define EASYRPG_TONE_INLINE inline __attribute__((always_inline))
++#else
++#define EASYRPG_TONE_INLINE inline
++#endif
++
+ /**
+  * Tone class.
+  */
+@@ -26,7 +32,7 @@
  	/**
  	 * Constructor. All values are set to 0.
  	 */
 -	Tone();
-+	inline Tone();
++	EASYRPG_TONE_INLINE Tone();
  
  	/**
  	 * Constructor.
-@@ -36,17 +36,17 @@
+@@ -36,17 +42,17 @@
  	 * @param blue blue component.
  	 * @param gray gray component.
  	 */
 -	Tone(int red, int green, int blue, int gray);
-+	inline Tone(int red, int green, int blue, int gray);
++	EASYRPG_TONE_INLINE Tone(int red, int green, int blue, int gray);
  
  	/**
  	 * Equality operator.
  	 */
 -	bool operator==(const Tone &other) const;
-+	inline bool operator==(const Tone &other) const;
++	EASYRPG_TONE_INLINE bool operator==(const Tone &other) const;
  
  	/**
  	 * Inequality operator.
  	 */
 -	bool operator!=(const Tone &other) const;
-+	inline bool operator!=(const Tone &other) const;
++	EASYRPG_TONE_INLINE bool operator!=(const Tone &other) const;
  
  	/**
  	 * Set all color properties.
-@@ -56,7 +56,7 @@
+@@ -56,7 +62,7 @@
  	 * @param blue blue component.
  	 * @param gray gray component.
  	 */
 -	void Set(int red, int green, int blue, int gray);
-+	inline void Set(int red, int green, int blue, int gray);
++	EASYRPG_TONE_INLINE void Set(int red, int green, int blue, int gray);
  
  	/** Red component. */
  	int red;
-@@ -71,4 +71,34 @@
+@@ -71,4 +77,36 @@
  	int gray;
  };
  
-+inline int EasyRpgToneClamp(int value) {
++EASYRPG_TONE_INLINE int EasyRpgToneClamp(int value) {
 +	return value < 0 ? 0 : (value > 255 ? 255 : value);
 +}
 +
-+inline Tone::Tone() :
++EASYRPG_TONE_INLINE Tone::Tone() :
 +	red(128), green(128), blue(128), gray(128) {
 +}
 +
-+inline Tone::Tone(int red, int green, int blue, int gray) :
++EASYRPG_TONE_INLINE Tone::Tone(int red, int green, int blue, int gray) :
 +	red(EasyRpgToneClamp(red)),
 +	green(EasyRpgToneClamp(green)),
 +	blue(EasyRpgToneClamp(blue)),
 +	gray(EasyRpgToneClamp(gray)) {
 +}
 +
-+inline bool Tone::operator==(const Tone &other) const {
++EASYRPG_TONE_INLINE bool Tone::operator==(const Tone &other) const {
 +	return red == other.red && green == other.green && blue == other.blue && gray == other.gray;
 +}
 +
-+inline bool Tone::operator!=(const Tone &other) const {
++EASYRPG_TONE_INLINE bool Tone::operator!=(const Tone &other) const {
 +	return !(*this == other);
 +}
 +
-+inline void Tone::Set(int nred, int ngreen, int nblue, int ngray) {
++EASYRPG_TONE_INLINE void Tone::Set(int nred, int ngreen, int nblue, int ngray) {
 +	red = EasyRpgToneClamp(nred);
 +	green = EasyRpgToneClamp(ngreen);
 +	blue = EasyRpgToneClamp(nblue);
 +	gray = EasyRpgToneClamp(ngray);
 +}
++
++#undef EASYRPG_TONE_INLINE
 +
  #endif
 --- a/src/tone.cpp
@@ -246,28 +276,35 @@
 -}
 --- a/src/game_switches.h
 +++ b/src/game_switches.h
-@@ -21,6 +21,7 @@
+@@ -21,7 +21,14 @@
  // Headers
  #include <vector>
  #include <string>
 +#include "main_data.h"
  
++#if defined(EASYRPG_SYMBIAN) && (defined(__GNUC__) || defined(__clang__))
++#define EASYRPG_SWITCH_INLINE inline __attribute__((always_inline))
++#else
++#define EASYRPG_SWITCH_INLINE inline
++#endif
++
  /**
   * Game_Switches class
-@@ -29,20 +30,37 @@
+  */
+@@ -29,20 +36,39 @@
  public:
  	Game_Switches_Class();
  
 -	std::vector<bool>::reference operator[](int switch_id);
-+	inline std::vector<bool>::reference operator[](int switch_id);
++	EASYRPG_SWITCH_INLINE std::vector<bool>::reference operator[](int switch_id);
  	
  	std::string GetName(int _id) const;
  
 -	bool IsValid(int switch_id) const;
-+	inline bool IsValid(int switch_id) const;
++	EASYRPG_SWITCH_INLINE bool IsValid(int switch_id) const;
  
 -	int GetSize() const;
-+	inline int GetSize() const;
++	EASYRPG_SWITCH_INLINE int GetSize() const;
  
  	void Reset();
  
@@ -276,21 +313,23 @@
  	std::vector<bool> dummy;
  };
  
-+inline std::vector<bool>::reference Game_Switches_Class::operator[](int switch_id) {
++EASYRPG_SWITCH_INLINE std::vector<bool>::reference Game_Switches_Class::operator[](int switch_id) {
 +	std::vector<bool>& values = Main_Data::game_data.system.switches;
 +	if (switch_id > 0 && static_cast<size_t>(switch_id) <= values.size())
 +		return values[static_cast<size_t>(switch_id - 1)];
 +	return AccessSlow(switch_id);
 +}
 +
-+inline bool Game_Switches_Class::IsValid(int switch_id) const {
++EASYRPG_SWITCH_INLINE bool Game_Switches_Class::IsValid(int switch_id) const {
 +	return switch_id > 0 &&
 +		static_cast<size_t>(switch_id) <= Main_Data::game_data.system.switches.size();
 +}
 +
-+inline int Game_Switches_Class::GetSize() const {
++EASYRPG_SWITCH_INLINE int Game_Switches_Class::GetSize() const {
 +	return static_cast<int>(Main_Data::game_data.system.switches.size());
 +}
++
++#undef EASYRPG_SWITCH_INLINE
 +
  // Global variable
  extern Game_Switches_Class Game_Switches;
@@ -344,28 +383,36 @@
  }
 --- a/src/game_variables.h
 +++ b/src/game_variables.h
-@@ -20,6 +20,7 @@
+@@ -20,8 +20,15 @@
  
  // Headers
  #include "data.h"
 +#include "main_data.h"
  #include <string>
  
++#if defined(EASYRPG_SYMBIAN) && (defined(__GNUC__) || defined(__clang__))
++#define EASYRPG_VARIABLE_INLINE inline __attribute__((always_inline))
++#else
++#define EASYRPG_VARIABLE_INLINE inline
++#endif
++
  /**
-@@ -29,20 +30,37 @@
+  * Game_Variables class.
+  */
+@@ -29,20 +36,39 @@
  public:
  	Game_Variables_Class();
  
 -	int& operator[] (int variable_id);
-+	inline int& operator[] (int variable_id);
++	EASYRPG_VARIABLE_INLINE int& operator[] (int variable_id);
  
  	std::string GetName(int _id) const;
  
 -	bool IsValid(int variable_id) const;
-+	inline bool IsValid(int variable_id) const;
++	EASYRPG_VARIABLE_INLINE bool IsValid(int variable_id) const;
  
 -	int GetSize() const;
-+	inline int GetSize() const;
++	EASYRPG_VARIABLE_INLINE int GetSize() const;
  
  	void Reset();
  
@@ -374,21 +421,23 @@
  	int dummy = 0;
  };
  
-+inline int& Game_Variables_Class::operator[] (int variable_id) {
++EASYRPG_VARIABLE_INLINE int& Game_Variables_Class::operator[] (int variable_id) {
 +	std::vector<uint32_t>& values = Main_Data::game_data.system.variables;
 +	if (variable_id > 0 && static_cast<size_t>(variable_id) <= values.size())
 +		return reinterpret_cast<int&>(values[static_cast<size_t>(variable_id - 1)]);
 +	return AccessSlow(variable_id);
 +}
 +
-+inline bool Game_Variables_Class::IsValid(int variable_id) const {
++EASYRPG_VARIABLE_INLINE bool Game_Variables_Class::IsValid(int variable_id) const {
 +	return variable_id > 0 &&
 +		static_cast<size_t>(variable_id) <= Main_Data::game_data.system.variables.size();
 +}
 +
-+inline int Game_Variables_Class::GetSize() const {
++EASYRPG_VARIABLE_INLINE int Game_Variables_Class::GetSize() const {
 +	return static_cast<int>(Main_Data::game_data.system.variables.size());
 +}
++
++#undef EASYRPG_VARIABLE_INLINE
 +
  // Global variable
  extern Game_Variables_Class Game_Variables;

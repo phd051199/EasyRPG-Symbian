@@ -9,17 +9,22 @@ enum TPhase {
     EFullPaintRecording
 };
 
-const int KCommandCapacity = 2048;
+// Draw calls that belong to a Drawable are folded into one compact record.
+// This small stream is only for operations outside a Drawable (background,
+// overlays, etc.), which keeps dense maps from spending CPU diffing thousands
+// of individual blits.
+const int KCommandCapacity = 256;
 const int KDrawableCapacity = 2048;
-const int KDirtyCapacity = 16;
-const int KMaximumDirtyRegions = 2;
-const int KFullRedrawAreaPercent = 88;
-const int KDirtyRegionFixedCostDivisor = 4;
+const int KDirtyCapacity = 32;
+const int KMaximumDirtyRegions = 4;
+const int KFullRedrawAreaPercent = 94;
+const int KDirtyRegionFixedCostDivisor = 10;
 const int KCommandResyncLookahead = 8;
-const int KAdaptiveEnterAreaPercent = 72;
-const int KAdaptiveEnterScore = 4;
+const int KDrawableResyncLookahead = 12;
+const int KAdaptiveEnterAreaPercent = 88;
+const int KAdaptiveEnterScore = 6;
 const int KAdaptiveScoreIncrease = 2;
-const int KAdaptiveFullFrames = 6;
+const int KAdaptiveFullFrames = 2;
 
 struct TCommand {
     unsigned int signature;
@@ -29,6 +34,8 @@ struct TCommand {
 struct TDrawableRecord {
     Drawable* drawable;
     Rect rect;
+    unsigned int signature;
+    bool signatureKnown;
 };
 
 TPhase gPhase = EIdle;
@@ -54,12 +61,18 @@ int gAdaptiveScore = 0;
 int gAdaptiveFullFrames = 0;
 bool gAdaptiveFullPaintActive = false;
 int gRecordSuppressionDepth = 0;
+bool gFastFullPaint = false;
 TDrawableRecord gDrawables[KDrawableCapacity];
 int gDrawableCount = 0;
 bool gDrawableOverflow = false;
 Drawable* gActiveDrawable = nullptr;
 Rect gActiveDrawableRect;
 bool gActiveDrawableHasRect = false;
+unsigned int gActiveDrawableSignature = 0;
+bool gActiveDrawableSignatureKnown = true;
+TDrawableRecord gPreviousDrawables[KDrawableCapacity];
+int gPreviousDrawableCount = 0;
+bool gPreviousDrawablesValid = false;
 
 int Area(const Rect& aRect) {
     return aRect.width > 0 && aRect.height > 0 ? aRect.width * aRect.height : 0;
@@ -91,8 +104,8 @@ bool SameRect(const Rect& aFirst, const Rect& aSecond) {
         aFirst.width == aSecond.width && aFirst.height == aSecond.height;
 }
 
-bool SameCommand(const TCommand& aFirst, const TCommand& aSecond) {
-    return aFirst.signature == aSecond.signature && SameRect(aFirst.rect, aSecond.rect);
+Rect ShiftRect(const Rect& aRect, int aShiftX, int aShiftY) {
+    return Rect(aRect.x + aShiftX, aRect.y + aShiftY, aRect.width, aRect.height);
 }
 
 void ForceFull() {
@@ -142,6 +155,151 @@ void AddDirty(const Rect& aInput) {
         return;
     }
     gDirty[gDirtyCount++] = rect;
+}
+
+void TrackActiveDrawableRect(const Rect& aRect) {
+    if (!gActiveDrawable)
+        return;
+    if (!gActiveDrawableHasRect) {
+        gActiveDrawableRect = aRect;
+        gActiveDrawableHasRect = true;
+    } else {
+        gActiveDrawableRect = UnionRect(gActiveDrawableRect, aRect);
+    }
+}
+
+void TrackActiveDrawableSignature(unsigned int aSignature) {
+    if (!gActiveDrawable)
+        return;
+    if (aSignature == 0) {
+        gActiveDrawableSignatureKnown = false;
+        return;
+    }
+    gActiveDrawableSignature = SymbianRenderDamage::HashValue(gActiveDrawableSignature, aSignature);
+}
+
+void AddScrollExposedDirty(int aShiftX, int aShiftY) {
+    if (aShiftX == 0 && aShiftY == 0)
+        return;
+    const int frameWidth = gFrameRect.width;
+    const int frameHeight = gFrameRect.height;
+    if (frameWidth <= 0 || frameHeight <= 0)
+        return;
+    const int absX = aShiftX < 0 ? -aShiftX : aShiftX;
+    const int absY = aShiftY < 0 ? -aShiftY : aShiftY;
+    if (absX >= frameWidth || absY >= frameHeight) {
+        ForceFull();
+        return;
+    }
+    if (aShiftX > 0)
+        AddDirty(Rect(0, 0, absX, frameHeight));
+    else if (aShiftX < 0)
+        AddDirty(Rect(frameWidth - absX, 0, absX, frameHeight));
+    if (aShiftY > 0)
+        AddDirty(Rect(0, 0, frameWidth, absY));
+    else if (aShiftY < 0)
+        AddDirty(Rect(0, frameHeight - absY, frameWidth, absY));
+}
+
+bool SameDrawableState(const TDrawableRecord& aPrevious,
+                       const TDrawableRecord& aCurrent,
+                       int aShiftX,
+                       int aShiftY) {
+    if (aPrevious.drawable != aCurrent.drawable ||
+        !aPrevious.signatureKnown || !aCurrent.signatureKnown ||
+        aPrevious.signature != aCurrent.signature)
+        return false;
+    // Two full-frame records are the scrolling background; everything else
+    // counts as unchanged when it moved by exactly the map translation.
+    if (SameRect(aPrevious.rect, gFrameRect) && SameRect(aCurrent.rect, gFrameRect))
+        return true;
+    return SameRect(ShiftRect(aPrevious.rect, aShiftX, aShiftY), aCurrent.rect);
+}
+
+// ponytail: this copy looks swappable like SaveCommandBaseline's pointer
+// exchange, but the paint pass re-reads gDrawables after EndRecord, so the
+// recorded frame must stay in place. Copy is load-bearing.
+void SaveDrawableBaseline() {
+    if (gDrawableOverflow) {
+        gPreviousDrawableCount = 0;
+        gPreviousDrawablesValid = false;
+        return;
+    }
+    gPreviousDrawableCount = gDrawableCount;
+    for (int index = 0; index < gDrawableCount; ++index)
+        gPreviousDrawables[index] = gDrawables[index];
+    gPreviousDrawablesValid = true;
+}
+
+void DiffDrawableRecords(int aShiftX, int aShiftY) {
+    if (!gPreviousDrawablesValid || gDrawableOverflow) {
+        ForceFull();
+        return;
+    }
+
+    int previousIndex = 0;
+    int currentIndex = 0;
+    while (previousIndex < gPreviousDrawableCount && currentIndex < gDrawableCount) {
+        const TDrawableRecord& previous = gPreviousDrawables[previousIndex];
+        const TDrawableRecord& current = gDrawables[currentIndex];
+
+        if (SameDrawableState(previous, current, aShiftX, aShiftY)) {
+            ++previousIndex;
+            ++currentIndex;
+            continue;
+        }
+        if (previous.drawable == current.drawable) {
+            AddDirty(ShiftRect(previous.rect, aShiftX, aShiftY));
+            AddDirty(current.rect);
+            ++previousIndex;
+            ++currentIndex;
+            if (DamageComplete())
+                return;
+            continue;
+        }
+
+        int previousMatch = -1;
+        int currentMatch = -1;
+        for (int offset = 1; offset <= KDrawableResyncLookahead; ++offset) {
+            if (previousMatch < 0 && previousIndex + offset < gPreviousDrawableCount &&
+                gPreviousDrawables[previousIndex + offset].drawable == current.drawable)
+                previousMatch = offset;
+            if (currentMatch < 0 && currentIndex + offset < gDrawableCount &&
+                previous.drawable == gDrawables[currentIndex + offset].drawable)
+                currentMatch = offset;
+            if (previousMatch >= 0 || currentMatch >= 0)
+                break;
+        }
+
+        if (previousMatch >= 0 && (currentMatch < 0 || previousMatch <= currentMatch)) {
+            for (int offset = 0; offset < previousMatch; ++offset)
+                AddDirty(ShiftRect(gPreviousDrawables[previousIndex + offset].rect, aShiftX, aShiftY));
+            previousIndex += previousMatch;
+            if (DamageComplete())
+                return;
+            continue;
+        }
+        if (currentMatch >= 0) {
+            for (int offset = 0; offset < currentMatch; ++offset)
+                AddDirty(gDrawables[currentIndex + offset].rect);
+            currentIndex += currentMatch;
+            if (DamageComplete())
+                return;
+            continue;
+        }
+
+        AddDirty(ShiftRect(previous.rect, aShiftX, aShiftY));
+        AddDirty(current.rect);
+        ++previousIndex;
+        ++currentIndex;
+        if (DamageComplete())
+            return;
+    }
+
+    while (previousIndex < gPreviousDrawableCount)
+        AddDirty(ShiftRect(gPreviousDrawables[previousIndex++].rect, aShiftX, aShiftY));
+    while (currentIndex < gDrawableCount)
+        AddDirty(gDrawables[currentIndex++].rect);
 }
 
 int DirtyArea() {
@@ -199,6 +357,113 @@ void OptimizeDirty() {
         ForceFull();
 }
 
+bool SameCommand(const TCommand& aPrevious, const TCommand& aCurrent, int aShiftX, int aShiftY) {
+    if (aPrevious.signature != aCurrent.signature)
+        return false;
+    if (SameRect(aPrevious.rect, gFrameRect) && SameRect(aCurrent.rect, gFrameRect))
+        return true;
+    return SameRect(ShiftRect(aPrevious.rect, aShiftX, aShiftY), aCurrent.rect);
+}
+
+void DiffCommands(int aShiftX, int aShiftY) {
+    if (!gPreviousValid || gOverflow) {
+        ForceFull();
+        return;
+    }
+
+    int previousIndex = 0;
+    int currentIndex = 0;
+    while (previousIndex < gPreviousCount && currentIndex < gCurrentCount) {
+        const TCommand& previous = gPrevious[previousIndex];
+        const TCommand& current = gCurrent[currentIndex];
+
+        if (SameCommand(previous, current, aShiftX, aShiftY)) {
+            ++previousIndex;
+            ++currentIndex;
+            continue;
+        }
+
+        if (SameRect(ShiftRect(previous.rect, aShiftX, aShiftY), current.rect)) {
+            AddDirty(current.rect);
+            ++previousIndex;
+            ++currentIndex;
+            if (DamageComplete())
+                return;
+            continue;
+        }
+
+        int previousMatch = -1;
+        int currentMatch = -1;
+        for (int offset = 1; offset <= KCommandResyncLookahead; ++offset) {
+            if (previousMatch < 0 && previousIndex + offset < gPreviousCount &&
+                SameCommand(gPrevious[previousIndex + offset], current, aShiftX, aShiftY))
+                previousMatch = offset;
+            if (currentMatch < 0 && currentIndex + offset < gCurrentCount &&
+                SameCommand(previous, gCurrent[currentIndex + offset], aShiftX, aShiftY))
+                currentMatch = offset;
+            if (previousMatch >= 0 || currentMatch >= 0)
+                break;
+        }
+
+        if (previousMatch >= 0 && (currentMatch < 0 || previousMatch <= currentMatch)) {
+            for (int offset = 0; offset < previousMatch; ++offset)
+                AddDirty(ShiftRect(gPrevious[previousIndex + offset].rect, aShiftX, aShiftY));
+            previousIndex += previousMatch;
+            if (DamageComplete())
+                return;
+            continue;
+        }
+        if (currentMatch >= 0) {
+            for (int offset = 0; offset < currentMatch; ++offset)
+                AddDirty(gCurrent[currentIndex + offset].rect);
+            currentIndex += currentMatch;
+            if (DamageComplete())
+                return;
+            continue;
+        }
+
+        AddDirty(ShiftRect(previous.rect, aShiftX, aShiftY));
+        AddDirty(current.rect);
+        ++previousIndex;
+        ++currentIndex;
+        if (DamageComplete())
+            return;
+    }
+
+    while (previousIndex < gPreviousCount)
+        AddDirty(ShiftRect(gPrevious[previousIndex++].rect, aShiftX, aShiftY));
+    while (currentIndex < gCurrentCount)
+        AddDirty(gCurrent[currentIndex++].rect);
+}
+
+// Diff the recorded frame against the previous baseline. A pending scroll
+// shifts the baseline instead of marking everything dirty.
+void DiffFrame() {
+    if (!gPreviousValid || !gPreviousDrawablesValid || gOverflow || gDrawableOverflow) {
+        ForceFull();
+        return;
+    }
+    AddScrollExposedDirty(gScrollX, gScrollY);
+    if (!DamageComplete())
+        DiffCommands(gScrollX, gScrollY);
+    if (!DamageComplete())
+        DiffDrawableRecords(gScrollX, gScrollY);
+    OptimizeDirty();
+}
+
+void SaveCommandBaseline() {
+    if (gOverflow) {
+        gPreviousCount = 0;
+        gPreviousValid = false;
+        return;
+    }
+    TCommand* completed = gCurrent;
+    gCurrent = gPrevious;
+    gPrevious = completed;
+    gPreviousCount = gCurrentCount;
+    gPreviousValid = true;
+}
+
 void UpdateAdaptiveMode() {
     const int frameArea = Area(gFrameRect);
     if (frameArea <= 0) {
@@ -229,6 +494,33 @@ namespace SymbianRenderDamage {
 
 const Rect* gPaintClipRect = nullptr;
 
+// Common frame-start reset. aClearScroll is false for BeginRecord (pending
+// scroll survives into the diff) and for BeginFastFullPaint (EndFastFullPaint
+// consumes it); BeginFullPaintRecord starts from a clean surface.
+static void ResetFrameState(TPhase aPhase, int aWidth, int aHeight, bool aClearScroll) {
+    gPhase = aPhase;
+    gCurrentCount = 0;
+    gOverflow = false;
+    gFullDependency = false;
+    gDamageValid = false;
+    gFullFrameRequested = false;
+    if (aClearScroll) {
+        gScrollX = 0;
+        gScrollY = 0;
+    }
+    gDirtyCount = 0;
+    gPaintRegion = -1;
+    gFrameRect = Rect(0, 0, aWidth, aHeight);
+    gPaintRect = gFrameRect;
+    gPaintClipRect = nullptr;
+    gDrawableCount = 0;
+    gDrawableOverflow = false;
+    gActiveDrawable = nullptr;
+    gActiveDrawableHasRect = false;
+    gActiveDrawableSignature = 0;
+    gActiveDrawableSignatureKnown = true;
+}
+
 void Reset() {
     gPhase = EIdle;
     gPreviousCount = 0;
@@ -246,32 +538,23 @@ void Reset() {
     gAdaptiveFullFrames = 0;
     gAdaptiveFullPaintActive = false;
     gRecordSuppressionDepth = 0;
+    gFastFullPaint = false;
     gDrawableCount = 0;
     gDrawableOverflow = false;
     gActiveDrawable = nullptr;
     gActiveDrawableHasRect = false;
+    gActiveDrawableSignature = 0;
+    gActiveDrawableSignatureKnown = true;
+    gPreviousDrawableCount = 0;
+    gPreviousDrawablesValid = false;
     gFrameRect = Rect();
     gPaintRect = Rect();
     gPaintClipRect = nullptr;
 }
 
 void ForceFullFrame(int aWidth, int aHeight) {
-    gPhase = EIdle;
-    gPreviousCount = 0;
-    gCurrentCount = 0;
-    gPreviousValid = false;
-    gOverflow = false;
-    gFullDependency = false;
-    gFullFrameRequested = false;
-    gScrollX = 0;
-    gScrollY = 0;
+    Reset();
     gFrameRect = Rect(0, 0, aWidth, aHeight);
-    gPaintRect = gFrameRect;
-    gPaintClipRect = nullptr;
-    gDrawableCount = 0;
-    gDrawableOverflow = false;
-    gActiveDrawable = nullptr;
-    gActiveDrawableHasRect = false;
     ForceFull();
     gDamageValid = true;
 }
@@ -305,41 +588,48 @@ void DiscardScroll() {
 }
 
 void BeginRecord(int aWidth, int aHeight) {
-    gPhase = ERecording;
-    gCurrentCount = 0;
-    gOverflow = false;
-    gFullDependency = false;
-    gDamageValid = false;
-    gFullFrameRequested = false;
-    gDirtyCount = 0;
-    gPaintRegion = -1;
-    gFrameRect = Rect(0, 0, aWidth, aHeight);
-    gPaintRect = gFrameRect;
-    gPaintClipRect = nullptr;
-    gDrawableCount = 0;
-    gDrawableOverflow = false;
-    gActiveDrawable = nullptr;
-    gActiveDrawableHasRect = false;
+    ResetFrameState(ERecording, aWidth, aHeight, false);
+}
+
+void BeginScrollRecord(int aWidth, int aHeight) {
+    BeginRecord(aWidth, aHeight);
 }
 
 void BeginFullPaintRecord(int aWidth, int aHeight) {
-    gPhase = EFullPaintRecording;
-    gCurrentCount = 0;
-    gOverflow = false;
-    gFullDependency = false;
-    gDamageValid = false;
-    gFullFrameRequested = false;
-    gScrollX = 0;
-    gScrollY = 0;
-    gFrameRect = Rect(0, 0, aWidth, aHeight);
-    gPaintRect = gFrameRect;
-    gPaintClipRect = nullptr;
+    ResetFrameState(EFullPaintRecording, aWidth, aHeight, true);
     ForceFull();
     gPaintRegion = 0;
-    gDrawableCount = 0;
-    gDrawableOverflow = false;
-    gActiveDrawable = nullptr;
-    gActiveDrawableHasRect = false;
+}
+
+void BeginFastFullPaint(int aWidth, int aHeight) {
+    ResetFrameState(EFullPaintRecording, aWidth, aHeight, false);
+    gPaintRegion = 0;
+    gFastFullPaint = true;
+    gRecordSuppressionDepth = 1;
+}
+
+void EndFastFullPaint() {
+    if (gPhase != EFullPaintRecording || !gFastFullPaint)
+        return;
+    gRecordSuppressionDepth = 0;
+    gFastFullPaint = false;
+    if (gOverflow || gDrawableOverflow) {
+        ForceFull();
+        gScrollX = 0;
+        gScrollY = 0;
+    } else {
+        DiffFrame();
+    }
+    SaveCommandBaseline();
+    SaveDrawableBaseline();
+    gDamageValid = true;
+    gPaintRegion = -1;
+    gPaintClipRect = nullptr;
+    gPhase = EIdle;
+}
+
+bool IsFastFullPaint() {
+    return gFastFullPaint;
 }
 
 void BeginDrawable(Drawable* aDrawable) {
@@ -348,6 +638,8 @@ void BeginDrawable(Drawable* aDrawable) {
     gActiveDrawable = aDrawable;
     gActiveDrawableRect = Rect();
     gActiveDrawableHasRect = false;
+    gActiveDrawableSignature = SymbianRenderDamage::HashSeed(0x44524157u);
+    gActiveDrawableSignatureKnown = true;
 }
 
 void EndDrawable() {
@@ -357,6 +649,8 @@ void EndDrawable() {
         if (gDrawableCount < KDrawableCapacity) {
             gDrawables[gDrawableCount].drawable = gActiveDrawable;
             gDrawables[gDrawableCount].rect = gActiveDrawableRect;
+            gDrawables[gDrawableCount].signature = gActiveDrawableSignature;
+            gDrawables[gDrawableCount].signatureKnown = gActiveDrawableSignatureKnown;
             ++gDrawableCount;
         } else {
             gDrawableOverflow = true;
@@ -364,6 +658,8 @@ void EndDrawable() {
     }
     gActiveDrawable = nullptr;
     gActiveDrawableHasRect = false;
+    gActiveDrawableSignature = 0;
+    gActiveDrawableSignatureKnown = true;
 }
 
 bool IsRecording() {
@@ -403,8 +699,7 @@ bool IsFullPaintRecording() {
 }
 
 void Record(unsigned int aSignature, const Rect& aInput) {
-    if (gRecordSuppressionDepth > 0 ||
-        (gPhase != ERecording && gPhase != EFullPaintRecording) || gOverflow)
+    if ((gPhase != ERecording && gPhase != EFullPaintRecording) || gOverflow)
         return;
 
     Rect rect = aInput;
@@ -413,13 +708,15 @@ void Record(unsigned int aSignature, const Rect& aInput) {
         return;
 
     if (gActiveDrawable) {
-        if (!gActiveDrawableHasRect) {
-            gActiveDrawableRect = rect;
-            gActiveDrawableHasRect = true;
-        } else {
-            gActiveDrawableRect = UnionRect(gActiveDrawableRect, rect);
-        }
+        TrackActiveDrawableRect(rect);
+        if (gRecordSuppressionDepth == 0 ||
+            (gFastFullPaint && gRecordSuppressionDepth == 1))
+            TrackActiveDrawableSignature(aSignature);
+        return;
     }
+
+    if (gRecordSuppressionDepth > 0 && !(gFastFullPaint && gRecordSuppressionDepth == 1))
+        return;
 
     if (gCurrentCount >= KCommandCapacity) {
         gOverflow = true;
@@ -445,116 +742,30 @@ void EndRecord() {
     if (gPhase != ERecording)
         return;
 
-    if (!gPreviousValid || gOverflow) {
-        ForceFull();
-    } else {
-        int previousIndex = 0;
-        int currentIndex = 0;
-        while (previousIndex < gPreviousCount && currentIndex < gCurrentCount) {
-            if (SameCommand(gPrevious[previousIndex], gCurrent[currentIndex])) {
-                ++previousIndex;
-                ++currentIndex;
-                continue;
-            }
-
-            if (SameRect(gPrevious[previousIndex].rect, gCurrent[currentIndex].rect)) {
-                AddDirty(gCurrent[currentIndex].rect);
-                ++previousIndex;
-                ++currentIndex;
-                if (DamageComplete()) {
-                    previousIndex = gPreviousCount;
-                    currentIndex = gCurrentCount;
-                }
-                continue;
-            }
-
-            int previousMatch = -1;
-            int currentMatch = -1;
-            for (int offset = 1; offset <= KCommandResyncLookahead; ++offset) {
-                if (previousMatch < 0 && previousIndex + offset < gPreviousCount &&
-                    SameCommand(gPrevious[previousIndex + offset], gCurrent[currentIndex]))
-                    previousMatch = offset;
-                if (currentMatch < 0 && currentIndex + offset < gCurrentCount &&
-                    SameCommand(gPrevious[previousIndex], gCurrent[currentIndex + offset]))
-                    currentMatch = offset;
-                if (previousMatch >= 0 || currentMatch >= 0)
-                    break;
-            }
-
-            if (previousMatch >= 0 && (currentMatch < 0 || previousMatch <= currentMatch)) {
-                for (int offset = 0; offset < previousMatch; ++offset)
-                    AddDirty(gPrevious[previousIndex + offset].rect);
-                previousIndex += previousMatch;
-                if (DamageComplete()) {
-                    previousIndex = gPreviousCount;
-                    currentIndex = gCurrentCount;
-                }
-                continue;
-            }
-
-            if (currentMatch >= 0) {
-                for (int offset = 0; offset < currentMatch; ++offset)
-                    AddDirty(gCurrent[currentIndex + offset].rect);
-                currentIndex += currentMatch;
-                if (DamageComplete()) {
-                    previousIndex = gPreviousCount;
-                    currentIndex = gCurrentCount;
-                }
-                continue;
-            }
-
-            AddDirty(gPrevious[previousIndex].rect);
-            AddDirty(gCurrent[currentIndex].rect);
-            ++previousIndex;
-            ++currentIndex;
-            if (DamageComplete()) {
-                previousIndex = gPreviousCount;
-                currentIndex = gCurrentCount;
-            }
-        }
-
-        while (previousIndex < gPreviousCount)
-            AddDirty(gPrevious[previousIndex++].rect);
-        while (currentIndex < gCurrentCount)
-            AddDirty(gCurrent[currentIndex++].rect);
-        OptimizeDirty();
-    }
-
+    DiffFrame();
     UpdateAdaptiveMode();
 
     if (gFullDependency && gDirtyCount > 0)
         ForceFull();
 
-    if (!gOverflow) {
-        TCommand* completed = gCurrent;
-        gCurrent = gPrevious;
-        gPrevious = completed;
-        gPreviousCount = gCurrentCount;
-        gPreviousValid = true;
-    } else {
-        gPreviousCount = 0;
-        gPreviousValid = false;
-    }
+    SaveCommandBaseline();
+    SaveDrawableBaseline();
 
     gDamageValid = true;
     gPaintClipRect = nullptr;
     gPhase = EIdle;
 }
 
+void EndScrollRecord() {
+    EndRecord();
+}
+
 void EndFullPaintRecord() {
     if (gPhase != EFullPaintRecording)
         return;
 
-    if (!gOverflow) {
-        TCommand* completed = gCurrent;
-        gCurrent = gPrevious;
-        gPrevious = completed;
-        gPreviousCount = gCurrentCount;
-        gPreviousValid = true;
-    } else {
-        gPreviousCount = 0;
-        gPreviousValid = false;
-    }
+    SaveCommandBaseline();
+    SaveDrawableBaseline();
     gDamageValid = true;
     gPaintRegion = -1;
     gPaintClipRect = nullptr;
@@ -575,6 +786,8 @@ bool DamageValid() {
 
 void ConsumeDamage() {
     gDamageValid = false;
+    gScrollX = 0;
+    gScrollY = 0;
 }
 
 int DirtyCount() {
@@ -583,15 +796,6 @@ int DirtyCount() {
 
 const Rect& DirtyRect(int aIndex) {
     return gDirty[aIndex];
-}
-
-void BeginPaint() {
-    gPaintRegion = -1;
-    gPaintRect = gDirtyCount > 0 ? gDirty[0] : gFrameRect;
-    for (int index = 1; index < gDirtyCount; ++index)
-        gPaintRect = UnionRect(gPaintRect, gDirty[index]);
-    gPaintClipRect = SameRect(gPaintRect, gFrameRect) ? nullptr : &gPaintRect;
-    gPhase = EPainting;
 }
 
 void BeginPaint(int aDirtyIndex) {

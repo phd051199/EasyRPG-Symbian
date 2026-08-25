@@ -11,6 +11,8 @@
 
 namespace
 {
+class CAudioPump;
+
 struct TSoftwareBgmState
 {
     HBufC8* iPcm;
@@ -48,7 +50,7 @@ struct TNativeChannelState
 struct TAudioRuntimeState
 {
     CAudioMixer* iMixer;
-    CIdle* iIdlePump;
+    CAudioPump* iPump;
     TSoftwareBgmState iBgm;
     TNativeChannelState iNativeChannels;
     TInt iAsyncError;
@@ -79,8 +81,9 @@ TAudioRuntimeState gAudio = {
 };
 
 const TInt KBgmRenderPumpFrames = 256;
-const TInt KBgmLogicPumpFrames = 768;
-const TInt KBgmIdlePumpFrames = 256;
+const TInt KBgmLogicPumpFrames = 512;
+const TInt KBgmAsyncPumpFrames = 128;
+const TInt KBgmEmergencyPumpFrames = 256;
 const TInt KBgmInitialPumpFrames = 1024;
 const TInt KBgmMinimumQueuedFrames = 1024;
 const TInt KBgmTargetFrames = 3072;
@@ -96,7 +99,45 @@ _LIT(KWavExtension, ".wav");
 _LIT(KMidExtension, ".mid");
 _LIT(KMidiExtension, ".midi");
 
-void StartAudioIdlePump();
+void StartAudioPump();
+TBool AudioPumpStep();
+
+class CAudioPump : public CTimer
+{
+public:
+    static CAudioPump* NewL()
+    {
+        CAudioPump* self = new (ELeave) CAudioPump;
+        CleanupStack::PushL(self);
+        self->ConstructL();
+        CleanupStack::Pop(self);
+        return self;
+    }
+
+    void StartPump()
+    {
+        if (!IsActive())
+            After(TTimeIntervalMicroSeconds32(1));
+    }
+
+private:
+    CAudioPump()
+        : CTimer(CActive::EPriorityStandard)
+    {
+    }
+
+    void ConstructL()
+    {
+        CTimer::ConstructL();
+        CActiveScheduler::Add(this);
+    }
+
+    void RunL()
+    {
+        if (iStatus.Int() == KErrNone && AudioPumpStep())
+            After(TTimeIntervalMicroSeconds32(2000));
+    }
+};
 
 void DecodeResourcePathL(const char* aPath, TDes& aDestination)
 {
@@ -119,8 +160,13 @@ void EnsureMixerL()
         gAudio.iMixer = CAudioMixer::NewL();
         gAudio.iMixer->SetMasterVolume(gAudio.iMasterVolumePercent);
     }
-    if (!gAudio.iIdlePump)
-        TRAP_IGNORE(gAudio.iIdlePump = CIdle::NewL(CActive::EPriorityLow));
+    if (!gAudio.iPump)
+    {
+        TInt pumpError = KErrNone;
+        TRAP(pumpError, gAudio.iPump = CAudioPump::NewL());
+        if (pumpError != KErrNone)
+            gAudio.iAsyncError = pumpError;
+    }
 }
 
 void UpdateBgmStep()
@@ -164,8 +210,8 @@ void BuildCacheKeyL(const TDesC& aPath, TInt aPitch, TDes& aKey)
 
 void StopBgmNow()
 {
-    if (gAudio.iIdlePump)
-        gAudio.iIdlePump->Cancel();
+    if (gAudio.iPump)
+        gAudio.iPump->Cancel();
     if (gAudio.iMixer)
         gAudio.iMixer->ClearStream(CAudioMixer::EStreamBgm);
     TNativeAudio::StopBgm();
@@ -183,13 +229,6 @@ void StopBgmNow()
     gAudio.iBgm.iFadeDurationMs = 0;
     gAudio.iBgm.iPlaying = EFalse;
     gAudio.iBgm.iPaused = EFalse;
-}
-
-TInt BgmSample(TInt aFrame, TInt aChannel)
-{
-    const TInt16* samples = reinterpret_cast<const TInt16*>(gAudio.iBgm.iPcm->Ptr());
-    const TInt sourceChannel = gAudio.iBgm.iChannels == 1 ? 0 : aChannel;
-    return samples[aFrame * gAudio.iBgm.iChannels + sourceChannel];
 }
 
 void PumpBgm(TInt aMaxFrames)
@@ -237,8 +276,64 @@ void PumpBgm(TInt aMaxFrames)
         UpdateBgmStep();
     const TInt64 totalPhase = static_cast<TInt64>(gAudio.iBgm.iFrameCount) << 16;
 
-    // Single resample path: at unity pitch the interpolation fraction is 0
-    // and the lerp degenerates to an exact copy, so no fast path is needed.
+    // The common RPG Maker case is 22.05 kHz PCM at 100% pitch, which is
+    // already in the mixer's native sample rate. Avoid doing two lerps and
+    // multiplies per output frame when no resampling is required.
+    if (gAudio.iBgm.iStep == (1 << 16))
+    {
+        while (freeFrames > 0)
+        {
+            TInt sourceFrame = static_cast<TInt>(gAudio.iBgm.iPhase >> 16);
+            if (sourceFrame >= gAudio.iBgm.iFrameCount)
+                sourceFrame = 0;
+
+            const TInt batch = Min(freeFrames, Min(512, gAudio.iBgm.iFrameCount - sourceFrame));
+            if (batch <= 0)
+                break;
+
+            TInt written = 0;
+            if (gAudio.iBgm.iChannels == 2)
+            {
+                const TInt16* samples = reinterpret_cast<const TInt16*>(gAudio.iBgm.iPcm->Ptr());
+                written = gAudio.iMixer->WriteStreamPcm16(CAudioMixer::EStreamBgm,
+                                                          samples + sourceFrame * 2,
+                                                          batch);
+            }
+            else
+            {
+                TInt16 output[512 * 2];
+                const TInt16* samples = reinterpret_cast<const TInt16*>(gAudio.iBgm.iPcm->Ptr());
+                for (TInt frame = 0; frame < batch; ++frame)
+                {
+                    const TInt16 sample = samples[sourceFrame + frame];
+                    output[frame * 2] = sample;
+                    output[frame * 2 + 1] = sample;
+                }
+                written = gAudio.iMixer->WriteStreamPcm16(CAudioMixer::EStreamBgm,
+                                                          output,
+                                                          batch);
+            }
+
+            if (written <= 0)
+                break;
+
+            gAudio.iBgm.iFramesQueued += static_cast<TUint64>(written);
+            sourceFrame += written;
+            if (sourceFrame >= gAudio.iBgm.iFrameCount)
+            {
+                sourceFrame -= gAudio.iBgm.iFrameCount;
+                ++gAudio.iBgm.iLoopCount;
+            }
+            gAudio.iBgm.iPhase = static_cast<TInt64>(sourceFrame) << 16;
+            freeFrames -= written;
+            if (written != batch)
+                break;
+        }
+        return;
+    }
+
+    const TInt16* samples = reinterpret_cast<const TInt16*>(gAudio.iBgm.iPcm->Ptr());
+    const TInt channels = gAudio.iBgm.iChannels;
     while (freeFrames > 0)
     {
         const TInt batch = Min(freeFrames, 512);
@@ -254,11 +349,14 @@ void PumpBgm(TInt aMaxFrames)
                 nextFrame = 0;
             const TInt fraction = static_cast<TInt>((gAudio.iBgm.iPhase & 0xffff) >> 1);
 
+            const TInt firstBase = sourceFrame * channels;
+            const TInt secondBase = nextFrame * channels;
             TInt channel = 0;
             for (channel = 0; channel < 2; ++channel)
             {
-                const TInt first = BgmSample(sourceFrame, channel);
-                const TInt second = BgmSample(nextFrame, channel);
+                const TInt sampleChannel = channels == 1 ? 0 : channel;
+                const TInt first = samples[firstBase + sampleChannel];
+                const TInt second = samples[secondBase + sampleChannel];
                 output[frame * 2 + channel] = static_cast<TInt16>(
                     first + (((second - first) * fraction) >> 15));
             }
@@ -283,13 +381,13 @@ void PumpBgm(TInt aMaxFrames)
     }
 }
 
-TInt AudioIdlePump(TAny*)
+TBool AudioPumpStep()
 {
     if (!gAudio.iMixer || !gAudio.iBgm.iPlaying || gAudio.iBgm.iPaused ||
         (!gAudio.iBgm.iMidiDecoder && !gAudio.iBgm.iPcm))
         return EFalse;
 
-    PumpBgm(KBgmIdlePumpFrames);
+    PumpBgm(KBgmAsyncPumpFrames);
     if (gAudio.iMixer)
         gAudio.iMixer->CommitStreams();
 
@@ -300,13 +398,13 @@ TInt AudioIdlePump(TAny*)
            gAudio.iMixer->StreamFreeFrames(CAudioMixer::EStreamBgm) > 0;
 }
 
-void StartAudioIdlePump()
+void StartAudioPump()
 {
-    if (!gAudio.iIdlePump || gAudio.iIdlePump->IsActive() ||
+    if (!gAudio.iPump || gAudio.iPump->IsActive() ||
         !gAudio.iMixer || !gAudio.iBgm.iPlaying || gAudio.iBgm.iPaused ||
         (!gAudio.iBgm.iMidiDecoder && !gAudio.iBgm.iPcm))
         return;
-    gAudio.iIdlePump->Start(TCallBack(AudioIdlePump, NULL));
+    gAudio.iPump->StartPump();
 }
 
 void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
@@ -339,7 +437,7 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
         gAudio.iMixer->SetStreamVolume(CAudioMixer::EStreamBgm, aVolume);
         PumpBgm(KBgmInitialPumpFrames);
         gAudio.iMixer->CommitStreams();
-        StartAudioIdlePump();
+        StartAudioPump();
         return;
     }
     if (!HasExtension(path, KWavExtension))
@@ -387,7 +485,7 @@ void PlayBgmL(const char* aPath, TInt aVolume, TInt aPitch, TInt aFadeIn)
     gAudio.iMixer->SetStreamVolume(CAudioMixer::EStreamBgm, aVolume);
     PumpBgm(KBgmInitialPumpFrames);
     gAudio.iMixer->CommitStreams();
-    StartAudioIdlePump();
+    StartAudioPump();
 }
 
 void PlayBgsL(const char* aPath, TInt aVolume, TInt aPitch)
@@ -635,8 +733,8 @@ extern "C" void EasyRpgAudioPauseBgm(void)
     if (!gAudio.iBgm.iPlaying || gAudio.iBgm.iPaused)
         return;
     gAudio.iBgm.iPaused = ETrue;
-    if (gAudio.iIdlePump)
-        gAudio.iIdlePump->Cancel();
+    if (gAudio.iPump)
+        gAudio.iPump->Cancel();
     if (gAudio.iMixer)
         gAudio.iMixer->ClearStream(CAudioMixer::EStreamBgm);
 }
@@ -654,7 +752,7 @@ extern "C" void EasyRpgAudioResumeBgm(void)
     PumpBgm(KBgmInitialPumpFrames);
     if (gAudio.iMixer)
         gAudio.iMixer->CommitStreams();
-    StartAudioIdlePump();
+    StartAudioPump();
 }
 
 extern "C" void EasyRpgAudioSetBgmVolume(int aVolume)
@@ -794,23 +892,19 @@ extern "C" void EasyRpgAudioUpdate(void)
     if (gAudio.iMixer && gAudio.iBgm.iPlaying && !gAudio.iBgm.iPaused &&
         (gAudio.iBgm.iMidiDecoder || gAudio.iBgm.iPcm))
     {
-        if (gAudio.iIdlePump)
+        if (gAudio.iPump)
         {
             const TInt queuedFrames = gAudio.iMixer->StreamQueuedFrames(CAudioMixer::EStreamBgm);
             if (queuedFrames < KBgmMinimumQueuedFrames)
             {
-                PumpBgm(KBgmMinimumQueuedFrames - queuedFrames);
+                PumpBgm(Min(KBgmEmergencyPumpFrames, KBgmMinimumQueuedFrames - queuedFrames));
                 gAudio.iMixer->CommitStreams();
             }
-            StartAudioIdlePump();
+            StartAudioPump();
         }
         else
         {
-#ifdef EASYRPG_SCRIPT_PROCESS
-            PumpBgm(KBgmLogicPumpFrames);
-#else
             PumpBgm(EasyRpgUpstreamPlayerShouldRender() ? KBgmRenderPumpFrames : KBgmLogicPumpFrames);
-#endif
             gAudio.iMixer->CommitStreams();
         }
     }
@@ -850,8 +944,8 @@ extern "C" void EasyRpgAudioShutdown(void)
     gAudio.iNativeChannels.iMeFadeDurationMs = 0;
     gAudio.iNativeChannels.iMeActive = EFalse;
     gAudio.iNativeChannels.iResumeBgmAfterMe = EFalse;
-    delete gAudio.iIdlePump;
-    gAudio.iIdlePump = NULL;
+    delete gAudio.iPump;
+    gAudio.iPump = NULL;
     delete gAudio.iMixer;
     gAudio.iMixer = NULL;
 }

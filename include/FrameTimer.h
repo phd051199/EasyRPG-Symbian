@@ -19,6 +19,7 @@ public:
     void Start();
     void Stop();
     TBool Running() const;
+    TInt TimeUntilNextTickMicroseconds() const;
 
 private:
     explicit CFrameTimer(MFrameTimerObserver& aObserver);
@@ -35,6 +36,7 @@ private:
     MFrameTimerObserver& iObserver;
     RTimer iTimer;
     TInt iCounterFrequency;
+    TInt64 iMicrosPerTickX65536;
     TBool iCounterCountsUp;
     TInt iFramePeriodCounter;
     TInt iFramePeriodRemainder;
@@ -43,6 +45,8 @@ private:
     TInt64 iElapsedCounter;
     TInt64 iNextDeadlineCounter;
     TUint32 iLogicFrame;
+    TInt iLogicTicksSinceRender;
+    TInt iImmediateCatchUpTicks;
     TBool iRunning;
 };
 

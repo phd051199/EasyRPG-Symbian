@@ -4,6 +4,7 @@
 #include <gdi.h>
 
 #include "GameMenu.h"
+#include "PlayerRuntime.h"
 #include "AppConfig.h"
 #include "AppPaths.h"
 #include "GohuFont.h"
@@ -68,10 +69,10 @@ TInt GohuTextWidth(const TDesC8& aText)
     return aText.Length() * KMenuTextAdvance;
 }
 
-void DrawGohuTextPass(CGraphicsContext& aGc,
-                      const TDesC8& aText,
-                      const TPoint& aOrigin,
-                      const TRgb& aColor)
+void DrawGohuText(CGraphicsContext& aGc,
+                  const TDesC8& aText,
+                  const TPoint& aOrigin,
+                  const TRgb& aColor)
 {
     aGc.SetPenStyle(CGraphicsContext::ENullPen);
     aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
@@ -110,14 +111,6 @@ void DrawGohuTextPass(CGraphicsContext& aGc,
         cursorX += KMenuTextAdvance;
     }
 }
-
-void DrawGohuText(CGraphicsContext& aGc,
-                  const TDesC8& aText,
-                  const TPoint& aOrigin,
-                  const TRgb& aColor)
-{
-    DrawGohuTextPass(aGc, aText, aOrigin, aColor);
-}
 }
 
 CGameMenu* CGameMenu::NewL(MGameMenuHost& aHost, RFs& aFs)
@@ -137,6 +130,7 @@ CGameMenu::CGameMenu(MGameMenuHost& aHost, RFs& aFs)
       iSelection(0),
       iLeftSoftHeld(EFalse),
       iRightSoftHeld(EFalse),
+      iRightSoftCaptured(EFalse),
       iHeldMenuKeys(0),
       iVolume(KDefaultVolume),
       iSoundEnabled(ETrue),
@@ -216,21 +210,6 @@ void CGameMenu::ApplySettingsL()
 TBool CGameMenu::IsOpen() const
 {
     return iOpen;
-}
-
-TInt CGameMenu::Selection() const
-{
-    return iSelection;
-}
-
-TInt CGameMenu::Volume() const
-{
-    return iVolume;
-}
-
-TBool CGameMenu::SoundEnabled() const
-{
-    return iSoundEnabled;
 }
 
 TInt CGameMenu::ItemCount() const
@@ -354,6 +333,7 @@ void CGameMenu::ResetInputState()
 {
     iLeftSoftHeld = EFalse;
     iRightSoftHeld = EFalse;
+    iRightSoftCaptured = EFalse;
     iHeldMenuKeys = 0;
 }
 
@@ -434,44 +414,17 @@ void CGameMenu::AdjustSelectionL(TInt aDelta)
 
 TInt CGameMenu::MapMenuKey(const TKeyEvent& aKey) const
 {
-    switch (aKey.iScanCode)
+    TUint32 playerKey = EasyRpgPlayerKeyForScanCode(aKey.iScanCode);
+    if (playerKey == 0 && aKey.iCode != 0)
+        playerKey = EasyRpgPlayerKeyForCharCode(aKey.iCode);
+    switch (playerKey)
     {
-    case EStdKeyUpArrow:
-    case 'W': return EMenuKeyUp;
-    case EStdKeyDownArrow:
-    case 'S': return EMenuKeyDown;
-    case EStdKeyLeftArrow:
-    case 'A': return EMenuKeyLeft;
-    case EStdKeyRightArrow:
-    case 'D': return EMenuKeyRight;
-    case EStdKeyEnter:
-    case EStdKeyDevice3:
-    case EStdKeySpace:
-    case 'Z': return EMenuKeyDecision;
-    case EStdKeyEscape: return EMenuKeyCancel;
-    default:
-        break;
-    }
-    switch (aKey.iCode)
-    {
-    case EKeyUpArrow:
-    case 'W':
-    case 'w': return EMenuKeyUp;
-    case EKeyDownArrow:
-    case 'S':
-    case 's': return EMenuKeyDown;
-    case EKeyLeftArrow:
-    case 'A':
-    case 'a': return EMenuKeyLeft;
-    case EKeyRightArrow:
-    case 'D':
-    case 'd': return EMenuKeyRight;
-    case EKeyEnter:
-    case EKeyDevice3:
-    case 'Z':
-    case 'z':
-    case ' ': return EMenuKeyDecision;
-    case EKeyEscape: return EMenuKeyCancel;
+    case CPlayerRuntime::EKeyUp: return EMenuKeyUp;
+    case CPlayerRuntime::EKeyDown: return EMenuKeyDown;
+    case CPlayerRuntime::EKeyLeft: return EMenuKeyLeft;
+    case CPlayerRuntime::EKeyRight: return EMenuKeyRight;
+    case CPlayerRuntime::EKeyDecision: return EMenuKeyDecision;
+    case CPlayerRuntime::EKeyCancel: return EMenuKeyCancel;
     default: return EMenuKeyNone;
     }
 }
@@ -513,7 +466,14 @@ TBool CGameMenu::HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent& aKey)
     if (aLeft)
         ActivateSelectionL();
     else
+    {
+        // A Symbian soft key normally arrives as KeyDown -> Key -> KeyUp.
+        // Closing on KeyDown must capture the rest of that physical press,
+        // otherwise the following Key event is delivered to the game as
+        // CANCEL after GameMenuPauseL(EFalse) clears the runtime key state.
+        iRightSoftCaptured = aType == EEventKeyDown;
         CloseL();
+    }
     return ETrue;
 }
 
@@ -547,7 +507,26 @@ TBool CGameMenu::HandleKeyEventL(TInt aType, const TKeyEvent& aKey)
     if (rightSoft)
     {
         if (!iOpen)
+        {
+            if (iRightSoftCaptured)
+            {
+                if (aType == EEventKey || aType == EEventKeyUp)
+                {
+                    iRightSoftCaptured = EFalse;
+                    iRightSoftHeld = EFalse;
+                }
+                return ETrue;
+            }
+
+            // Keep the menu's soft-key latch synchronized even while the
+            // menu is closed. Without this, the KeyUp after closing is lost
+            // to the menu and the next Back press appears to be already held.
+            if (aType == EEventKeyDown)
+                iRightSoftHeld = ETrue;
+            else if (aType == EEventKey || aType == EEventKeyUp)
+                iRightSoftHeld = EFalse;
             return EFalse;
+        }
         return HandleSoftKeyL(EFalse, aType, aKey);
     }
     if (!iOpen)

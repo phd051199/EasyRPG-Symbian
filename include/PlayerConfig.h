@@ -12,20 +12,21 @@ enum
     KLogicFps = 60,
     KRenderFps = 30,
     KLogicTicksPerRender = KLogicFps / KRenderFps,
-    KMaxCatchUpLogicFrames = 2,
+    // Keep short render stalls from slowing game logic/input. A missed render
+    // stays due and is retried on the next logic tick while 60 Hz game logic
+    // keeps advancing independently.
+    KMaxCatchUpLogicFrames = 4,
+    KIdleMaintenanceIntervalFrames = 16,
+    KIdleMaintenanceMinSlackUs = 4000,
     // Upstream damage-tracking cap; presentation batching limits
     // (KMaximumPresentRegions, KDirtyRegionCapacity) live in DisplaySurface.cpp.
-    KMaximumScreenUpdateRegions = 6
+    KMaximumScreenUpdateRegions = 8
 };
 
 const TInt KLowMemoryBytes = 12 * 1024 * 1024;
 const TInt KCriticalMemoryBytes = 6 * 1024 * 1024;
 const TInt KLowMemoryRecoveryBytes = 16 * 1024 * 1024;
 const TInt KCriticalMemoryRecoveryBytes = 9 * 1024 * 1024;
-const TUint32 KLowMemoryTrimFrames = 180;
-const TUint32 KCriticalMemoryTrimFrames = 60;
-const TUint32 KHeapCompressFrames = 300;
-const TInt KHeapCompressMinFreedBytes = 128 * 1024;
 }
 
 #endif

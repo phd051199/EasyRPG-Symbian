@@ -38,7 +38,98 @@
  #ifdef NDEBUG
  	if (result != nmemb && !Eof()) {
  		perror("Reading error: ");
-@@ -160,11 +163,11 @@
+@@ -80,18 +83,29 @@
+ }
+ 
+ int LcfReader::ReadInt() {
+-	int value = 0;
++	uint32_t value = 0;
+ 	unsigned char temp = 0;
++	int loops = 0;
+ 
+ 	do {
++		if (loops == 5) {
++			fprintf(stderr, "Invalid compressed integer at %u\n", Tell());
++			do {
++				if (Read0(&temp, 1, 1) == 0)
++					break;
++			} while (temp & 0x80);
++			return 0;
++		}
++
+ 		value <<= 7;
+ 		if (Read0(&temp, 1, 1) == 0) {
+ 			assert(value == 0);
+ 			return 0;
+ 		}
+-		value |= temp & 0x7F;
++		value |= static_cast<uint32_t>(temp & 0x7F);
++		++loops;
+ 	} while (temp & 0x80);
+-	return value;
++	return static_cast<int>(value);
+ }
+ 
+ template <>
+@@ -118,25 +132,21 @@
+ 
+ template <>
+ void LcfReader::Read<uint8_t>(std::vector<uint8_t> &buffer, size_t size) {
+-	buffer.clear();
+-
+-	for (unsigned int i = 0; i < size; ++i) {
+-		uint8_t val;
+-		Read(&val, 1, 1);
+-		buffer.push_back(val);
+-	}
++	buffer.resize(size);
++	if (size != 0)
++		Read(&buffer[0], 1, size);
+ }
+ 
+ template <>
+ void LcfReader::Read<int16_t>(std::vector<int16_t> &buffer, size_t size) {
+-	buffer.clear();
+ 	size_t items = size / 2;
+-	for (unsigned int i = 0; i < items; ++i) {
+-		int16_t val;
+-		Read(&val, 2, 1);
+-		SwapByteOrder(val);
+-		buffer.push_back(val);
+-	}
++	buffer.resize(items);
++	if (items != 0)
++		Read(&buffer[0], sizeof(int16_t), items);
++#ifdef WORDS_BIGENDIAN
++	for (size_t i = 0; i < items; ++i)
++		SwapByteOrder(buffer[i]);
++#endif
+ 	if (size % 2 != 0) {
+ 		Seek(1, FromCurrent);
+ 		buffer.push_back(0);
+@@ -145,14 +155,14 @@
+ 
+ template <>
+ void LcfReader::Read<uint32_t>(std::vector<uint32_t> &buffer, size_t size) {
+-	buffer.clear();
+ 	size_t items = size / 4;
+-	for (unsigned int i = 0; i < items; ++i) {
+-		uint32_t val;
+-		Read(&val, 4, 1);
+-		SwapByteOrder(val);
+-		buffer.push_back(val);
+-	}
++	buffer.resize(items);
++	if (items != 0)
++		Read(&buffer[0], sizeof(uint32_t), items);
++#ifdef WORDS_BIGENDIAN
++	for (size_t i = 0; i < items; ++i)
++		SwapByteOrder(buffer[i]);
++#endif
+ 	if (size % 4 != 0) {
+ 		Seek(size % 4, FromCurrent);
+ 		buffer.push_back(0);
+@@ -160,11 +170,14 @@
  }
  
  void LcfReader::ReadString(std::string& ref, size_t size) {
@@ -47,15 +138,18 @@
 -	Read(chars, 1, size);
 -	ref = Encode(std::string(chars));
 -	delete[] chars;
-+	std::string raw;
-+	raw.resize(size);
-+	if (size != 0)
-+		Read(&raw[0], 1, size);
-+	ref = Encode(raw);
++	ref.resize(size);
++	if (size != 0) {
++		Read(&ref[0], 1, size);
++		const std::string::size_type nul = ref.find('\0');
++		if (nul != std::string::npos)
++			ref.resize(nul);
++	}
++	ref = Encode(ref);
  }
  
  bool LcfReader::IsOk() const {
-@@ -176,15 +179,25 @@
+@@ -176,15 +189,25 @@
  }
  
  void LcfReader::Seek(size_t pos, SeekMode mode) {
@@ -84,7 +178,7 @@
  		break;
  	default:
  		assert(false && "Invalid SeekMode");
-@@ -192,11 +205,15 @@
+@@ -192,11 +215,15 @@
  }
  
  uint32_t LcfReader::Tell() {
@@ -102,19 +196,6 @@
  }
  
  #ifdef _DEBUG
-@@ -227,6 +244,12 @@
- }
- #else
- void LcfReader::Skip(const struct LcfReader::Chunk& chunk_info) {
-+	if (chunk_info.length <= 64) {
-+		uint8_t buffer[64];
-+		if (chunk_info.length != 0)
-+			Read(buffer, 1, chunk_info.length);
-+		return;
-+	}
- 	Seek((size_t)chunk_info.length, FromCurrent);
- }
- #endif
 --- a/src/ldb_eventcommand.cpp
 +++ b/src/ldb_eventcommand.cpp
 @@ -35,9 +35,10 @@

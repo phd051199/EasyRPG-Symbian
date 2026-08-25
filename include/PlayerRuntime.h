@@ -63,4 +63,9 @@ private:
     TBool iPlayerRunning;
 };
 
+// Resolve a key event to CPlayerRuntime::TPlayerKey flags via the shared
+// scan-code/char-code table (implemented in RuntimeEngine.cpp).
+TUint32 EasyRpgPlayerKeyForScanCode(TInt aScanCode);
+TUint32 EasyRpgPlayerKeyForCharCode(TInt aCode);
+
 #endif

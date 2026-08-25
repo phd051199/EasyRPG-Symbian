@@ -87,14 +87,6 @@ TUint32 CAudioMixer::HashKey(const TDesC& aKey)
     return hash;
 }
 
-
-TInt16 CAudioMixer::ReadPcm16(const TUint8* aData)
-{
-    const TUint16 value = static_cast<TUint16>(aData[0]) |
-                          static_cast<TUint16>(static_cast<TUint16>(aData[1]) << 8);
-    return static_cast<TInt16>(value);
-}
-
 void CAudioMixer::WritePcm16(TUint8* aData, TInt aValue)
 {
     if (aValue > 32767)
@@ -635,10 +627,17 @@ void CAudioMixer::FillOutputBuffer(TInt aBufferIndex)
     for (voice = 0; voice < KMaxVoices; ++voice)
         MixVoice(iVoices[voice], iMixBuffer, frameCount);
 
-    TUint8* destination = const_cast<TUint8*>(output.Ptr());
-    TInt sample;
-    for (sample = 0; sample < KOutputBufferBytes / 2; ++sample)
-        WritePcm16(destination + sample * 2, (iMixBuffer[sample] * 3) / 4);
+    TInt16* destination = reinterpret_cast<TInt16*>(const_cast<TUint8*>(output.Ptr()));
+    const TInt sampleCount = KOutputBufferBytes / 2;
+    for (TInt sample = 0; sample < sampleCount; ++sample)
+    {
+        TInt value = (iMixBuffer[sample] * 3) / 4;
+        if (value > 32767)
+            value = 32767;
+        else if (value < -32768)
+            value = -32768;
+        destination[sample] = static_cast<TInt16>(value);
+    }
 }
 
 TInt CAudioMixer::FreeOutputBufferIndex() const

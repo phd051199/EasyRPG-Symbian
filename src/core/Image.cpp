@@ -70,26 +70,6 @@ unsigned int Read32(const unsigned char* p) {
            (static_cast<unsigned int>(p[3]) << 24);
 }
 
-bool ReadWholeFile(FILE* stream, unsigned char*& data, unsigned& length) {
-    data = 0;
-    length = 0;
-    if (!stream || fseek(stream, 0, SEEK_END) != 0)
-        return false;
-    long size = ftell(stream);
-    if (size <= 0 || fseek(stream, 0, SEEK_SET) != 0)
-        return false;
-    data = static_cast<unsigned char*>(malloc(static_cast<unsigned>(size)));
-    if (!data)
-        return false;
-    if (fread(data, 1, static_cast<unsigned>(size), stream) != static_cast<unsigned>(size)) {
-        free(data);
-        data = 0;
-        return false;
-    }
-    length = static_cast<unsigned>(size);
-    return true;
-}
-
 void PrepareImageAllocation(unsigned pixel_count, unsigned transient_bytes) {
 #ifdef EASYRPG_SYMBIAN
 	if (!pixel_count)

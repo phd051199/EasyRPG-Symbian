@@ -48,6 +48,7 @@ private:
     TFileName iArchivePath;
     TState iState;
     TBool iCreated;
+    TBool iResumed;
     TGameLaunchStage iFailureStage;
     TBuf<32> iExitCategory;
     TInt iExitReason;

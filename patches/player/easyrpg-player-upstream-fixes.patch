@@ -67,79 +67,62 @@
  		case 4:
  			// Items
  			switch (com.parameters[6]) {
-@@ -1028,49 +1032,53 @@
+@@ -1028,49 +1032,11 @@
  		int start = com.parameters[0] == 2 ? Game_Variables[com.parameters[1]] : com.parameters[1];
  		int end = com.parameters[0] == 1 ? com.parameters[2] : start;
  
 -		for (i = start; i <= end; ++i) {
 -			const int old_value = Game_Variables[i];
-+		EasyRpgCompat::ApplyControlVariableRange(
-+			start, end, com.parameters[4], com.parameters[5], com.parameters[6], value,
-+			[](int variable_id) { return Game_Variables[variable_id]; },
-+			[](int low, int high) { return rand() % (high - low + 1) + low; },
-+			[&](int variable_id, int operation_value) {
-+			const int old_value = Game_Variables[variable_id];
- 			switch (com.parameters[3]) {
- 				case 0:
- 					// Assignement
+-			switch (com.parameters[3]) {
+-				case 0:
+-					// Assignement
 -					Game_Variables[i] = value;
-+					Game_Variables[variable_id] = operation_value;
- 					break;
- 				case 1:
- 					// Addition
+-					break;
+-				case 1:
+-					// Addition
 -					Game_Variables[i] += value;
-+					Game_Variables[variable_id] += operation_value;
- 					break;
- 				case 2:
- 					// Subtraction
+-					break;
+-				case 2:
+-					// Subtraction
 -					Game_Variables[i] -= value;
-+					Game_Variables[variable_id] -= operation_value;
- 					break;
- 				case 3:
- 					// Multiplication
+-					break;
+-				case 3:
+-					// Multiplication
 -					Game_Variables[i] *= value;
-+					Game_Variables[variable_id] *= operation_value;
- 					break;
- 				case 4:
- 					// Division
+-					break;
+-				case 4:
+-					// Division
 -					if (value != 0) {
 -						Game_Variables[i] /= value;
-+					if (operation_value != 0) {
-+						Game_Variables[variable_id] /= operation_value;
- 					}
- 					break;
- 				case 5:
- 					// Module
+-					}
+-					break;
+-				case 5:
+-					// Module
 -					if (value != 0) {
 -						Game_Variables[i] %= value;
-+					if (operation_value != 0) {
-+						Game_Variables[variable_id] %= operation_value;
- 					} else {
+-					} else {
 -						Game_Variables[i] = 0;
-+						Game_Variables[variable_id] = 0;
- 					}
- 			}
- 
+-					}
+-			}
+-
 -			if (Game_Variables[i] > MaxSize) {
 -				Game_Variables[i] = MaxSize;
-+			if (Game_Variables[variable_id] > MaxSize) {
-+				Game_Variables[variable_id] = MaxSize;
- 			}
+-			}
 -			if (Game_Variables[i] < MinSize) {
 -				Game_Variables[i] = MinSize;
-+			if (Game_Variables[variable_id] < MinSize) {
-+				Game_Variables[variable_id] = MinSize;
- 			}
+-			}
 -			if (Game_Variables[i] != old_value)
 -				Game_Map::SetNeedVariableRefresh(i);
 -		}
-+			if (Game_Variables[variable_id] != old_value)
-+				Game_Map::SetNeedVariableRefresh(variable_id);
-+		});
++		EasyRpgCompat::ApplyControlVariableRange(Game_Variables,
++			start, end, com.parameters[3], com.parameters[4], com.parameters[5],
++			com.parameters[6], value, MaxSize, MinSize,
++			[](int low, int high) { return rand() % (high - low + 1) + low; },
++			&Game_Map::SetNeedVariableRefresh);
  	}
  
  	return true;
-@@ -1375,11 +1383,11 @@
+@@ -1375,11 +1341,11 @@
  		amount = -amount;
  
  	for (const auto& actor : GetActors(com.parameters[0], com.parameters[1])) {
@@ -156,7 +139,7 @@
  
  		if (actor->IsDead()) {
  			Game_Battle::SetNeedRefresh(true);
-@@ -1910,14 +1918,15 @@
+@@ -1910,14 +1876,15 @@
  	int speed = com.parameters[1];
  	int tenths = com.parameters[2];
  	bool wait = com.parameters[3] != 0;

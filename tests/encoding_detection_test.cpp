@@ -293,6 +293,51 @@ void TestMixedVietnameseSaveRoundTrip() {
     std::remove(path);
 }
 
+void TestCompressedIntegerReader() {
+    const char* valid_path = "/tmp/easyrpg_symbian_lcf_int_test.bin";
+    {
+        const unsigned char bytes[] = {
+            0x8f, 0xff, 0xff, 0xff, 0x7f,
+            0x87, 0xff, 0xff, 0xff, 0x7f,
+            0x2a
+        };
+        std::FILE* file = std::fopen(valid_path, "wb");
+        Check(file != 0, "LCF compressed integer test file opens");
+        if (file) {
+            std::fwrite(bytes, 1, sizeof(bytes), file);
+            std::fclose(file);
+            LcfReader reader(valid_path);
+            Check(reader.ReadInt() == -1,
+                  "LCF compressed integer keeps negative 32-bit values");
+            Check(reader.ReadInt() == 0x7fffffff,
+                  "LCF compressed integer keeps positive 32-bit values");
+            Check(reader.ReadInt() == 42,
+                  "LCF compressed integer keeps parser alignment");
+        }
+    }
+    std::remove(valid_path);
+
+    const char* malformed_path = "/tmp/easyrpg_symbian_lcf_int_malformed_test.bin";
+    {
+        const unsigned char bytes[] = {
+            0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00,
+            0x2a
+        };
+        std::FILE* file = std::fopen(malformed_path, "wb");
+        Check(file != 0, "Malformed LCF compressed integer test file opens");
+        if (file) {
+            std::fwrite(bytes, 1, sizeof(bytes), file);
+            std::fclose(file);
+            LcfReader reader(malformed_path);
+            Check(reader.ReadInt() == 0,
+                  "LCF rejects compressed integers longer than five bytes");
+            Check(reader.ReadInt() == 42,
+                  "LCF malformed integer recovery consumes the whole value");
+        }
+    }
+    std::remove(malformed_path);
+}
+
 int TestDetection(const char* game_dir, const char* expected_first, bool expect_mixed) {
     const std::string ini_file = std::string(game_dir) + "/RPG_RT.ini";
     const std::string ini_encoding = ReaderUtil::GetEncoding(ini_file);
@@ -350,6 +395,7 @@ int main(int argc, char** argv) {
     std::printf("Recode unit tests:\n");
     TestRecode();
     TestMixedVietnameseSaveRoundTrip();
+    TestCompressedIntegerReader();
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];

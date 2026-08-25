@@ -1,0 +1,263 @@
+--- a/src/bitmap.cpp
++++ b/src/bitmap.cpp
+@@ -1209,7 +1209,7 @@
+ 
+ 	Bitmap src(pixels, width, height, 0, img_format);
+ 	Clear();
+-	Blit(0, 0, src, src.GetRect(), Opacity::opaque);
++	BlitFast(0, 0, src, src.GetRect(), Opacity::opaque);
+ 	free(pixels);
+ }
+ 
+--- a/src/bitmap_hslrgb.h
++++ b/src/bitmap_hslrgb.h
+@@ -56,7 +56,7 @@
+ 
+ static inline void HSL_adjust(int& h, int& s, int& l, int hue) {
+ 	h += hue;
+-	if (h > 0x600) h -= 0x600;
++	if (h >= 0x600) h -= 0x600;
+ 	if (s > 0xFF) s = 0xFF;
+ 	l = (l > 0xFF) ? 0xFF : (l < 0) ? 0 : l;
+ }
+--- a/src/game_interpreter.h
++++ b/src/game_interpreter.h
+@@ -46,6 +46,12 @@
+ 	~Game_Interpreter();
+ 
+ 	void Clear();
++
++	// Pads truncated command parameter vectors (foreign-engine or corrupt
++	// files) to the minimum each handler reads. Called once at data load,
++	// not on the per-frame reference path.
++	static void SanitizeEventCommands(std::vector<RPG::EventCommand>& commands);
++
+ 	void Setup(
+ 		const std::vector<RPG::EventCommand>& _list,
+ 		int _event_id,
+@@ -98,6 +104,8 @@
+ 	typedef bool (Game_Interpreter::*ContinuationFunction)(RPG::EventCommand const& com);
+ 	ContinuationFunction continuation;
+ 
++	static size_t MinimumEventCommandParameters(int code);
++
+ 	class CommandList {
+ 	public:
+ 		CommandList() : ref(&owned) {}
+@@ -126,6 +134,7 @@
+ 		size_t size() const { return ref->size(); }
+ 		RPG::EventCommand const& operator[](size_t value) const { return (*ref)[value]; }
+ 		const std::vector<RPG::EventCommand>& Get() const { return *ref; }
++		void SanitizeOwned();
+ 	private:
+ 		std::vector<RPG::EventCommand> owned;
+ 		const std::vector<RPG::EventCommand>* ref;
+--- a/src/game_interpreter.cpp
++++ b/src/game_interpreter.cpp
+@@ -157,6 +157,110 @@
+ // Is interpreter running.
+ bool Game_Interpreter::IsRunning() const {
+ 	return !list.empty();
++}
++
++size_t Game_Interpreter::MinimumEventCommandParameters(int code) {
++	switch (code) {
++	case Cmd::MessageOptions: return 4;
++	case Cmd::ChangeFaceGraphic: return 3;
++	case Cmd::ShowChoice:
++	case Cmd::ShowChoiceOption: return 1;
++	case Cmd::InputNumber: return 2;
++	case Cmd::ControlSwitches: return 4;
++	case Cmd::ControlVars: return 7;
++	case Cmd::TimerOperation: return 5;
++	case Cmd::ChangeGold: return 3;
++	case Cmd::ChangeItems: return 5;
++	case Cmd::ChangePartyMembers: return 3;
++	case Cmd::ChangeExp:
++	case Cmd::ChangeLevel:
++	case Cmd::ChangeParameters:
++	case Cmd::ChangeHP: return 6;
++	case Cmd::ChangeSkills:
++	case Cmd::ChangeEquipment:
++	case Cmd::ChangeSP: return 5;
++	case Cmd::ChangeCondition: return 4;
++	case Cmd::FullHeal: return 2;
++	case Cmd::SimulatedAttack: return 8;
++	case Cmd::Wait: return 1;
++	case Cmd::PlayBGM: return 4;
++	case Cmd::FadeOutBGM: return 1;
++	case Cmd::PlaySound: return 3;
++	case Cmd::ChangeHeroName:
++	case Cmd::ChangeHeroTitle: return 1;
++	case Cmd::ChangeSpriteAssociation: return 3;
++	case Cmd::ChangeActorFace:
++	case Cmd::ChangeVehicleGraphic: return 2;
++	case Cmd::ChangeSystemBGM: return 5;
++	case Cmd::ChangeSystemSFX: return 4;
++	case Cmd::ChangeSystemGraphics: return 1;
++	case Cmd::ChangeScreenTransitions: return 2;
++	case Cmd::MemorizeLocation: return 3;
++	case Cmd::SetVehicleLocation: return 5;
++	case Cmd::ChangeEventLocation: return 4;
++	case Cmd::TradeEventLocations: return 2;
++	case Cmd::StoreTerrainID:
++	case Cmd::StoreEventID: return 4;
++	case Cmd::EraseScreen:
++	case Cmd::ShowScreen: return 1;
++	case Cmd::TintScreen: return 6;
++	case Cmd::FlashScreen: return 6;
++	case Cmd::ShakeScreen: return 4;
++	case Cmd::WeatherEffects: return 2;
++	case Cmd::SpriteTransparency: return 1;
++	case Cmd::MoveEvent: return 4;
++	case Cmd::KeyInputProc: return 5;
++	case Cmd::ChangeMapTileset: return 1;
++	case Cmd::ChangePBG: return 6;
++	case Cmd::ChangeEncounterRate: return 1;
++	case Cmd::TileSubstitution: return 3;
++	case Cmd::TeleportTargets: return 6;
++	case Cmd::ChangeTeleportAccess:
++	case Cmd::ChangeEscapeAccess:
++	case Cmd::ChangeSaveAccess:
++	case Cmd::ChangeMainMenuAccess: return 1;
++	case Cmd::EscapeTarget: return 5;
++	case Cmd::ConditionalBranch: return 5;
++	case Cmd::JumpToLabel: return 1;
++	case Cmd::CallEvent: return 1;
++	case Cmd::ChangeClass: return 7;
++	case Cmd::ChangeBattleCommands: return 4;
++	case Cmd::RecallToLocation: return 3;
++	case Cmd::EnemyEncounter: return Player::IsRPG2k() ? 6 : 9;
++	case Cmd::OpenShop: return 3;
++	case Cmd::ShowInn: return 3;
++	case Cmd::EnterHeroName: return 3;
++	case Cmd::Teleport: return 3;
++	case Cmd::PanScreen: return 5;
++	case Cmd::ShowPicture: return 14;
++	case Cmd::MovePicture: return 16;
++	case Cmd::ErasePicture: return 1;
++	case Cmd::ShowBattleAnimation: return 4;
++	case Cmd::FlashSprite: return 7;
++	case Cmd::PlayMovie: return 5;
++	case Cmd::CallCommonEvent: return 1;
++	case Cmd::ForceFlee:
++	case Cmd::EnableCombo:
++	case Cmd::ChangeMonsterCondition: return 3;
++	case Cmd::ChangeMonsterHP:
++	case Cmd::ChangeMonsterMP: return 4;
++	case Cmd::ShowHiddenMonster: return 1;
++	case Cmd::ShowBattleAnimation_B: return 3;
++	case Cmd::ConditionalBranch_B: return 5;
++	default: return 0;
++	}
++}
++
++void Game_Interpreter::SanitizeEventCommands(std::vector<RPG::EventCommand>& commands) {
++	for (std::vector<RPG::EventCommand>::iterator it = commands.begin(); it != commands.end(); ++it) {
++		const size_t minimum = MinimumEventCommandParameters(it->code);
++		if (it->parameters.size() < minimum)
++			it->parameters.resize(minimum, 0);
++	}
++}
++
++void Game_Interpreter::CommandList::SanitizeOwned() {
++	Game_Interpreter::SanitizeEventCommands(owned);
+ }
+ 
+ // Setup.
+@@ -171,6 +275,7 @@
+ 	map_id = Game_Map::GetMapId();
+ 	event_id = _event_id;
+ 	list = _list;
++	list.SanitizeOwned();
+ 	triggered_by_decision_key = started_by_decision_key;
+ 
+ 	debug_x = dbg_x;
+@@ -666,6 +771,9 @@
+ }
+ 
+ std::vector<std::string> Game_Interpreter::GetChoices() {
++	if (index + 1 >= list.size())
++		return std::vector<std::string>();
++
+ 	// Let's find the choices
+ 	int current_indent = list[index + 1].indent;
+ 	std::vector<std::string> s_choices;
+--- a/src/game_map.cpp
++++ b/src/game_map.cpp
+@@ -456,13 +456,22 @@
+ 	// Make main interpreter "busy" if save contained events to prevent auto-events from starting
+ 	interpreter->SetupFromSave(Main_Data::game_data.events.commands, 0);
+ 
++	size_t save_event_index = 0;
+ 	events.reserve(map->events.size());
+ 	for (size_t i = 0; i < map->events.size(); ++i) {
+-		if (i < map_info.events.size()) {
+-			events.emplace_back(location.map_id, map->events[i], map_info.events[i]);
++		const RPG::Event& map_event = map->events[i];
++		while (save_event_index < map_info.events.size() &&
++				map_info.events[save_event_index].ID < map_event.ID) {
++			++save_event_index;
++		}
++
++		if (save_event_index < map_info.events.size() &&
++				map_info.events[save_event_index].ID == map_event.ID) {
++			events.emplace_back(location.map_id, map_event, map_info.events[save_event_index]);
++			++save_event_index;
+ 		}
+ 		else {
+-			events.emplace_back(location.map_id, map->events[i]);
++			events.emplace_back(location.map_id, map_event);
+ 		}
+ 
+ 		if (events.back().IsMoveRouteOverwritten())
+@@ -520,7 +529,24 @@
+ 
+ 	if (map.get() == NULL) {
+ 		Output::ErrorStr(LcfReader::GetError());
++	}
++
++	// Pad truncated event command parameters once at map load (foreign-engine
++	// or corrupt files) so interpreters never see short parameter vectors on
++	// the per-frame reference path. Common events come from the LDB, which is
++	// loaded once per process (one game per process on this port).
++	static bool common_events_sanitized = false;
++	if (!common_events_sanitized) {
++		common_events_sanitized = true;
++		for (RPG::CommonEvent& common_event : Data::commonevents) {
++			Game_Interpreter::SanitizeEventCommands(common_event.event_commands);
++		}
+ 	}
++	for (RPG::Event& map_event : map->events) {
++		for (RPG::EventPage& page : map_event.pages) {
++			Game_Interpreter::SanitizeEventCommands(page.event_commands);
++		}
++	}
+ 
+ 	refresh_type = Refresh_All;
+ 
+--- a/src/game_interpreter_map.cpp
++++ b/src/game_interpreter_map.cpp
+@@ -65,6 +65,7 @@
+ 		map_id = Game_Map::GetMapId();
+ 		event_id = _event_id;
+ 		list = save[_index].commands;
++		list.SanitizeOwned();
+ 		index = save[_index].current_command;
+ 		triggered_by_decision_key = save[_index].actioned;
+ 
+@@ -576,12 +577,12 @@
+ 	case 2: // Pan
+ 		direction = com.parameters[1];
+ 		distance = com.parameters[2];
+-		speed = com.parameters[3];
++		speed = std::max(1, std::min(6, com.parameters[3]));
+ 		waiting_pan_screen = com.parameters[4] != 0;
+ 		Game_Map::StartPan(direction, distance, speed, waiting_pan_screen);
+ 		break;
+ 	case 3: // Reset
+-		speed = com.parameters[3];
++		speed = std::max(1, std::min(6, com.parameters[3]));
+ 		distance = std::max(std::abs(Game_Map::GetPanX()), std::abs(Game_Map::GetPanY())) / SCREEN_TILE_WIDTH;
+ 		waiting_pan_screen = com.parameters[4] != 0;
+ 		Game_Map::ResetPan(speed, waiting_pan_screen);

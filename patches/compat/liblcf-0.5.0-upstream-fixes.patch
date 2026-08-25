@@ -38,7 +38,17 @@
  	}
 --- a/src/reader_struct.cpp
 +++ b/src/reader_struct.cpp
-@@ -52,7 +52,17 @@
+@@ -5,8 +5,7 @@
+  */
+ 
+ #include <cstring>
+-#include <iostream>
+-#include <iomanip>
++#include <stdio.h>
+ #include "ldb_reader.h"
+ #include "lmt_reader.h"
+ #include "lmu_reader.h"
+@@ -52,7 +51,17 @@
  #ifdef LCF_DEBUG_TRACE
  			printf("0x%02x (size: %d, pos: 0x%x): %s\n", chunk_info.ID, chunk_info.length, stream.Tell(), it->second->name);
  #endif
@@ -56,3 +66,27 @@
  		}
  		else
  			stream.Skip(chunk_info);
+@@ -66,10 +75,7 @@
+ 	for (int i = 0; fields[i] != NULL; i++) {
+ 		const Field<S>* field = fields[i];
+ 		if (field->id < last)
+-			std::cerr << "field order mismatch: " << field->id
+-					  << " after " << last
+-					  << " in struct " << name
+-					  << std::endl;
++			fprintf(stderr, "field order mismatch: %d after %d in struct %s\n", field->id, last, name);
+ 		//printf("\n%s", field->name);
+ 		if (field->IsDefault(obj, ref)) {
+ 			//printf(" -> default");
+@@ -89,10 +95,7 @@
+ 	for (int i = 0; fields[i] != NULL; i++) {
+ 		const Field<RPG::Save>* field = fields[i];
+ 		if (field->id < last)
+-			std::cerr << "field order mismatch: " << field->id
+-					  << " after " << last
+-					  << " in struct " << name
+-					  << std::endl;
++			fprintf(stderr, "field order mismatch: %d after %d in struct %s\n", field->id, last, name);
+ 		//printf("\n%s", field->name);
+ 		if (field->IsDefault(obj, ref)) {
+ 			//printf(" -> default");

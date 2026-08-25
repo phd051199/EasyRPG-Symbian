@@ -1,6 +1,4 @@
 #include "Encoding.h"
-#ifndef EASYRPG_LAUNCHER_PROCESS
-#endif
 #include "ZipVfs.h"
 
 namespace

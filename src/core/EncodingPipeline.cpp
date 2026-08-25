@@ -559,17 +559,18 @@ std::string Tcvn3ToUtf8(const std::string& input) {
     return output;
 }
 
-std::string Cp932ToUtf8(const std::string& input) {
+namespace {
+typedef int (*LegacyDecodeFn)(const unsigned char*, unsigned int, unsigned short*, unsigned int, unsigned int*);
+
+std::string LegacyDecodeToUtf8(LegacyDecodeFn aDecode, const std::string& input) {
     if (input.empty())
         return std::string();
 
     const unsigned int source_length = static_cast<unsigned int>(input.size());
     std::vector<unsigned short> utf16(source_length);
     unsigned int utf16_length = 0;
-    const int status = EasyRpgCoreCp932ToUtf16(
-        reinterpret_cast<const unsigned char*>(input.data()), source_length,
-        &utf16[0], source_length, &utf16_length);
-    if (status != 0)
+    if (aDecode(reinterpret_cast<const unsigned char*>(input.data()), source_length,
+                &utf16[0], source_length, &utf16_length) != 0)
         return std::string();
 
     std::string output;
@@ -578,25 +579,14 @@ std::string Cp932ToUtf8(const std::string& input) {
         AppendUtf8(output, utf16[index]);
     return output;
 }
+}
+
+std::string Cp932ToUtf8(const std::string& input) {
+    return LegacyDecodeToUtf8(&EasyRpgCoreCp932ToUtf16, input);
+}
 
 std::string GbkToUtf8(const std::string& input) {
-    if (input.empty())
-        return std::string();
-
-    const unsigned int source_length = static_cast<unsigned int>(input.size());
-    std::vector<unsigned short> utf16(source_length);
-    unsigned int utf16_length = 0;
-    const int status = EasyRpgCoreGbkToUtf16(
-        reinterpret_cast<const unsigned char*>(input.data()), source_length,
-        &utf16[0], source_length, &utf16_length);
-    if (status != 0)
-        return std::string();
-
-    std::string output;
-    output.reserve(utf16_length * 3u);
-    for (unsigned int index = 0; index < utf16_length; ++index)
-        AppendUtf8(output, utf16[index]);
-    return output;
+    return LegacyDecodeToUtf8(&EasyRpgCoreGbkToUtf16, input);
 }
 
 bool IsValidUtf8(const std::string& value);
@@ -715,14 +705,24 @@ bool Utf8ToUtf16(const std::string& input, std::vector<unsigned short>& output) 
     return true;
 }
 
-std::string Utf8ToCp932(const std::string& input) {
+namespace {
+typedef int (*LegacyEncodeFn)(const unsigned short*, unsigned int, unsigned char*, unsigned int, unsigned int*);
+
+std::string Utf8ToLegacyBytes(LegacyEncodeFn aEncode, const std::string& input) {
     std::vector<unsigned short> utf16;
-    if (!Utf8ToUtf16(input, utf16) || utf16.empty()) return std::string();
+    if (!Utf8ToUtf16(input, utf16) || utf16.empty())
+        return std::string();
     std::vector<unsigned char> encoded(utf16.size() * 2u);
     unsigned int encoded_length = 0;
-    const int status = EasyRpgCoreUtf16ToCp932(&utf16[0], static_cast<unsigned int>(utf16.size()), &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length);
-    if (status != 0) return std::string();
+    if (aEncode(&utf16[0], static_cast<unsigned int>(utf16.size()),
+                &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length) != 0)
+        return std::string();
     return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+}
+}
+
+std::string Utf8ToCp932(const std::string& input) {
+    return Utf8ToLegacyBytes(&EasyRpgCoreUtf16ToCp932, input);
 }
 
 std::string Utf8ToTcvn3(const std::string& input) {
@@ -759,15 +759,7 @@ std::string Utf8ToMixedVietnamese(const std::string& input) {
 }
 
 std::string Utf8ToGbk(const std::string& input) {
-    std::vector<unsigned short> utf16;
-    if (!Utf8ToUtf16(input, utf16) || utf16.empty()) return std::string();
-    std::vector<unsigned char> encoded(utf16.size() * 2u);
-    unsigned int encoded_length = 0;
-    const int status = EasyRpgCoreUtf16ToGbk(
-        &utf16[0], static_cast<unsigned int>(utf16.size()),
-        &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length);
-    if (status != 0) return std::string();
-    return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+    return Utf8ToLegacyBytes(&EasyRpgCoreUtf16ToGbk, input);
 }
 
 bool ContainsJapaneseKana(const std::vector<unsigned short>& utf16) {
@@ -1059,9 +1051,6 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
     for (std::vector<EasyRpgCharsetDetector::Guess>::const_iterator it = guesses.begin();
          it != guesses.end(); ++it)
         PushEncoding(encodings, it->encoding);
-
-    if (mixed_vietnamese && !strong_chinese)
-        PushEncoding(encodings, "EASYRPG_VI_CP932");
 
     PushEncoding(encodings, "SHIFT_JIS");
     PushEncoding(encodings, "GBK");

@@ -171,19 +171,19 @@ uint32_t PackNative32(uint32_t aPixel)
     return Bitmap::pixel_format.rgba_to_uint32_t(red, green, blue, alpha);
 }
 
-uint32_t ReadColorPixel(const uint8_t* aRow, int aX, int aBpp)
+template <int Bpp>
+inline uint32_t ReadColorPixelAt(const uint8_t* aRow, int aX)
 {
-    if (aBpp == 2)
+    if (Bpp == 2)
         return ExpandRgb565(reinterpret_cast<const uint16_t*>(aRow)[aX]);
-    if (aBpp == 4)
-        return ExpandNative32(reinterpret_cast<const uint32_t*>(aRow)[aX]);
-    return 0;
+    return ExpandNative32(reinterpret_cast<const uint32_t*>(aRow)[aX]);
 }
 
-void BlendColorPixel(uint8_t* aRow, int aX, int aBpp, uint32_t aSource)
+template <int Bpp>
+inline void BlendColorPixelAt(uint8_t* aRow, int aX, uint32_t aSource)
 {
     const uint32_t sourceAlpha = aSource >> 24;
-    if (aBpp == 2)
+    if (Bpp == 2)
     {
         uint16_t* destination = reinterpret_cast<uint16_t*>(aRow) + aX;
         if (sourceAlpha == 255)
@@ -205,7 +205,7 @@ void BlendColorPixel(uint8_t* aRow, int aX, int aBpp, uint32_t aSource)
                 ((outGreen >> 2) << 5) | (outBlue >> 3));
         }
     }
-    else if (aBpp == 4)
+    else
     {
         uint32_t* destination = reinterpret_cast<uint32_t*>(aRow) + aX;
         if (sourceAlpha == 255)
@@ -215,16 +215,38 @@ void BlendColorPixel(uint8_t* aRow, int aX, int aBpp, uint32_t aSource)
     }
 }
 
-uint8_t GlyphAlpha(const uint8_t* aRow, int aX, int aBpp)
+template <int Bpp>
+inline uint8_t GlyphAlphaAt(const uint8_t* aRow, int aX)
 {
-    if (aBpp == 1)
+    if (Bpp == 1)
         return aRow[aX];
-    if (aBpp == 4)
+    const uint32_t pixel = reinterpret_cast<const uint32_t*>(aRow)[aX];
+    return Bitmap::pixel_format.a.unpack(pixel);
+}
+
+template <int GlyphBpp, int DestBpp>
+void DrawSolidGlyphLoop(const uint8_t* aGlyphPixels,
+                        uint8_t* aDestinationPixels,
+                        int aX, int aY,
+                        int aGlyphLeft, int aGlyphTop,
+                        int aGlyphRight, int aGlyphBottom,
+                        int aGlyphPitch, int aDestinationPitch,
+                        uint32_t aColor)
+{
+    for (int glyphY = aGlyphTop; glyphY < aGlyphBottom; ++glyphY)
     {
-        const uint32_t pixel = reinterpret_cast<const uint32_t*>(aRow)[aX];
-        return Bitmap::pixel_format.a.unpack(pixel);
+        uint8_t* destination = aDestinationPixels + (aY + glyphY) * aDestinationPitch;
+        const uint8_t* glyphRow = aGlyphPixels + glyphY * aGlyphPitch;
+        for (int glyphX = aGlyphLeft; glyphX < aGlyphRight; ++glyphX)
+        {
+            const int destinationX = aX + glyphX;
+            const uint8_t mask = GlyphAlphaAt<GlyphBpp>(glyphRow, glyphX);
+            if (mask == 255)
+                BlendColorPixelAt<DestBpp>(destination, destinationX, aColor);
+            else if (mask != 0)
+                BlendColorPixelAt<DestBpp>(destination, destinationX, ScalePixel(aColor, mask));
+        }
     }
-    return 0;
 }
 
 void DrawSolidGlyph(Bitmap& aDestination,
@@ -269,19 +291,48 @@ void DrawSolidGlyph(Bitmap& aDestination,
 
     uint8_t* destinationPixels = reinterpret_cast<uint8_t*>(aDestination.pixels());
     const uint8_t* glyphPixels = reinterpret_cast<const uint8_t*>(aGlyph.pixels());
-    for (int glyphY = glyphTop; glyphY < glyphBottom; ++glyphY)
+    if (glyphBpp == 1 && destinationBpp == 2)
+        DrawSolidGlyphLoop<1, 2>(glyphPixels, destinationPixels, aX, aY,
+                                 glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                 glyphPitch, destinationPitch, color);
+    else if (glyphBpp == 1)
+        DrawSolidGlyphLoop<1, 4>(glyphPixels, destinationPixels, aX, aY,
+                                 glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                 glyphPitch, destinationPitch, color);
+    else if (destinationBpp == 2)
+        DrawSolidGlyphLoop<4, 2>(glyphPixels, destinationPixels, aX, aY,
+                                 glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                 glyphPitch, destinationPitch, color);
+    else
+        DrawSolidGlyphLoop<4, 4>(glyphPixels, destinationPixels, aX, aY,
+                                 glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                 glyphPitch, destinationPitch, color);
+}
+
+template <int GlyphBpp, int SystemBpp, int DestBpp>
+void DrawSystemGlyphLoop(const uint8_t* aGlyphPixels,
+                         const uint8_t* aSystemPixels,
+                         uint8_t* aDestinationPixels,
+                         int aX, int aY,
+                         int aGlyphLeft, int aGlyphTop,
+                         int aGlyphRight, int aGlyphBottom,
+                         int aGlyphPitch, int aSystemPitch, int aDestinationPitch,
+                         int aSourceX, int aSourceY)
+{
+    for (int glyphY = aGlyphTop; glyphY < aGlyphBottom; ++glyphY)
     {
-        const int destinationY = aY + glyphY;
-        uint8_t* destination = destinationPixels + destinationY * destinationPitch;
-        const uint8_t* glyphRow = glyphPixels + glyphY * glyphPitch;
-        for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
+        uint8_t* destination = aDestinationPixels + (aY + glyphY) * aDestinationPitch;
+        const uint8_t* source = aSystemPixels + (aSourceY + glyphY) * aSystemPitch;
+        const uint8_t* glyphRow = aGlyphPixels + glyphY * aGlyphPitch;
+        for (int glyphX = aGlyphLeft; glyphX < aGlyphRight; ++glyphX)
         {
             const int destinationX = aX + glyphX;
-            const uint8_t mask = GlyphAlpha(glyphRow, glyphX, glyphBpp);
+            const uint8_t mask = GlyphAlphaAt<GlyphBpp>(glyphRow, glyphX);
+            const uint32_t sourcePixel = ReadColorPixelAt<SystemBpp>(source, aSourceX + glyphX);
             if (mask == 255)
-                BlendColorPixel(destination, destinationX, destinationBpp, color);
+                BlendColorPixelAt<DestBpp>(destination, destinationX, sourcePixel);
             else if (mask != 0)
-                BlendColorPixel(destination, destinationX, destinationBpp, ScalePixel(color, mask));
+                BlendColorPixelAt<DestBpp>(destination, destinationX, ScalePixel(sourcePixel, mask));
         }
     }
 }
@@ -347,24 +398,38 @@ void DrawSystemGlyph(Bitmap& aDestination,
     uint8_t* destinationPixels = reinterpret_cast<uint8_t*>(aDestination.pixels());
     const uint8_t* systemPixels = reinterpret_cast<const uint8_t*>(aSystem.pixels());
     const uint8_t* glyphPixels = reinterpret_cast<const uint8_t*>(aGlyph.pixels());
-    for (int glyphY = glyphTop; glyphY < glyphBottom; ++glyphY)
-    {
-        const int destinationY = aY + glyphY;
-        const int systemY = sourceY + glyphY;
-        uint8_t* destination = destinationPixels + destinationY * destinationPitch;
-        const uint8_t* source = systemPixels + systemY * systemPitch;
-        const uint8_t* glyphRow = glyphPixels + glyphY * glyphPitch;
-        for (int glyphX = glyphLeft; glyphX < glyphRight; ++glyphX)
-        {
-            const int destinationX = aX + glyphX;
-            const uint8_t mask = GlyphAlpha(glyphRow, glyphX, glyphBpp);
-            const uint32_t sourcePixel = ReadColorPixel(source, sourceX + glyphX, systemBpp);
-            if (mask == 255)
-                BlendColorPixel(destination, destinationX, destinationBpp, sourcePixel);
-            else if (mask != 0)
-                BlendColorPixel(destination, destinationX, destinationBpp, ScalePixel(sourcePixel, mask));
-        }
-    }
+    if (glyphBpp == 1 && systemBpp == 2 && destinationBpp == 2)
+        DrawSystemGlyphLoop<1, 2, 2>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
+    else if (glyphBpp == 1 && systemBpp == 2)
+        DrawSystemGlyphLoop<1, 2, 4>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
+    else if (glyphBpp == 1 && destinationBpp == 2)
+        DrawSystemGlyphLoop<1, 4, 2>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
+    else if (glyphBpp == 1)
+        DrawSystemGlyphLoop<1, 4, 4>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
+    else if (systemBpp == 2 && destinationBpp == 2)
+        DrawSystemGlyphLoop<4, 2, 2>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
+    else if (systemBpp == 2)
+        DrawSystemGlyphLoop<4, 2, 4>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
+    else if (destinationBpp == 2)
+        DrawSystemGlyphLoop<4, 4, 2>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
+    else
+        DrawSystemGlyphLoop<4, 4, 4>(glyphPixels, systemPixels, destinationPixels, aX, aY,
+                                     glyphLeft, glyphTop, glyphRight, glyphBottom,
+                                     glyphPitch, systemPitch, destinationPitch, sourceX, sourceY);
 }
 
 bool IsExFontCode(char32_t aCode)
@@ -535,7 +600,7 @@ void Text::Draw(Bitmap& aDestination,
         if (code == U'\n')
         {
             x = aX;
-            y += lineHeight > 0 ? lineHeight : 12;
+            y += lineHeight;
             continue;
         }
 

@@ -7,25 +7,11 @@ namespace
 {
 // Region budgets, kept separate from PlayerConfig.h::KMaximumScreenUpdateRegions
 // (upstream damage tracking cap): these bound what presentation can batch.
+// ponytail: per-frame merging lives in core RenderDamage::OptimizeDirty; here
+// we only cap accumulation — more than KMaximumPresentRegions pending rects
+// means a heavy-change burst, which a full paint serves just as well.
 const TInt KDirtyRegionCapacity = 16;
 const TInt KMaximumPresentRegions = 4;
-const TInt KDirtyRegionFixedCostDivisor = 6;
-const TInt KFullRedrawAreaPercent = 88;
-
-TInt RectArea(const TRect& aRect)
-{
-    const TInt width = aRect.iBr.iX - aRect.iTl.iX;
-    const TInt height = aRect.iBr.iY - aRect.iTl.iY;
-    return width > 0 && height > 0 ? width * height : 0;
-}
-
-TRect UnionRects(const TRect& aFirst, const TRect& aSecond)
-{
-    return TRect(Min(aFirst.iTl.iX, aSecond.iTl.iX),
-                 Min(aFirst.iTl.iY, aSecond.iTl.iY),
-                 Max(aFirst.iBr.iX, aSecond.iBr.iX),
-                 Max(aFirst.iBr.iY, aSecond.iBr.iY));
-}
 
 TBool RectsEqual(const TRect& aFirst, const TRect& aSecond)
 {
@@ -33,71 +19,6 @@ TBool RectsEqual(const TRect& aFirst, const TRect& aSecond)
         aFirst.iTl.iY == aSecond.iTl.iY &&
         aFirst.iBr.iX == aSecond.iBr.iX &&
         aFirst.iBr.iY == aSecond.iBr.iY;
-}
-
-void RemoveDirtyRegion(TEasyRpgDirtyRegionSlot* aRegions, TInt& aRegionCount, TInt aIndex)
-{
-    for (TInt index = aIndex + 1; index < aRegionCount; ++index)
-        aRegions[index - 1].iRect = aRegions[index].iRect;
-    --aRegionCount;
-}
-
-TInt DirtyRegionArea(const TEasyRpgDirtyRegionSlot* aRegions, TInt aRegionCount)
-{
-    TInt area = 0;
-    for (TInt index = 0; index < aRegionCount; ++index)
-        area += RectArea(aRegions[index].iRect);
-    return area;
-}
-
-void OptimizeDirtyRegions(TEasyRpgDirtyRegionSlot* aRegions, TInt& aRegionCount, const TRect& aFrameRect)
-{
-    if (aRegionCount <= 0)
-        return;
-
-    while (aRegionCount > KMaximumPresentRegions)
-    {
-        TInt selectedFirst = 0;
-        TInt selectedSecond = 1;
-        TInt selectedIncrease = 0x7fffffff;
-        for (TInt first = 0; first < aRegionCount - 1; ++first)
-        {
-            for (TInt second = first + 1; second < aRegionCount; ++second)
-            {
-                const TRect merged = UnionRects(aRegions[first].iRect, aRegions[second].iRect);
-                const TInt increase = RectArea(merged) -
-                    RectArea(aRegions[first].iRect) - RectArea(aRegions[second].iRect);
-                if (increase < selectedIncrease)
-                {
-                    selectedFirst = first;
-                    selectedSecond = second;
-                    selectedIncrease = increase;
-                }
-            }
-        }
-        aRegions[selectedFirst].iRect = UnionRects(aRegions[selectedFirst].iRect, aRegions[selectedSecond].iRect);
-        RemoveDirtyRegion(aRegions, aRegionCount, selectedSecond);
-    }
-
-    TRect combined = aRegions[0].iRect;
-    for (TInt index = 1; index < aRegionCount; ++index)
-        combined = UnionRects(combined, aRegions[index].iRect);
-
-    const TInt frameArea = RectArea(aFrameRect);
-    const TInt fixedRegionCost = frameArea / KDirtyRegionFixedCostDivisor;
-    const TInt separateCost = DirtyRegionArea(aRegions, aRegionCount) +
-        Max(0, aRegionCount - 1) * fixedRegionCost;
-    if (RectArea(combined) <= separateCost)
-    {
-        aRegions[0].iRect = combined;
-        aRegionCount = 1;
-    }
-
-    if (DirtyRegionArea(aRegions, aRegionCount) * 100 > frameArea * KFullRedrawAreaPercent)
-    {
-        aRegions[0].iRect = aFrameRect;
-        aRegionCount = 1;
-    }
 }
 
 }
@@ -340,7 +261,7 @@ void CDisplaySurface::PresentL()
 
     for (TInt index = 0; index < currentDirtyCount; ++index)
     {
-        if (iDirtyRegionCount >= KDirtyRegionCapacity)
+        if (iDirtyRegionCount >= KMaximumPresentRegions)
         {
             iDirtyRegions[0].iRect = frameRect;
             iDirtyRegionCount = 1;
@@ -349,11 +270,5 @@ void CDisplaySurface::PresentL()
             return;
         }
         iDirtyRegions[iDirtyRegionCount++].iRect = currentDirty[index].iRect;
-    }
-    OptimizeDirtyRegions(iDirtyRegions, iDirtyRegionCount, frameRect);
-    if (iDirtyRegionCount == 1 && RectsEqual(iDirtyRegions[0].iRect, frameRect))
-    {
-        iPresentScrollX = 0;
-        iPresentScrollY = 0;
     }
 }

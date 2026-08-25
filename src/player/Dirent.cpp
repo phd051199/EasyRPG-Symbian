@@ -99,8 +99,13 @@ const TInt KVirtualBufferMaxBytes = 128 * 1024;
 const TInt KVirtualBufferBudgetBytes = 1024 * 1024;
 const TInt KVirtualLowMemoryBufferMaxBytes = 32 * 1024;
 const TInt KVirtualLowMemoryBufferBudgetBytes = 128 * 1024;
-const TInt KVirtualReadAheadBytes = 16 * 1024;
-const TInt KVirtualLowMemoryReadAheadBytes = 8 * 1024;
+// Stored game archives are random-access slices of one large RFile. A larger
+// sequential window cuts file-server round trips while liblcf parses LMU/LDB
+// and other assets that are too large for the small-file buffer. 32 KiB is a
+// good E72 trade-off: at the hard 32-handle limit the theoretical footprint is
+// only 1 MiB, and low-memory mode halves it immediately.
+const TInt KVirtualReadAheadBytes = 32 * 1024;
+const TInt KVirtualLowMemoryReadAheadBytes = 16 * 1024;
 const TInt KVirtualDirCacheSlots = 8;
 const TInt KVirtualDirCacheMaxEntries = 512;
 const TInt KVirtualDirCacheEntryBudget = 1024;
@@ -384,13 +389,7 @@ void AppendVirtualEntryL(EasyRpgDir& aDir, const TDesC& aName, TUint8 aType)
         }
     }
 
-    User::LeaveIfError(aDir.iVirtualTypes.Append(aType));
-    TRAPD(error, aDir.iVirtualNames->AppendL(aName));
-    if (error != KErrNone)
-    {
-        aDir.iVirtualTypes.Remove(aDir.iVirtualTypes.Count() - 1);
-        User::Leave(error);
-    }
+    AppendVirtualEntryDirectL(aDir, aName, aType);
 }
 
 EasyRpgDir* OpenVirtualDirL(const char* aPath)

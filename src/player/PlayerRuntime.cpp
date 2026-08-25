@@ -83,6 +83,12 @@ void ResolveResourcePathL(CZipVfs& aResources,
         User::Leave(KErrNotFound);
     }
 
+    // Extension substitution only helps extensionless names; a dotted name
+    // that missed the exact lookup (and its known-extension check above)
+    // would just burn 17 archive probes before failing anyway.
+    if (file.Locate('.') >= 0)
+        User::Leave(KErrNotFound);
+
     for (TUint index = 0; index < sizeof(extensions) / sizeof(extensions[0]); ++index)
     {
         if (base.Length() + extensions[index].Length() > base.MaxLength())
@@ -171,6 +177,27 @@ extern "C" int EasyRpgPlatformPrepareAllocation(int aBytes)
     EasyRpgUpstreamPlayerTrimMemory(pressure);
     User::Heap().Compress();
     return EasyRpgPlatformFreeRamBytes();
+}
+
+extern "C" unsigned int EasyRpgPlatformFastCounter(void)
+{
+    return User::FastCounter();
+}
+
+extern "C" unsigned int EasyRpgPlatformFastCounterFrequency(void)
+{
+    TInt frequency = 0;
+    return HAL::Get(HALData::EFastCounterFrequency, frequency) == KErrNone && frequency > 0
+        ? static_cast<unsigned int>(frequency)
+        : 0u;
+}
+
+extern "C" int EasyRpgPlatformFastCounterCountsUp(void)
+{
+    TInt countsUp = 1;
+    if (HAL::Get(HALData::EFastCounterCountsUp, countsUp) != KErrNone)
+        return 1;
+    return countsUp != 0 ? 1 : 0;
 }
 
 extern "C" int EasyRpgResolveResource(const char* aDirectory,
