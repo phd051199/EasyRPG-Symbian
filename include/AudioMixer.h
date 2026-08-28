@@ -8,6 +8,8 @@
 class CAudioMixer : public CBase, public MMdaAudioOutputStreamCallback
 {
 public:
+    typedef void (*TStreamRefillCallback)(TAny* aContext);
+
     enum TStreamBus
     {
         EStreamBgm = 0,
@@ -15,7 +17,8 @@ public:
         EStreamBusCount
     };
 
-    static CAudioMixer* NewL();
+    static CAudioMixer* NewL(TStreamRefillCallback aRefillCallback = NULL,
+                             TAny* aRefillContext = NULL);
     ~CAudioMixer();
 
     void CachePcm16L(const TDesC& aKey, const TInt16* aSamples, TInt aFrameCount, TInt aSampleRate, TInt aChannels, TBool aPinned = EFalse);
@@ -42,7 +45,11 @@ private:
         KOutputBufferBytes = 4096,
         KOutputBufferCount = 7,
         KOutputQueueDepth = 6,
-        KOutputFillBurst = 1,
+        // Keep a few buffers queued ahead so short render / map-load spikes do
+        // not starve CMdaAudioOutputStream. Three 4 KiB stereo buffers are
+        // about 139 ms at 22.05 kHz, which is enough jitter tolerance without
+        // growing the mixer allocation.
+        KOutputFillBurst = 3,
         KStreamBufferFrames = 4096,
         KMaxCachedClips = 128,
         KMaxCachedKeyLength = 160,
@@ -83,8 +90,9 @@ private:
         TBool iActive;
     };
 
-    CAudioMixer();
+    CAudioMixer(TStreamRefillCallback aRefillCallback, TAny* aRefillContext);
     void ConstructL();
+    void OpenOutputStream();
     TCachedClip* FindCachedClip(const TDesC& aKey);
     const TCachedClip* FindCachedClip(const TDesC& aKey) const;
     void LinkCachedClip(TInt aClipIndex);
@@ -103,8 +111,10 @@ private:
     TInt FreeOutputBufferIndex() const;
     TInt OutputBufferIndex(const TDesC8& aBuffer) const;
     TBool HasAudioToMix() const;
+    TBool HasActiveStream() const;
+    TBool NeedsStreamRefill() const;
     TBool CanFillOutputBuffer() const;
-    void QueueOutputBuffers();
+    void QueueOutputBuffers(TInt aMaxBuffers = KOutputFillBurst);
     void ResetOutputQueue();
     static void ClearVoice(TVoice& aVoice);
     static TBool VoiceIsActive(const TVoice& aVoice);
@@ -129,6 +139,11 @@ private:
     TBool iShuttingDown;
     TInt iLastError;
     TInt iMasterVolume;
+    TStreamRefillCallback iRefillCallback;
+    TAny* iRefillContext;
+    TUint32 iNextOpenAttemptMs;
+    TBool iOpening;
+    TBool iWaitingForPlayComplete;
 
     void MaoscOpenComplete(TInt aError);
     void MaoscBufferCopied(TInt aError, const TDesC8& aBuffer);

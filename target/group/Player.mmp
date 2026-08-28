@@ -9,6 +9,7 @@ OPTION GCCE       -O3 -fomit-frame-pointer -fno-rtti -mtune=arm1136jf-s
 SOURCEPATH        ..\..\src\player
 SOURCE            RuntimeMain.cpp
 SOURCE            RuntimeEngine.cpp
+SOURCE            KeyMapping.cpp
 SOURCE            GameMenu.cpp
 SOURCE            FrameTimer.cpp
 SOURCE            DisplaySurface.cpp

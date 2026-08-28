@@ -10,6 +10,7 @@
 #include "AppConfig.h"
 #include "DirentBridge.h"
 #include "DisplaySurface.h"
+#include "KeyMapping.h"
 #include "MovieBridge.h"
 #include "PerfOverlay.h"
 #include "PlayerRuntime.h"
@@ -608,7 +609,8 @@ TUint32 CRuntimeEngine::GameMenuFeatures() const
     return EGameMenuFeatureSound |
            EGameMenuFeatureVolume |
            EGameMenuFeatureFps |
-           EGameMenuFeatureHelp;
+           EGameMenuFeatureHelp |
+           EGameMenuFeatureControls;
 }
 
 void CRuntimeEngine::GameMenuSetSoundEnabledL(TBool aEnabled)
@@ -663,77 +665,6 @@ void CRuntimeEngine::GameMenuRequestRedraw()
     iNeedsFullRedraw = ETrue;
     if (iDirectScreenActive)
         TRAP_IGNORE(PresentDirectL(ETrue));
-}
-
-namespace
-{
-
-// One row per physical mapping: scan code (EStdKey* or char-as-scancode on
-// QWERTY devices) and character code resolve to the same player key. Lookup
-// falls back from scan code to char code, so key-up/repeat events resolve
-// on any device without caching scancode associations.
-struct TKeyMapEntry
-{
-    TInt iScanCode;
-    TInt iCharCode;
-    TUint32 iPlayerKey;
-};
-
-const TKeyMapEntry KKeyMap[] =
-{
-    { EStdKeyUpArrow, EKeyUpArrow, CPlayerRuntime::EKeyUp },
-    { 'W', 'w', CPlayerRuntime::EKeyUp },
-    { EStdKeyDownArrow, EKeyDownArrow, CPlayerRuntime::EKeyDown },
-    { 'S', 's', CPlayerRuntime::EKeyDown },
-    { EStdKeyLeftArrow, EKeyLeftArrow, CPlayerRuntime::EKeyLeft },
-    { 'A', 'a', CPlayerRuntime::EKeyLeft },
-    { EStdKeyRightArrow, EKeyRightArrow, CPlayerRuntime::EKeyRight },
-    { 'D', 'd', CPlayerRuntime::EKeyRight },
-    { EStdKeyEnter, EKeyEnter, CPlayerRuntime::EKeyDecision },
-    { EStdKeyDevice3, EKeyDevice3, CPlayerRuntime::EKeyDecision },
-    { EStdKeySpace, ' ', CPlayerRuntime::EKeyDecision },
-    { 'Z', 'z', CPlayerRuntime::EKeyDecision },
-    { EStdKeyEscape, EKeyEscape, CPlayerRuntime::EKeyCancel },
-    { EStdKeyLeftShift, EKeyLeftShift, CPlayerRuntime::EKeyShift },
-    { EStdKeyRightShift, EKeyRightShift, CPlayerRuntime::EKeyShift },
-    { '0', '0', CPlayerRuntime::EKeyN0 },
-    { '1', '1', CPlayerRuntime::EKeyN1 },
-    { '2', '2', CPlayerRuntime::EKeyN2 },
-    { '3', '3', CPlayerRuntime::EKeyN3 },
-    { '4', '4', CPlayerRuntime::EKeyN4 },
-    { '5', '5', CPlayerRuntime::EKeyN5 },
-    { '6', '6', CPlayerRuntime::EKeyN6 },
-    { '7', '7', CPlayerRuntime::EKeyN7 },
-    { '8', '8', CPlayerRuntime::EKeyN8 },
-    { '9', '9', CPlayerRuntime::EKeyN9 },
-    { EStdKeyNkpPlus, '+', CPlayerRuntime::EKeyPlus },
-    { EStdKeyMinus, '-', CPlayerRuntime::EKeyMinus },
-    { EStdKeyNkpMinus, 0, CPlayerRuntime::EKeyMinus },
-    { EStdKeyNkpAsterisk, '*', CPlayerRuntime::EKeyMultiply },
-    { EStdKeyForwardSlash, '/', CPlayerRuntime::EKeyDivide },
-    { EStdKeyNkpForwardSlash, 0, CPlayerRuntime::EKeyDivide },
-    { EStdKeyFullStop, '.', CPlayerRuntime::EKeyPeriod },
-    { EStdKeyNkpFullStop, 0, CPlayerRuntime::EKeyPeriod }
-};
-
-const TInt KKeyMapCount = sizeof(KKeyMap) / sizeof(KKeyMap[0]);
-
-} // namespace
-
-TUint32 EasyRpgPlayerKeyForScanCode(TInt aScanCode)
-{
-    for (TInt index = 0; index < KKeyMapCount; ++index)
-        if (KKeyMap[index].iScanCode == aScanCode)
-            return KKeyMap[index].iPlayerKey;
-    return 0;
-}
-
-TUint32 EasyRpgPlayerKeyForCharCode(TInt aCode)
-{
-    for (TInt index = 0; index < KKeyMapCount; ++index)
-        if (KKeyMap[index].iCharCode == aCode)
-            return KKeyMap[index].iPlayerKey;
-    return 0;
 }
 
 void CRuntimeEngine::ClearPlayerInput()
@@ -806,9 +737,34 @@ void CRuntimeEngine::HandleKeyEvent(TInt aType, const TKeyEvent& aKey)
         return;
     }
 
-    TUint32 playerKey = EasyRpgPlayerKeyForScanCode(aKey.iScanCode);
-    if (playerKey == 0 && aKey.iCode != 0)
-        playerKey = EasyRpgPlayerKeyForCharCode(aKey.iCode);
+    const TUint32 playerKey = EasyRpgPlayerKeyForEvent(aKey);
+
+    // E72/S60 keyboard drivers do not always emit a standalone Shift event
+    // for every translated key sequence. Keep EasyRPG's SHIFT action in sync
+    // with the modifier flags as well, so Shift+direction/action reaches the
+    // upstream input bitset as two simultaneously held keys.
+    if (!EasyRpgHasCustomPlayerKeyBinding(CPlayerRuntime::EKeyShift) &&
+        playerKey != CPlayerRuntime::EKeyShift)
+    {
+        TInt modifiers = aKey.iModifiers;
+        const TInt windowModifiers = iWs.GetModifierState();
+        if (windowModifiers >= 0)
+            modifiers |= windowModifiers;
+        const TBool shiftPressed =
+            (modifiers & (EModifierLeftShift |
+                          EModifierRightShift |
+                          EModifierShift)) != 0;
+        const TBool shiftWasPressed =
+            (iHeldPlayerKeys & CPlayerRuntime::EKeyShift) != 0;
+        if (shiftPressed != shiftWasPressed)
+        {
+            if (shiftPressed)
+                iHeldPlayerKeys |= CPlayerRuntime::EKeyShift;
+            else
+                iHeldPlayerKeys &= ~CPlayerRuntime::EKeyShift;
+            iRuntime->SetKeyState(CPlayerRuntime::EKeyShift, shiftPressed);
+        }
+    }
 
     if (aType == EEventKeyDown && playerKey != 0)
     {

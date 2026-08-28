@@ -14,7 +14,8 @@ enum TGameMenuFeature
     EGameMenuFeatureVolume = 1u << 1,
     EGameMenuFeatureFps = 1u << 2,
     EGameMenuFeatureHelp = 1u << 3,
-    EGameMenuFeatureReset = 1u << 4
+    EGameMenuFeatureReset = 1u << 4,
+    EGameMenuFeatureControls = 1u << 5
 };
 
 class MGameMenuHost
@@ -54,6 +55,7 @@ private:
         EItemVolume,
         EItemFps,
         EItemHelp,
+        EItemControls,
         EItemCustom,
         EItemReset,
         EItemExit
@@ -72,18 +74,28 @@ private:
     void AdjustSelectionL(TInt aDelta);
     void NormalizeSelection();
     void MoveSelection(TInt aDelta);
+    void NormalizeControlSelection();
+    void MoveControlSelection(TInt aDelta);
+    void ActivateControlSelectionL();
+    TBool HandleControlCaptureL(TInt aType, const TKeyEvent& aKey);
+    void ControlItemText(TInt aIndex, TDes8& aText) const;
     TInt MapMenuKey(const TKeyEvent& aKey) const;
     TBool HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent& aKey);
     TBool TriggerMenuKey(TInt aMenuKey, TInt aType, const TKeyEvent& aKey);
     void DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
     void DrawHelpL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
+    void DrawControlsL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
 
 private:
     MGameMenuHost& iHost;
     RFs& iFs;
     TBool iOpen;
     TBool iHelpVisible;
+    TBool iControlsVisible;
     TInt iSelection;
+    TInt iControlSelection;
+    TInt iCaptureControlIndex;
+    TInt iCapturedScanCode;
     TBool iLeftSoftHeld;
     TBool iRightSoftHeld;
     TBool iRightSoftCaptured;

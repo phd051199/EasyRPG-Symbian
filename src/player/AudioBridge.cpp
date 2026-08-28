@@ -82,9 +82,9 @@ TAudioRuntimeState gAudio = {
 
 const TInt KBgmRenderPumpFrames = 256;
 const TInt KBgmLogicPumpFrames = 512;
-const TInt KBgmAsyncPumpFrames = 128;
-const TInt KBgmEmergencyPumpFrames = 256;
-const TInt KBgmInitialPumpFrames = 1024;
+const TInt KBgmAsyncPumpFrames = 256;
+const TInt KBgmEmergencyPumpFrames = 1024;
+const TInt KBgmInitialPumpFrames = 3072;
 const TInt KBgmMinimumQueuedFrames = 1024;
 const TInt KBgmTargetFrames = 3072;
 const TInt KSoftwareBgmWaveMaxBytes = 768 * 1024;
@@ -101,6 +101,8 @@ _LIT(KMidiExtension, ".midi");
 
 void StartAudioPump();
 TBool AudioPumpStep();
+void PumpBgm(TInt aMaxFrames);
+void RefillMixerStreams(TAny* aContext);
 
 class CAudioPump : public CTimer
 {
@@ -122,7 +124,10 @@ public:
 
 private:
     CAudioPump()
-        : CTimer(CActive::EPriorityStandard)
+        // The frame timer also runs at EPriorityHigh. Audio must not sit at
+        // EPriorityStandard while the renderer is doing catch-up ticks or the
+        // software BGM ring can run dry even though plenty of PCM is decoded.
+        : CTimer(CActive::EPriorityHigh)
     {
     }
 
@@ -157,7 +162,7 @@ void EnsureMixerL()
 {
     if (!gAudio.iMixer)
     {
-        gAudio.iMixer = CAudioMixer::NewL();
+        gAudio.iMixer = CAudioMixer::NewL(&RefillMixerStreams, NULL);
         gAudio.iMixer->SetMasterVolume(gAudio.iMasterVolumePercent);
     }
     if (!gAudio.iPump)
@@ -379,6 +384,14 @@ void PumpBgm(TInt aMaxFrames)
         if (written != batch)
             break;
     }
+}
+
+void RefillMixerStreams(TAny*)
+{
+    // This is called synchronously by CAudioMixer when MMF has room for the
+    // next descriptor. Keep it bounded to one output buffer so audio callbacks
+    // remain short while no longer depending on the game/render update cadence.
+    PumpBgm(KBgmEmergencyPumpFrames);
 }
 
 TBool AudioPumpStep()
@@ -835,6 +848,9 @@ extern "C" void EasyRpgAudioUpdate(void)
         const TInt mixerError = gAudio.iMixer->ConsumeError();
         if (mixerError != KErrNone)
             gAudio.iAsyncError = mixerError;
+        // Also services a deferred stream reopen after audio-policy loss.
+        // QueueOutputBuffers() is idempotent while MMF is already ready/full.
+        gAudio.iMixer->CommitStreams();
     }
     if (gAudio.iBgm.iFadeDurationMs > 0 &&
         (gAudio.iBgm.iPlaying || TNativeAudio::HasBgm()))

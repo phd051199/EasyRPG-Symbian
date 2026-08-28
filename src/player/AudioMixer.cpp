@@ -1,16 +1,23 @@
 #include "AudioMixer.h"
 #include "NativeAudio.h"
 
-CAudioMixer* CAudioMixer::NewL()
+namespace
 {
-    CAudioMixer* self = new (ELeave) CAudioMixer;
+const TUint32 KOutputReopenDelayMs = 250;
+}
+
+CAudioMixer* CAudioMixer::NewL(TStreamRefillCallback aRefillCallback,
+                               TAny* aRefillContext)
+{
+    CAudioMixer* self = new (ELeave) CAudioMixer(aRefillCallback, aRefillContext);
     CleanupStack::PushL(self);
     self->ConstructL();
     CleanupStack::Pop(self);
     return self;
 }
 
-CAudioMixer::CAudioMixer()
+CAudioMixer::CAudioMixer(TStreamRefillCallback aRefillCallback,
+                         TAny* aRefillContext)
     : iStream(NULL),
       iQueuedOutputBufferCount(0),
       iClipCount(0),
@@ -21,7 +28,12 @@ CAudioMixer::CAudioMixer()
       iReady(EFalse),
       iShuttingDown(EFalse),
       iLastError(KErrNone),
-      iMasterVolume(50)
+      iMasterVolume(50),
+      iRefillCallback(aRefillCallback),
+      iRefillContext(aRefillContext),
+      iNextOpenAttemptMs(0),
+      iOpening(EFalse),
+      iWaitingForPlayComplete(EFalse)
 {
     TInt i;
     for (i = 0; i < KMaxCachedClips; ++i)
@@ -49,10 +61,23 @@ void CAudioMixer::ConstructL()
     iStream = CMdaAudioOutputStream::NewL(*this,
                                          EMdaPriorityNormal,
                                          EMdaPriorityPreferenceTime);
+    OpenOutputStream();
+}
+
+void CAudioMixer::OpenOutputStream()
+{
+    if (!iStream || iReady || iOpening || iWaitingForPlayComplete || iShuttingDown)
+        return;
+
+    const TUint32 now = TNativeAudio::NowMilliseconds();
+    if (static_cast<TInt32>(now - iNextOpenAttemptMs) < 0)
+        return;
+
     TMdaAudioDataSettings settings;
     Mem::FillZ(&settings, sizeof(settings));
     settings.iSampleRate = TMdaAudioDataSettings::ESampleRate22050Hz;
     settings.iChannels = TMdaAudioDataSettings::EChannelsStereo;
+    iOpening = ETrue;
     iStream->Open(&settings);
 }
 
@@ -680,6 +705,29 @@ TBool CAudioMixer::HasAudioToMix() const
     return EFalse;
 }
 
+TBool CAudioMixer::HasActiveStream() const
+{
+    TInt bus;
+    for (bus = 0; bus < EStreamBusCount; ++bus)
+    {
+        if (iStreams[bus].iActive)
+            return ETrue;
+    }
+    return EFalse;
+}
+
+TBool CAudioMixer::NeedsStreamRefill() const
+{
+    const TInt frameCount = KOutputBufferBytes / (KOutputChannels * 2);
+    TInt bus;
+    for (bus = 0; bus < EStreamBusCount; ++bus)
+    {
+        if (iStreams[bus].iActive && iStreams[bus].iQueuedFrames < frameCount)
+            return ETrue;
+    }
+    return EFalse;
+}
+
 TBool CAudioMixer::CanFillOutputBuffer() const
 {
     const TInt frameCount = KOutputBufferBytes / (KOutputChannels * 2);
@@ -693,13 +741,24 @@ TBool CAudioMixer::CanFillOutputBuffer() const
     return HasAudioToMix();
 }
 
-void CAudioMixer::QueueOutputBuffers()
+void CAudioMixer::QueueOutputBuffers(TInt aMaxBuffers)
 {
-    if (!iStream || !iReady || iShuttingDown)
+    if (!iStream || iShuttingDown)
         return;
-    TInt filled = 0;
-    while (iQueuedOutputBufferCount < KOutputQueueDepth && filled < KOutputFillBurst)
+    if (!iReady)
     {
+        OpenOutputStream();
+        return;
+    }
+    TInt filled = 0;
+    while (iQueuedOutputBufferCount < KOutputQueueDepth && filled < aMaxBuffers)
+    {
+        // Refill from the already-decoded software source in the MMF
+        // callback path. Waiting for the next game tick here allowed map
+        // loads, rendering spikes and first-use SFX decoding to drain the
+        // stream ring and end playback with KErrUnderflow.
+        if (NeedsStreamRefill() && iRefillCallback)
+            iRefillCallback(iRefillContext);
         if (!CanFillOutputBuffer())
             return;
         const TInt bufferIndex = FreeOutputBufferIndex();
@@ -727,6 +786,7 @@ void CAudioMixer::QueueOutputBuffers()
             }
             Mem::Copy(iVoices, voices, sizeof(iVoices));
             iReady = EFalse;
+            iWaitingForPlayComplete = iQueuedOutputBufferCount > 0;
             iLastError = error;
             return;
         }
@@ -774,6 +834,7 @@ TInt CAudioMixer::OutputSampleRate()
 
 void CAudioMixer::MaoscOpenComplete(TInt aError)
 {
+    iOpening = EFalse;
     if (aError == KErrNone)
     {
         TRAPD(propertyError,
@@ -782,6 +843,7 @@ void CAudioMixer::MaoscOpenComplete(TInt aError)
         if (propertyError != KErrNone)
         {
             iReady = EFalse;
+            iNextOpenAttemptMs = TNativeAudio::NowMilliseconds() + KOutputReopenDelayMs;
             iLastError = propertyError;
             return;
         }
@@ -792,6 +854,7 @@ void CAudioMixer::MaoscOpenComplete(TInt aError)
     else
     {
         iReady = EFalse;
+        iNextOpenAttemptMs = TNativeAudio::NowMilliseconds() + KOutputReopenDelayMs;
         iLastError = aError;
     }
 }
@@ -808,25 +871,38 @@ void CAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
     if (aError != KErrNone && aError != KErrAbort && !iShuttingDown)
     {
         iReady = EFalse;
+        iWaitingForPlayComplete = ETrue;
         iLastError = aError;
         return;
     }
     if (aError == KErrNone && !iShuttingDown)
-        QueueOutputBuffers();
+    {
+        // MMF returned one descriptor: prepare exactly one replacement here.
+        // Startup/game-loop commits can still prefill KOutputFillBurst buffers.
+        QueueOutputBuffers(1);
+    }
 }
 
 void CAudioMixer::MaoscPlayComplete(TInt aError)
 {
     if (iShuttingDown)
         return;
+    iWaitingForPlayComplete = EFalse;
+    ResetOutputQueue();
     if (aError == KErrNone || aError == KErrUnderflow)
     {
-        ResetOutputQueue();
+        // KErrUnderflow is the documented end-of-data signal. It is normal
+        // after the final SFX, but indicates a real underrun while a looping
+        // software stream is still active. Keep the stream open and refill it
+        // immediately in either case.
+        if (aError == KErrUnderflow && HasActiveStream())
+            iLastError = KErrUnderflow;
         QueueOutputBuffers();
     }
     else if (aError != KErrAbort)
     {
         iReady = EFalse;
+        iNextOpenAttemptMs = TNativeAudio::NowMilliseconds() + KOutputReopenDelayMs;
         iLastError = aError;
     }
 }

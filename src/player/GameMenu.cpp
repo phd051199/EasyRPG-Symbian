@@ -8,6 +8,7 @@
 #include "AppConfig.h"
 #include "AppPaths.h"
 #include "GohuFont.h"
+#include "KeyMapping.h"
 #include "NativeAudio.h"
 
 namespace
@@ -62,6 +63,17 @@ TBool ReadSettingInt(const TDesC8& aData, const TDesC8& aKey, TInt& aValue)
         return EFalse;
     aValue = value;
     return ETrue;
+}
+
+void AppendSettingInt(TDes8& aData, const TDesC8& aKey, TInt aValue)
+{
+    TBuf8<24> value;
+    value.Num(aValue);
+    if (aData.Length() + aKey.Length() + value.Length() + 1 > aData.MaxLength())
+        return;
+    aData.Append(aKey);
+    aData.Append(value);
+    aData.Append('\n');
 }
 
 TInt GohuTextWidth(const TDesC8& aText)
@@ -127,7 +139,11 @@ CGameMenu::CGameMenu(MGameMenuHost& aHost, RFs& aFs)
       iFs(aFs),
       iOpen(EFalse),
       iHelpVisible(EFalse),
+      iControlsVisible(EFalse),
       iSelection(0),
+      iControlSelection(0),
+      iCaptureControlIndex(-1),
+      iCapturedScanCode(0),
       iLeftSoftHeld(EFalse),
       iRightSoftHeld(EFalse),
       iRightSoftCaptured(EFalse),
@@ -150,13 +166,14 @@ CGameMenu::~CGameMenu()
 
 void CGameMenu::LoadSettings()
 {
+    EasyRpgResetCustomPlayerKeyBindings();
     TFileName settingsPath;
     if (EasyRpgPaths::Build(settingsPath, EasyRpgApp::KSettingsFileSuffix) != KErrNone)
         return;
     RFile file;
     if (file.Open(iFs, settingsPath, EFileRead | EFileShareReadersOnly) != KErrNone)
         return;
-    TBuf8<256> data;
+    TBuf8<2048> data;
     const TInt error = file.Read(data);
     file.Close();
     if (error != KErrNone)
@@ -172,6 +189,28 @@ void CGameMenu::LoadSettings()
         iSoundEnabled = iVolume > 0;
     if (ReadSettingInt(data, KFpsSetting, value))
         iFpsEnabled = value != 0;
+
+    const TInt keyCount = EasyRpgConfigurablePlayerKeyCount();
+    for (TInt index = 0; index < keyCount; ++index)
+    {
+        const TUint32 playerKey = EasyRpgConfigurablePlayerKeyAt(index);
+        TBuf8<32> settingName;
+        EasyRpgPlayerKeySettingName(playerKey, settingName);
+        if (settingName.Length() <= 0)
+            continue;
+
+        TBuf8<40> scanSetting(settingName);
+        scanSetting.Append(_L8("_scan="));
+        TInt scanCode = 0;
+        if (!ReadSettingInt(data, scanSetting, scanCode))
+            continue;
+
+        TBuf8<40> charSetting(settingName);
+        charSetting.Append(_L8("_char="));
+        TInt charCode = 0;
+        ReadSettingInt(data, charSetting, charCode);
+        EasyRpgSetCustomPlayerKeyBinding(playerKey, scanCode, charCode);
+    }
 }
 
 void CGameMenu::SaveSettings()
@@ -187,11 +226,33 @@ void CGameMenu::SaveSettings()
     RFile file;
     if (file.Replace(iFs, settingsPath, EFileWrite | EFileShareExclusive) != KErrNone)
         return;
-    TBuf8<128> data;
+    TBuf8<2048> data;
     data.Format(_L8("master_volume=%d\nsound_enabled=%d\nfps_enabled=%d\n"),
                 iVolume,
                 iSoundEnabled ? 1 : 0,
                 iFpsEnabled ? 1 : 0);
+
+    const TInt keyCount = EasyRpgConfigurablePlayerKeyCount();
+    for (TInt index = 0; index < keyCount; ++index)
+    {
+        const TUint32 playerKey = EasyRpgConfigurablePlayerKeyAt(index);
+        TInt scanCode = 0;
+        TInt charCode = 0;
+        if (!EasyRpgGetCustomPlayerKeyBinding(playerKey, scanCode, charCode))
+            continue;
+
+        TBuf8<32> settingName;
+        EasyRpgPlayerKeySettingName(playerKey, settingName);
+        if (settingName.Length() <= 0)
+            continue;
+
+        TBuf8<40> scanSetting(settingName);
+        scanSetting.Append(_L8("_scan="));
+        AppendSettingInt(data, scanSetting, scanCode);
+        TBuf8<40> charSetting(settingName);
+        charSetting.Append(_L8("_char="));
+        AppendSettingInt(data, charSetting, charCode);
+    }
     file.Write(data);
     file.Close();
 }
@@ -220,6 +281,7 @@ TInt CGameMenu::ItemCount() const
     if (features & EGameMenuFeatureVolume) ++count;
     if (features & EGameMenuFeatureFps) ++count;
     if (features & EGameMenuFeatureHelp) ++count;
+    if (features & EGameMenuFeatureControls) ++count;
     count += Max(0, iHost.GameMenuCustomItemCount());
     if (features & EGameMenuFeatureReset) ++count;
     return count;
@@ -238,6 +300,7 @@ CGameMenu::TItemKind CGameMenu::ItemKindAt(TInt aIndex, TInt& aCustomIndex) cons
     MATCH_FEATURE(EGameMenuFeatureVolume, EItemVolume)
     MATCH_FEATURE(EGameMenuFeatureFps, EItemFps)
     MATCH_FEATURE(EGameMenuFeatureHelp, EItemHelp)
+    MATCH_FEATURE(EGameMenuFeatureControls, EItemControls)
 #undef MATCH_FEATURE
 
     const TInt customCount = Max(0, iHost.GameMenuCustomItemCount());
@@ -276,6 +339,9 @@ void CGameMenu::ItemText(TInt aIndex, TDes8& aText) const
     case EItemHelp:
         aText.Copy(_L8("HELP"));
         break;
+    case EItemControls:
+        aText.Copy(_L8("CONTROLS"));
+        break;
     case EItemCustom:
         iHost.GameMenuCustomItemText(customIndex, aText);
         break;
@@ -303,6 +369,9 @@ void CGameMenu::OpenL()
     NormalizeSelection();
     iHeldMenuKeys = 0;
     iHelpVisible = EFalse;
+    iControlsVisible = EFalse;
+    iCaptureControlIndex = -1;
+    iCapturedScanCode = 0;
     iOpen = ETrue;
     TRAPD(error, iHost.GameMenuPauseL(ETrue));
     if (error != KErrNone)
@@ -319,6 +388,9 @@ void CGameMenu::CloseL()
         return;
     iHeldMenuKeys = 0;
     iHelpVisible = EFalse;
+    iControlsVisible = EFalse;
+    iCaptureControlIndex = -1;
+    iCapturedScanCode = 0;
     iOpen = EFalse;
     TRAPD(error, iHost.GameMenuPauseL(EFalse));
     if (error != KErrNone)
@@ -335,6 +407,8 @@ void CGameMenu::ResetInputState()
     iRightSoftHeld = EFalse;
     iRightSoftCaptured = EFalse;
     iHeldMenuKeys = 0;
+    iCaptureControlIndex = -1;
+    iCapturedScanCode = 0;
 }
 
 void CGameMenu::NormalizeSelection()
@@ -353,11 +427,135 @@ void CGameMenu::NormalizeSelection()
 
 void CGameMenu::MoveSelection(TInt aDelta)
 {
-    if (!iOpen || iHelpVisible || ItemCount() <= 0)
+    if (!iOpen || iHelpVisible || iControlsVisible || ItemCount() <= 0)
         return;
     iSelection += aDelta;
     NormalizeSelection();
     iHost.GameMenuRequestRedraw();
+}
+
+void CGameMenu::NormalizeControlSelection()
+{
+    const TInt count = EasyRpgConfigurablePlayerKeyCount() + 1;
+    if (count <= 0)
+    {
+        iControlSelection = 0;
+        return;
+    }
+    while (iControlSelection < 0)
+        iControlSelection += count;
+    while (iControlSelection >= count)
+        iControlSelection -= count;
+}
+
+void CGameMenu::MoveControlSelection(TInt aDelta)
+{
+    if (!iControlsVisible || iCaptureControlIndex >= 0 || aDelta == 0)
+        return;
+    iControlSelection += aDelta;
+    NormalizeControlSelection();
+    iHost.GameMenuRequestRedraw();
+}
+
+void CGameMenu::ActivateControlSelectionL()
+{
+    if (!iControlsVisible || iCaptureControlIndex >= 0)
+        return;
+    NormalizeControlSelection();
+    const TInt keyCount = EasyRpgConfigurablePlayerKeyCount();
+    if (iControlSelection == keyCount)
+    {
+        EasyRpgResetCustomPlayerKeyBindings();
+        SaveSettings();
+        iHost.GameMenuRequestRedraw();
+        return;
+    }
+    if (iControlSelection < 0 || iControlSelection >= keyCount)
+        return;
+    iCaptureControlIndex = iControlSelection;
+    iCapturedScanCode = 0;
+    iHeldMenuKeys = 0;
+    iHost.GameMenuRequestRedraw();
+}
+
+TBool CGameMenu::HandleControlCaptureL(TInt aType, const TKeyEvent& aKey)
+{
+    if (!iControlsVisible)
+        return EFalse;
+
+    if (iCapturedScanCode != 0)
+    {
+        if (aKey.iScanCode == iCapturedScanCode)
+        {
+            if (aType == EEventKeyUp || aType == EEventKey)
+                iCapturedScanCode = 0;
+            return ETrue;
+        }
+        // Some keyboard drivers omit KeyUp. A different scan code proves the
+        // captured physical press has ended, so do not keep the latch forever.
+        iCapturedScanCode = 0;
+    }
+
+    if (iCaptureControlIndex < 0)
+        return EFalse;
+    if (aType == EEventKeyUp)
+        return ETrue;
+    if (aType == EEventKey && aKey.iRepeats > 0)
+        return ETrue;
+    if (aType != EEventKeyDown && aType != EEventKey)
+        return ETrue;
+    if (aKey.iScanCode == 0 && aKey.iCode == 0)
+        return ETrue;
+
+    const TUint32 playerKey =
+        EasyRpgConfigurablePlayerKeyAt(iCaptureControlIndex);
+    if (playerKey == 0)
+    {
+        iCaptureControlIndex = -1;
+        return ETrue;
+    }
+
+    EasyRpgSetCustomPlayerKeyBinding(playerKey, aKey.iScanCode, aKey.iCode);
+    SaveSettings();
+    iCaptureControlIndex = -1;
+    iCapturedScanCode = aType == EEventKeyDown ? aKey.iScanCode : 0;
+    iHeldMenuKeys = 0;
+    iHost.GameMenuRequestRedraw();
+    return ETrue;
+}
+
+void CGameMenu::ControlItemText(TInt aIndex, TDes8& aText) const
+{
+    aText.Zero();
+    const TInt keyCount = EasyRpgConfigurablePlayerKeyCount();
+    if (aIndex == keyCount)
+    {
+        aText.Copy(_L8("RESET DEFAULTS"));
+        return;
+    }
+    if (aIndex < 0 || aIndex >= keyCount)
+        return;
+
+    const TUint32 playerKey = EasyRpgConfigurablePlayerKeyAt(aIndex);
+    TBuf8<24> actionName;
+    EasyRpgPlayerKeyName(playerKey, actionName);
+    aText.Copy(actionName.Left(aText.MaxLength()));
+    if (aText.Length() + 2 <= aText.MaxLength())
+        aText.Append(_L8(": "));
+
+    if (aIndex == iCaptureControlIndex)
+    {
+        _LIT8(KPressKey, "PRESS KEY");
+        if (aText.Length() + KPressKey().Length() <= aText.MaxLength())
+            aText.Append(KPressKey);
+        return;
+    }
+
+    TBuf8<24> bindingName;
+    EasyRpgPlayerKeyBindingName(playerKey, bindingName);
+    const TInt remaining = aText.MaxLength() - aText.Length();
+    if (remaining > 0)
+        aText.Append(bindingName.Left(remaining));
 }
 
 void CGameMenu::ActivateSelectionL()
@@ -381,6 +579,12 @@ void CGameMenu::ActivateSelectionL()
         break;
     case EItemHelp:
         iHelpVisible = ETrue;
+        break;
+    case EItemControls:
+        iControlsVisible = ETrue;
+        iCaptureControlIndex = -1;
+        iCapturedScanCode = 0;
+        NormalizeControlSelection();
         break;
     case EItemCustom:
         if (!iHost.GameMenuCustomActivateL(customIndex))
@@ -414,19 +618,31 @@ void CGameMenu::AdjustSelectionL(TInt aDelta)
 
 TInt CGameMenu::MapMenuKey(const TKeyEvent& aKey) const
 {
-    TUint32 playerKey = EasyRpgPlayerKeyForScanCode(aKey.iScanCode);
-    if (playerKey == 0 && aKey.iCode != 0)
-        playerKey = EasyRpgPlayerKeyForCharCode(aKey.iCode);
-    switch (playerKey)
-    {
-    case CPlayerRuntime::EKeyUp: return EMenuKeyUp;
-    case CPlayerRuntime::EKeyDown: return EMenuKeyDown;
-    case CPlayerRuntime::EKeyLeft: return EMenuKeyLeft;
-    case CPlayerRuntime::EKeyRight: return EMenuKeyRight;
-    case CPlayerRuntime::EKeyDecision: return EMenuKeyDecision;
-    case CPlayerRuntime::EKeyCancel: return EMenuKeyCancel;
-    default: return EMenuKeyNone;
-    }
+    // Menu navigation is deliberately independent from gameplay remapping.
+    // This guarantees a way to navigate/undo mappings even after a bad bind.
+    const TInt scanCode = aKey.iScanCode >= 'a' && aKey.iScanCode <= 'z'
+        ? aKey.iScanCode - 'a' + 'A'
+        : aKey.iScanCode;
+    TInt charCode = aKey.iCode;
+    if (charCode >= 'A' && charCode <= 'Z')
+        charCode = charCode - 'A' + 'a';
+
+    if (scanCode == EStdKeyUpArrow || scanCode == 'W' || charCode == 'w')
+        return EMenuKeyUp;
+    if (scanCode == EStdKeyDownArrow || scanCode == 'S' || charCode == 's')
+        return EMenuKeyDown;
+    if (scanCode == EStdKeyLeftArrow || scanCode == 'A' || charCode == 'a')
+        return EMenuKeyLeft;
+    if (scanCode == EStdKeyRightArrow || scanCode == 'D' || charCode == 'd')
+        return EMenuKeyRight;
+    if (scanCode == EStdKeyEnter || scanCode == EStdKeyDevice3 ||
+        scanCode == EStdKeySpace || scanCode == 'Z' ||
+        charCode == EKeyEnter || charCode == EKeyDevice3 ||
+        charCode == ' ' || charCode == 'z')
+        return EMenuKeyDecision;
+    if (scanCode == EStdKeyEscape || charCode == EKeyEscape)
+        return EMenuKeyCancel;
+    return EMenuKeyNone;
 }
 
 TBool CGameMenu::HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent& aKey)
@@ -461,6 +677,30 @@ TBool CGameMenu::HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent& aKey)
     {
         iHelpVisible = EFalse;
         iHost.GameMenuRequestRedraw();
+        return ETrue;
+    }
+    if (iControlsVisible)
+    {
+        if (iCaptureControlIndex >= 0)
+        {
+            // Softkeys stay reserved for menu control and are never captured
+            // as gameplay bindings. Back cancels the pending capture.
+            if (!aLeft)
+            {
+                iCaptureControlIndex = -1;
+                iCapturedScanCode = 0;
+                iHost.GameMenuRequestRedraw();
+            }
+            return ETrue;
+        }
+        if (aLeft)
+            ActivateControlSelectionL();
+        else
+        {
+            iControlsVisible = EFalse;
+            iHeldMenuKeys = 0;
+            iHost.GameMenuRequestRedraw();
+        }
         return ETrue;
     }
     if (aLeft)
@@ -532,6 +772,40 @@ TBool CGameMenu::HandleKeyEventL(TInt aType, const TKeyEvent& aKey)
     if (!iOpen)
         return EFalse;
 
+    if (iControlsVisible)
+    {
+        if (HandleControlCaptureL(aType, aKey))
+            return ETrue;
+
+        const TInt controlKey = MapMenuKey(aKey);
+        if (controlKey == EMenuKeyNone)
+            return ETrue;
+        const TBool controlTrigger = TriggerMenuKey(controlKey, aType, aKey);
+        if (!controlTrigger)
+            return ETrue;
+
+        switch (controlKey)
+        {
+        case EMenuKeyUp:
+            MoveControlSelection(-1);
+            break;
+        case EMenuKeyDown:
+            MoveControlSelection(1);
+            break;
+        case EMenuKeyDecision:
+            ActivateControlSelectionL();
+            break;
+        case EMenuKeyCancel:
+            iControlsVisible = EFalse;
+            iHeldMenuKeys = 0;
+            iHost.GameMenuRequestRedraw();
+            break;
+        default:
+            break;
+        }
+        return ETrue;
+    }
+
     const TInt menuKey = MapMenuKey(aKey);
     if (menuKey == EMenuKeyNone)
         return ETrue;
@@ -581,6 +855,8 @@ void CGameMenu::DrawL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
         return;
     if (iHelpVisible)
         DrawHelpL(aGc, aDevice);
+    else if (iControlsVisible)
+        DrawControlsL(aGc, aDevice);
     else
         DrawMenuL(aGc, aDevice);
 }
@@ -692,4 +968,85 @@ void CGameMenu::DrawHelpL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
                  KClose,
                  TPoint(x, panel.iBr.iY - KMenuTextHeight - 7),
                  TRgb(255, 255, 255));
+}
+
+void CGameMenu::DrawControlsL(CGraphicsContext& aGc, CBitmapDevice& aDevice)
+{
+    NormalizeControlSelection();
+    const TInt itemCount = EasyRpgConfigurablePlayerKeyCount() + 1;
+    if (itemCount <= 0)
+        return;
+
+    const TSize screenSize = aDevice.SizeInPixels();
+    const TInt rowHeight = KMenuTextHeight + 4;
+    const TInt titleHeight = KMenuTextHeight + 8;
+    const TInt footerHeight = KMenuTextHeight + 8;
+    const TInt panelWidth = Min(292, Max(1, screenSize.iWidth - 12));
+    const TInt panelHeight = Min(220, Max(1, screenSize.iHeight - 12));
+    const TRect panel(TPoint((screenSize.iWidth - panelWidth) / 2,
+                             (screenSize.iHeight - panelHeight) / 2),
+                      TSize(panelWidth, panelHeight));
+
+    aGc.SetPenStyle(CGraphicsContext::ESolidPen);
+    aGc.SetPenColor(TRgb(255, 255, 255));
+    aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
+    aGc.SetBrushColor(TRgb(0, 0, 0));
+    aGc.DrawRect(panel);
+
+    const TInt rowX = panel.iTl.iX + 7;
+    const TInt rowWidth = panelWidth - 14;
+    const TInt titleY = panel.iTl.iY + 7;
+    _LIT8(KControls, "CONTROLS");
+    DrawGohuText(aGc, KControls, TPoint(rowX + 3, titleY), TRgb(255, 255, 255));
+
+    const TInt firstY = panel.iTl.iY + titleHeight + 5;
+    const TInt usableRowsHeight = panelHeight - titleHeight - footerHeight - 10;
+    const TInt visibleRows = Max(1, usableRowsHeight / rowHeight);
+    TInt firstItem = 0;
+    if (iControlSelection >= visibleRows)
+        firstItem = iControlSelection - visibleRows + 1;
+    if (firstItem + visibleRows > itemCount)
+        firstItem = Max(0, itemCount - visibleRows);
+
+    for (TInt row = 0; row < visibleRows && firstItem + row < itemCount; ++row)
+    {
+        const TInt item = firstItem + row;
+        const TInt rowY = firstY + row * rowHeight;
+        TBuf8<64> text;
+        ControlItemText(item, text);
+        if (item == iControlSelection)
+        {
+            aGc.SetPenStyle(CGraphicsContext::ENullPen);
+            aGc.SetBrushStyle(CGraphicsContext::ESolidBrush);
+            aGc.SetBrushColor(TRgb(255, 255, 255));
+            aGc.DrawRect(TRect(TPoint(rowX, rowY), TSize(rowWidth, rowHeight - 1)));
+            DrawGohuText(aGc, text, TPoint(rowX + 4, rowY + 2), TRgb(0, 0, 0));
+        }
+        else
+        {
+            DrawGohuText(aGc, text, TPoint(rowX + 4, rowY + 2), TRgb(255, 255, 255));
+        }
+    }
+
+    const TInt footerY = panel.iBr.iY - KMenuTextHeight - 5;
+    if (iCaptureControlIndex >= 0)
+    {
+        _LIT8(KPressKey, "PRESS KEY");
+        _LIT8(KCancel, "CANCEL");
+        DrawGohuText(aGc, KPressKey, TPoint(panel.iTl.iX + 8, footerY), TRgb(255, 255, 255));
+        DrawGohuText(aGc,
+                     KCancel,
+                     TPoint(panel.iBr.iX - GohuTextWidth(KCancel) - 8, footerY),
+                     TRgb(255, 255, 255));
+    }
+    else
+    {
+        _LIT8(KSelect, "SELECT");
+        _LIT8(KBack, "BACK");
+        DrawGohuText(aGc, KSelect, TPoint(panel.iTl.iX + 8, footerY), TRgb(255, 255, 255));
+        DrawGohuText(aGc,
+                     KBack,
+                     TPoint(panel.iBr.iX - GohuTextWidth(KBack) - 8, footerY),
+                     TRgb(255, 255, 255));
+    }
 }
