@@ -13,29 +13,34 @@
 #include "GohuFont.h"
 
 #ifdef EASYRPG_ENCODING_CORPUS_TEST
-extern "C" void EasyRpgEncodingCorpusRecord(const char* aSourceEncoding,
-                                               const char* aDestinationEncoding,
-                                               const unsigned char* aSource,
-                                               unsigned int aSourceLength,
-                                               const unsigned char* aDestination,
-                                               unsigned int aDestinationLength);
+extern "C" void EasyRpgEncodingCorpusRecord(const char *aSourceEncoding,
+                                            const char *aDestinationEncoding,
+                                            const unsigned char *aSource,
+                                            unsigned int aSourceLength,
+                                            const unsigned char *aDestination,
+                                            unsigned int aDestinationLength);
 #endif
 
-namespace {
-char AsciiLower(char value) {
+namespace
+{
+char AsciiLower(char value)
+{
     if (value >= 'A' && value <= 'Z')
         return static_cast<char>(value + ('a' - 'A'));
     return value;
 }
 
-bool IsEncodingSeparator(char value) {
+bool IsEncodingSeparator(char value)
+{
     return value == '-' || value == '_' || value == ' ';
 }
 
-bool EncodingEquals(const std::string& value, const char* expected) {
+bool EncodingEquals(const std::string &value, const char *expected)
+{
     std::string::size_type i = 0;
     unsigned int j = 0;
-    while (true) {
+    while (true)
+    {
         while (i < value.size() && IsEncodingSeparator(value[i]))
             ++i;
         while (expected[j] != '\0' && IsEncodingSeparator(expected[j]))
@@ -51,63 +56,75 @@ bool EncodingEquals(const std::string& value, const char* expected) {
     }
 }
 
-bool IsCp932Encoding(const std::string& encoding) {
+bool IsCp932Encoding(const std::string &encoding)
+{
     return EncodingEquals(encoding, "932") || EncodingEquals(encoding, "CP932") ||
            EncodingEquals(encoding, "MS932") || EncodingEquals(encoding, "SHIFT_JIS") ||
            EncodingEquals(encoding, "WINDOWS-31J") || EncodingEquals(encoding, "WINDOWS-932") ||
            EncodingEquals(encoding, "IBM-943_P15A-2003");
 }
 
-bool IsGbkEncoding(const std::string& encoding) {
+bool IsGbkEncoding(const std::string &encoding)
+{
     return EncodingEquals(encoding, "936") || EncodingEquals(encoding, "CP936") ||
            EncodingEquals(encoding, "WINDOWS-936") || EncodingEquals(encoding, "GBK") ||
            EncodingEquals(encoding, "GB2312");
 }
 
-bool IsBig5Encoding(const std::string& encoding) {
+bool IsBig5Encoding(const std::string &encoding)
+{
     return EncodingEquals(encoding, "950") || EncodingEquals(encoding, "CP950") ||
            EncodingEquals(encoding, "WINDOWS-950") || EncodingEquals(encoding, "BIG5");
 }
 
-bool IsUtf8Encoding(const std::string& encoding) {
+bool IsUtf8Encoding(const std::string &encoding)
+{
     return EncodingEquals(encoding, "UTF-8") || EncodingEquals(encoding, "UTF8");
 }
 
-bool IsMixedVietnameseEncoding(const std::string& encoding) {
+bool IsMixedVietnameseEncoding(const std::string &encoding)
+{
     return EncodingEquals(encoding, "EASYRPG_VI_CP932") || EncodingEquals(encoding, "TCVN3_CP932");
 }
 
-bool IsMixedGbkCp932Encoding(const std::string& encoding) {
+bool IsMixedGbkCp932Encoding(const std::string &encoding)
+{
     return EncodingEquals(encoding, "EASYRPG_GBK_CP932") ||
            EncodingEquals(encoding, "GBK_CP932");
 }
 
-bool IsAsciiLetter(unsigned char value) {
+bool IsAsciiLetter(unsigned char value)
+{
     return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
 }
 
-struct Tcvn3Evidence {
+struct Tcvn3Evidence
+{
     unsigned int ascii_letters = 0;
     unsigned int mapped_bytes = 0;
     unsigned int ascii_anchored_bytes = 0;
     unsigned int score = 0;
 };
 
-Tcvn3Evidence InspectTcvn3(const std::string& input,
-                           bool preserve_ascii_anchored_high_bytes) {
+Tcvn3Evidence InspectTcvn3(const std::string &input,
+                           bool preserve_ascii_anchored_high_bytes)
+{
     Tcvn3Evidence result;
-    for (std::string::size_type index = 0; index < input.size(); ++index) {
+    for (std::string::size_type index = 0; index < input.size(); ++index)
+    {
         if (IsAsciiLetter(static_cast<unsigned char>(input[index])))
             ++result.ascii_letters;
     }
 
-    for (std::string::size_type index = 0; index < input.size(); ++index) {
+    for (std::string::size_type index = 0; index < input.size(); ++index)
+    {
         const unsigned char value = static_cast<unsigned char>(input[index]);
         const unsigned int codepoint = EasyRpgTcvn3DecodeByte(value);
         if (codepoint == value || codepoint == 0x00a0u ||
             (codepoint >= 0x0300u && codepoint <= 0x0323u))
             continue;
-        if (value < 0x20u) {
+        if (value < 0x20u)
+        {
             ++result.mapped_bytes;
             result.score += 4;
             continue;
@@ -115,59 +132,62 @@ Tcvn3Evidence InspectTcvn3(const std::string& input,
         if (value < 0xa1u)
             continue;
         const bool left_letter = index > 0 &&
-            IsAsciiLetter(static_cast<unsigned char>(input[index - 1]));
+                                 IsAsciiLetter(static_cast<unsigned char>(input[index - 1]));
         const bool right_letter = index + 1 < input.size() &&
-            IsAsciiLetter(static_cast<unsigned char>(input[index + 1]));
-        // CP932 lead bytes in Japanese text frequently overlap the high half
-        // of TCVN3. Ignore those when the string has little ASCII context,
-        // except when the byte is embedded in an ASCII word. RPG Maker
-        // control sequences (\C[n], \|, ...) otherwise dilute the global
-        // ASCII ratio and made valid Vietnamese words such as "trường học",
-        // "sống sót" and "hệ thống" look like Shift-JIS.
+                                  IsAsciiLetter(static_cast<unsigned char>(input[index + 1]));
         if (value >= 0xe0u && result.ascii_letters * 2u <= input.size() &&
             (!preserve_ascii_anchored_high_bytes || (!left_letter && !right_letter)))
             continue;
 
         ++result.mapped_bytes;
-        if (left_letter || right_letter) {
+        if (left_letter || right_letter)
+        {
             ++result.ascii_anchored_bytes;
             result.score += 2;
-        } else if ((index > 0 && input[index - 1] == ' ') ||
+        }
+        else if ((index > 0 && input[index - 1] == ' ') ||
                  (index + 1 < input.size() && input[index + 1] == ' '))
             ++result.score;
     }
     return result;
 }
 
-bool IsCp932LeadByte(unsigned char value) {
+bool IsCp932LeadByte(unsigned char value)
+{
     return (value >= 0x81u && value <= 0x9fu) ||
            (value >= 0xe0u && value <= 0xfcu);
 }
 
-bool IsCp932TrailByte(unsigned char value) {
+bool IsCp932TrailByte(unsigned char value)
+{
     return (value >= 0x40u && value <= 0x7eu) ||
            (value >= 0x80u && value <= 0xfcu);
 }
 
-struct Cp932Evidence {
+struct Cp932Evidence
+{
     bool valid = true;
     unsigned int multibyte_chars = 0;
     unsigned int longest_multibyte_run = 0;
     unsigned int kana_lead_pairs = 0;
 };
 
-Cp932Evidence InspectCp932(const std::string& input) {
+Cp932Evidence InspectCp932(const std::string &input)
+{
     Cp932Evidence result;
     unsigned int current_run = 0;
-    for (std::string::size_type index = 0; index < input.size();) {
+    for (std::string::size_type index = 0; index < input.size();)
+    {
         const unsigned char value = static_cast<unsigned char>(input[index]);
-        if (value < 0x80u || (value >= 0xa1u && value <= 0xdfu)) {
+        if (value < 0x80u || (value >= 0xa1u && value <= 0xdfu))
+        {
             current_run = 0;
             ++index;
             continue;
         }
         if (!IsCp932LeadByte(value) || index + 1u >= input.size() ||
-            !IsCp932TrailByte(static_cast<unsigned char>(input[index + 1u]))) {
+            !IsCp932TrailByte(static_cast<unsigned char>(input[index + 1u])))
+        {
             result.valid = false;
             return result;
         }
@@ -182,27 +202,33 @@ Cp932Evidence InspectCp932(const std::string& input) {
     return result;
 }
 
-struct GbkByteEvidence {
+struct GbkByteEvidence
+{
     bool valid = true;
     unsigned int multibyte_chars = 0;
     unsigned int gb2312_lead_pairs = 0;
 };
 
-bool IsGbkTrailByte(unsigned char value) {
+bool IsGbkTrailByte(unsigned char value)
+{
     return (value >= 0x40u && value <= 0x7eu) ||
            (value >= 0x80u && value <= 0xfeu);
 }
 
-GbkByteEvidence InspectGbkBytes(const std::string& input) {
+GbkByteEvidence InspectGbkBytes(const std::string &input)
+{
     GbkByteEvidence result;
-    for (std::string::size_type index = 0; index < input.size();) {
+    for (std::string::size_type index = 0; index < input.size();)
+    {
         const unsigned char lead = static_cast<unsigned char>(input[index]);
-        if (lead < 0x80u) {
+        if (lead < 0x80u)
+        {
             ++index;
             continue;
         }
         if (lead < 0x81u || lead > 0xfeu || index + 1u >= input.size() ||
-            !IsGbkTrailByte(static_cast<unsigned char>(input[index + 1u]))) {
+            !IsGbkTrailByte(static_cast<unsigned char>(input[index + 1u])))
+        {
             result.valid = false;
             return result;
         }
@@ -214,13 +240,15 @@ GbkByteEvidence InspectGbkBytes(const std::string& input) {
     return result;
 }
 
-enum class MixedCjkEncoding {
+enum class MixedCjkEncoding
+{
     Unknown,
     Cp932,
     Gbk
 };
 
-MixedCjkEncoding ClassifyMixedCjkText(const std::string& input) {
+MixedCjkEncoding ClassifyMixedCjkText(const std::string &input)
+{
     const Cp932Evidence cp932 = InspectCp932(input);
     const GbkByteEvidence gbk = InspectGbkBytes(input);
     if (cp932.valid && !gbk.valid)
@@ -229,9 +257,6 @@ MixedCjkEncoding ClassifyMixedCjkText(const std::string& input) {
         return MixedCjkEncoding::Gbk;
     if (!cp932.valid && !gbk.valid)
         return MixedCjkEncoding::Unknown;
-    // In a Chinese-primary mixed game many perfectly valid GBK byte pairs are
-    // also structurally valid CP932. Only prefer CP932 when the byte pattern
-    // has explicit kana evidence; otherwise GBK is the deterministic primary.
     if (cp932.kana_lead_pairs != 0u)
         return MixedCjkEncoding::Cp932;
     if (gbk.multibyte_chars != 0u)
@@ -241,15 +266,18 @@ MixedCjkEncoding ClassifyMixedCjkText(const std::string& input) {
     return MixedCjkEncoding::Unknown;
 }
 
-bool IsMixedGbkCp932Sample(const std::string& input) {
+bool IsMixedGbkCp932Sample(const std::string &input)
+{
     unsigned int cp932_lines = 0;
     unsigned int gbk_lines = 0;
     std::string::size_type start = 0;
-    while (start < input.size()) {
+    while (start < input.size())
+    {
         std::string::size_type end = input.find('\n', start);
         if (end == std::string::npos)
             end = input.size();
-        if (end > start) {
+        if (end > start)
+        {
             const std::string line(input, start, end - start);
             const Cp932Evidence cp932 = InspectCp932(line);
             const GbkByteEvidence gbk = InspectGbkBytes(line);
@@ -264,107 +292,199 @@ bool IsMixedGbkCp932Sample(const std::string& input) {
     return cp932_lines >= 5u && gbk_lines >= 5u;
 }
 
-enum class MixedLegacyEncoding {
+enum class MixedLegacyEncoding
+{
     Unknown,
     Cp932,
     Tcvn3
 };
 
-bool HasTcvn3Evidence(const Tcvn3Evidence& evidence) {
+bool HasTcvn3Evidence(const Tcvn3Evidence &evidence)
+{
     return evidence.mapped_bytes != 0u && evidence.score >= 2u;
 }
 
-bool HasStrongTcvn3Evidence(const Tcvn3Evidence& evidence) {
+bool HasStrongTcvn3Evidence(const Tcvn3Evidence &evidence)
+{
     return evidence.mapped_bytes >= 2u && HasTcvn3Evidence(evidence);
 }
 
-bool HasAsciiAnchoredTcvn3Evidence(const Tcvn3Evidence& evidence) {
+bool HasAsciiAnchoredTcvn3Evidence(const Tcvn3Evidence &evidence)
+{
     return evidence.mapped_bytes >= 2u &&
            evidence.ascii_anchored_bytes >= 2u &&
            evidence.ascii_letters >= 3u &&
            evidence.ascii_letters >= evidence.mapped_bytes * 2u;
 }
 
-char VietnameseBaseLetter(unsigned int codepoint) {
-    if (codepoint >= 0x1ea0u && codepoint <= 0x1eb7u) return 'a';
-    if (codepoint >= 0x1eb8u && codepoint <= 0x1ec7u) return 'e';
-    if (codepoint >= 0x1ec8u && codepoint <= 0x1ecbu) return 'i';
-    if (codepoint >= 0x1eccu && codepoint <= 0x1ee3u) return 'o';
-    if (codepoint >= 0x1ee4u && codepoint <= 0x1ef1u) return 'u';
-    if (codepoint >= 0x1ef2u && codepoint <= 0x1ef9u) return 'y';
-    switch (codepoint) {
-    case 0x00c0u: case 0x00c1u: case 0x00c2u: case 0x00c3u:
-    case 0x00e0u: case 0x00e1u: case 0x00e2u: case 0x00e3u:
-    case 0x0102u: case 0x0103u: return 'a';
-    case 0x00c8u: case 0x00c9u: case 0x00cau:
-    case 0x00e8u: case 0x00e9u: case 0x00eau: return 'e';
-    case 0x00ccu: case 0x00cdu: case 0x00ecu: case 0x00edu:
-    case 0x0128u: case 0x0129u: return 'i';
-    case 0x00d2u: case 0x00d3u: case 0x00d4u: case 0x00d5u:
-    case 0x00f2u: case 0x00f3u: case 0x00f4u: case 0x00f5u:
-    case 0x01a0u: case 0x01a1u: return 'o';
-    case 0x00d9u: case 0x00dau: case 0x00f9u: case 0x00fau:
-    case 0x0168u: case 0x0169u: case 0x01afu: case 0x01b0u: return 'u';
-    case 0x00ddu: case 0x00fdu: return 'y';
-    case 0x0110u: case 0x0111u: return 'd';
-    default: return 0;
+char VietnameseBaseLetter(unsigned int codepoint)
+{
+    if (codepoint >= 0x1ea0u && codepoint <= 0x1eb7u)
+        return 'a';
+    if (codepoint >= 0x1eb8u && codepoint <= 0x1ec7u)
+        return 'e';
+    if (codepoint >= 0x1ec8u && codepoint <= 0x1ecbu)
+        return 'i';
+    if (codepoint >= 0x1eccu && codepoint <= 0x1ee3u)
+        return 'o';
+    if (codepoint >= 0x1ee4u && codepoint <= 0x1ef1u)
+        return 'u';
+    if (codepoint >= 0x1ef2u && codepoint <= 0x1ef9u)
+        return 'y';
+    switch (codepoint)
+    {
+    case 0x00c0u:
+    case 0x00c1u:
+    case 0x00c2u:
+    case 0x00c3u:
+    case 0x00e0u:
+    case 0x00e1u:
+    case 0x00e2u:
+    case 0x00e3u:
+    case 0x0102u:
+    case 0x0103u:
+        return 'a';
+    case 0x00c8u:
+    case 0x00c9u:
+    case 0x00cau:
+    case 0x00e8u:
+    case 0x00e9u:
+    case 0x00eau:
+        return 'e';
+    case 0x00ccu:
+    case 0x00cdu:
+    case 0x00ecu:
+    case 0x00edu:
+    case 0x0128u:
+    case 0x0129u:
+        return 'i';
+    case 0x00d2u:
+    case 0x00d3u:
+    case 0x00d4u:
+    case 0x00d5u:
+    case 0x00f2u:
+    case 0x00f3u:
+    case 0x00f4u:
+    case 0x00f5u:
+    case 0x01a0u:
+    case 0x01a1u:
+        return 'o';
+    case 0x00d9u:
+    case 0x00dau:
+    case 0x00f9u:
+    case 0x00fau:
+    case 0x0168u:
+    case 0x0169u:
+    case 0x01afu:
+    case 0x01b0u:
+        return 'u';
+    case 0x00ddu:
+    case 0x00fdu:
+        return 'y';
+    case 0x0110u:
+    case 0x0111u:
+        return 'd';
+    default:
+        return 0;
     }
 }
 
-bool IsVietnameseVowel(char value) {
+bool IsVietnameseVowel(char value)
+{
     return value == 'a' || value == 'e' || value == 'i' ||
            value == 'o' || value == 'u' || value == 'y';
 }
 
-bool MatchesAny(const std::string& value, const char* const* values,
-                unsigned int count) {
-    for (unsigned int index = 0; index < count; ++index) {
+bool MatchesAny(const std::string &value, const char *const *values, unsigned int count)
+{
+    for (unsigned int index = 0; index < count; ++index)
+    {
         if (value == values[index])
             return true;
     }
     return false;
 }
 
-bool IsPlausibleVietnameseSyllable(const std::string& normalized,
+bool IsPlausibleVietnameseSyllable(const std::string &normalized,
                                    unsigned int mapped_letters,
-                                   unsigned int ascii_letters) {
+                                   unsigned int ascii_letters)
+{
     if (mapped_letters == 0u || ascii_letters == 0u ||
         normalized.empty() || normalized.size() > 9u)
         return false;
 
     std::string::size_type vowel_begin = std::string::npos;
     std::string::size_type vowel_end = std::string::npos;
-    for (std::string::size_type index = 0; index < normalized.size(); ++index) {
+    for (std::string::size_type index = 0; index < normalized.size(); ++index)
+    {
         if (!IsVietnameseVowel(normalized[index]))
             continue;
-        if (vowel_begin == std::string::npos) {
+        if (vowel_begin == std::string::npos)
+        {
             vowel_begin = index;
             vowel_end = index + 1u;
-        } else if (index == vowel_end) {
+        }
+        else if (index == vowel_end)
+        {
             vowel_end = index + 1u;
-        } else {
+        }
+        else
+        {
             return false;
         }
     }
     if (vowel_begin == std::string::npos)
         return false;
 
-    static const char* const KOnsets[] = {
-        "", "b", "c", "ch", "d", "g", "gh", "gi", "h", "k", "kh",
-        "l", "m", "n", "ng", "ngh", "nh", "p", "ph", "q", "qu", "r",
-        "s", "t", "th", "tr", "v", "x"
-    };
-    static const char* const KFinals[] = {
-        "", "c", "ch", "m", "n", "ng", "nh", "p", "t"
-    };
+    static const char *const KOnsets[] = {
+        "",
+        "b",
+        "c",
+        "ch",
+        "d",
+        "g",
+        "gh",
+        "gi",
+        "h",
+        "k",
+        "kh",
+        "l",
+        "m",
+        "n",
+        "ng",
+        "ngh",
+        "nh",
+        "p",
+        "ph",
+        "q",
+        "qu",
+        "r",
+        "s",
+        "t",
+        "th",
+        "tr",
+        "v",
+        "x"};
+    static const char *const KFinals[] = {
+        "",
+        "c",
+        "ch",
+        "m",
+        "n",
+        "ng",
+        "nh",
+        "p",
+        "t"};
     const std::string onset = normalized.substr(0, vowel_begin);
     const std::string final = normalized.substr(vowel_end);
     return MatchesAny(onset, KOnsets, sizeof(KOnsets) / sizeof(KOnsets[0])) &&
            MatchesAny(final, KFinals, sizeof(KFinals) / sizeof(KFinals[0]));
 }
 
-bool ContainsCp932PunctuationPair(const std::string& input) {
-    for (std::string::size_type index = 0; index + 1u < input.size(); ++index) {
+bool ContainsCp932PunctuationPair(const std::string &input)
+{
+    for (std::string::size_type index = 0; index + 1u < input.size(); ++index)
+    {
         if (static_cast<unsigned char>(input[index]) == 0x81u &&
             IsCp932TrailByte(static_cast<unsigned char>(input[index + 1u])))
             return true;
@@ -372,7 +492,8 @@ bool ContainsCp932PunctuationPair(const std::string& input) {
     return false;
 }
 
-bool LooksLikeVietnameseSyllables(const std::string& input) {
+bool LooksLikeVietnameseSyllables(const std::string &input)
+{
     if (ContainsCp932PunctuationPair(input))
         return false;
 
@@ -383,32 +504,43 @@ bool LooksLikeVietnameseSyllables(const std::string& input) {
     unsigned int mapped_letters = 0;
     unsigned int ascii_letters = 0;
 
-    for (std::string::size_type index = 0; index <= input.size(); ++index) {
+    for (std::string::size_type index = 0; index <= input.size(); ++index)
+    {
         char base = 0;
         bool mapped = false;
-        if (index < input.size()) {
+        if (index < input.size())
+        {
             const unsigned char value = static_cast<unsigned char>(input[index]);
-            if (IsAsciiLetter(value)) {
-                base = value >= 'A' && value <= 'Z' ?
-                    static_cast<char>(value - 'A' + 'a') : static_cast<char>(value);
-            } else {
+            if (IsAsciiLetter(value))
+            {
+                base = value >= 'A' && value <= 'Z' ? static_cast<char>(value - 'A' + 'a') : static_cast<char>(value);
+            }
+            else
+            {
                 base = VietnameseBaseLetter(EasyRpgTcvn3DecodeByte(value));
                 mapped = base != 0;
             }
         }
 
-        if (base != 0) {
+        if (base != 0)
+        {
             normalized.push_back(base);
-            if (mapped) ++mapped_letters;
-            else ++ascii_letters;
+            if (mapped)
+                ++mapped_letters;
+            else
+                ++ascii_letters;
             continue;
         }
 
-        if (mapped_letters != 0u) {
-            if (IsPlausibleVietnameseSyllable(normalized, mapped_letters, ascii_letters)) {
+        if (mapped_letters != 0u)
+        {
+            if (IsPlausibleVietnameseSyllable(normalized, mapped_letters, ascii_letters))
+            {
                 ++good_words;
                 good_mapped_letters += mapped_letters;
-            } else {
+            }
+            else
+            {
                 ++bad_words;
             }
         }
@@ -419,7 +551,8 @@ bool LooksLikeVietnameseSyllables(const std::string& input) {
     return good_words != 0u && bad_words == 0u && good_mapped_letters >= 2u;
 }
 
-bool IsVietnameseLetter(unsigned int codepoint) {
+bool IsVietnameseLetter(unsigned int codepoint)
+{
     return (codepoint >= 0x00c0u && codepoint <= 0x00c3u) ||
            (codepoint >= 0x00c8u && codepoint <= 0x00cau) ||
            (codepoint >= 0x00ccu && codepoint <= 0x00cdu) ||
@@ -441,26 +574,31 @@ bool IsVietnameseLetter(unsigned int codepoint) {
            (codepoint >= 0x1ea0u && codepoint <= 0x1ef9u);
 }
 
-bool LooksLikeVietnameseLatinText(const std::string& input,
-                                  const Tcvn3Evidence& evidence) {
+bool LooksLikeVietnameseLatinText(const std::string &input,
+                                  const Tcvn3Evidence &evidence)
+{
     if (!HasTcvn3Evidence(evidence))
         return false;
 
     unsigned int letters = 0;
     unsigned int vietnamese_letters = 0;
     unsigned int spaces = 0;
-    for (std::string::size_type index = 0; index < input.size(); ++index) {
+    for (std::string::size_type index = 0; index < input.size(); ++index)
+    {
         const unsigned char value = static_cast<unsigned char>(input[index]);
-        if (IsAsciiLetter(value)) {
+        if (IsAsciiLetter(value))
+        {
             ++letters;
             continue;
         }
-        if (value == ' ' || value == '\t') {
+        if (value == ' ' || value == '\t')
+        {
             ++spaces;
             continue;
         }
         const unsigned int codepoint = EasyRpgTcvn3DecodeByte(value);
-        if (IsVietnameseLetter(codepoint)) {
+        if (IsVietnameseLetter(codepoint))
+        {
             ++letters;
             ++vietnamese_letters;
             continue;
@@ -476,14 +614,16 @@ bool LooksLikeVietnameseLatinText(const std::string& input,
            (spaces != 0u || evidence.mapped_bytes >= 2u);
 }
 
-MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input,
-                                            bool prefer_ascii_anchored_tcvn3) {
+MixedLegacyEncoding ClassifyMixedLegacyText(const std::string &input,
+                                            bool prefer_ascii_anchored_tcvn3)
+{
     const Tcvn3Evidence tcvn3 = InspectTcvn3(input, false);
     const Cp932Evidence cp932 = InspectCp932(input);
 
     if (!cp932.valid)
         return HasTcvn3Evidence(tcvn3) ? MixedLegacyEncoding::Tcvn3 : MixedLegacyEncoding::Unknown;
-    if (prefer_ascii_anchored_tcvn3) {
+    if (prefer_ascii_anchored_tcvn3)
+    {
         const Tcvn3Evidence relaxed_tcvn3 = InspectTcvn3(input, true);
         if (HasAsciiAnchoredTcvn3Evidence(relaxed_tcvn3) &&
             LooksLikeVietnameseSyllables(input))
@@ -500,22 +640,23 @@ MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input,
     return HasTcvn3Evidence(tcvn3) ? MixedLegacyEncoding::Tcvn3 : MixedLegacyEncoding::Cp932;
 }
 
-MixedLegacyEncoding ClassifyMixedLegacyText(const std::string& input) {
+MixedLegacyEncoding ClassifyMixedLegacyText(const std::string &input)
+{
     return ClassifyMixedLegacyText(input, true);
 }
 
-unsigned int CountTcvn3Lines(const std::string& input) {
+unsigned int CountTcvn3Lines(const std::string &input)
+{
     unsigned int tcvn3_lines = 0;
     std::string::size_type start = 0;
-    while (start < input.size()) {
+    while (start < input.size())
+    {
         std::string::size_type end = input.find('\n', start);
         if (end == std::string::npos)
             end = input.size();
-        if (end > start) {
+        if (end > start)
+        {
             const std::string line(input, start, end - start);
-            // Keep game-level detection conservative. The relaxed per-string
-            // rule is only needed after a game is already known to be mixed;
-            // using it here can make Japanese resource names look Vietnamese.
             if (ClassifyMixedLegacyText(line, false) == MixedLegacyEncoding::Tcvn3)
                 ++tcvn3_lines;
         }
@@ -524,22 +665,30 @@ unsigned int CountTcvn3Lines(const std::string& input) {
     return tcvn3_lines;
 }
 
-bool IsMixedVietnameseSample(const std::string& input) {
+bool IsMixedVietnameseSample(const std::string &input)
+{
     if (input.size() < 64u)
         return false;
     return CountTcvn3Lines(input) >= 5u;
 }
 
-void AppendUtf8(std::string& output, unsigned int codepoint) {
-    if (codepoint <= 0x7fu) output.push_back(static_cast<char>(codepoint));
-    else if (codepoint <= 0x7ffu) {
+void AppendUtf8(std::string &output, unsigned int codepoint)
+{
+    if (codepoint <= 0x7fu)
+        output.push_back(static_cast<char>(codepoint));
+    else if (codepoint <= 0x7ffu)
+    {
         output.push_back(static_cast<char>(0xc0u | (codepoint >> 6)));
         output.push_back(static_cast<char>(0x80u | (codepoint & 0x3fu)));
-    } else if (codepoint <= 0xffffu) {
+    }
+    else if (codepoint <= 0xffffu)
+    {
         output.push_back(static_cast<char>(0xe0u | (codepoint >> 12)));
         output.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3fu)));
         output.push_back(static_cast<char>(0x80u | (codepoint & 0x3fu)));
-    } else {
+    }
+    else
+    {
         output.push_back(static_cast<char>(0xf0u | (codepoint >> 18)));
         output.push_back(static_cast<char>(0x80u | ((codepoint >> 12) & 0x3fu)));
         output.push_back(static_cast<char>(0x80u | ((codepoint >> 6) & 0x3fu)));
@@ -547,30 +696,35 @@ void AppendUtf8(std::string& output, unsigned int codepoint) {
     }
 }
 
-std::string Tcvn3ToUtf8(const std::string& input) {
+std::string Tcvn3ToUtf8(const std::string &input)
+{
     std::string output;
     output.reserve(input.size() * 3u);
-    for (std::string::size_type index = 0; index < input.size(); ++index) {
+    for (std::string::size_type index = 0; index < input.size(); ++index)
+    {
         const unsigned char value = static_cast<unsigned char>(input[index]);
         const unsigned int codepoint = EasyRpgTcvn3DecodeByte(value);
-        if (codepoint == value && value < 0x80u) output.push_back(static_cast<char>(value));
-        else AppendUtf8(output, codepoint);
+        if (codepoint == value && value < 0x80u)
+            output.push_back(static_cast<char>(value));
+        else
+            AppendUtf8(output, codepoint);
     }
     return output;
 }
 
-namespace {
-typedef int (*LegacyDecodeFn)(const unsigned char*, unsigned int, unsigned short*, unsigned int, unsigned int*);
+namespace
+{
+typedef int (*LegacyDecodeFn)(const unsigned char *, unsigned int, unsigned short *, unsigned int, unsigned int *);
 
-std::string LegacyDecodeToUtf8(LegacyDecodeFn aDecode, const std::string& input) {
+std::string LegacyDecodeToUtf8(LegacyDecodeFn aDecode, const std::string &input)
+{
     if (input.empty())
         return std::string();
 
     const unsigned int source_length = static_cast<unsigned int>(input.size());
     std::vector<unsigned short> utf16(source_length);
     unsigned int utf16_length = 0;
-    if (aDecode(reinterpret_cast<const unsigned char*>(input.data()), source_length,
-                &utf16[0], source_length, &utf16_length) != 0)
+    if (aDecode(reinterpret_cast<const unsigned char *>(input.data()), source_length, &utf16[0], source_length, &utf16_length) != 0)
         return std::string();
 
     std::string output;
@@ -579,48 +733,59 @@ std::string LegacyDecodeToUtf8(LegacyDecodeFn aDecode, const std::string& input)
         AppendUtf8(output, utf16[index]);
     return output;
 }
-}
+} // namespace
 
-std::string Cp932ToUtf8(const std::string& input) {
+std::string Cp932ToUtf8(const std::string &input)
+{
     return LegacyDecodeToUtf8(&EasyRpgCoreCp932ToUtf16, input);
 }
 
-std::string GbkToUtf8(const std::string& input) {
+std::string GbkToUtf8(const std::string &input)
+{
     return LegacyDecodeToUtf8(&EasyRpgCoreGbkToUtf16, input);
 }
 
-bool IsValidUtf8(const std::string& value);
+bool IsValidUtf8(const std::string &value);
 
-bool IsStrongUtf8CjkText(const std::string& input) {
+bool IsStrongUtf8CjkText(const std::string &input)
+{
     if (!IsValidUtf8(input))
         return false;
 
     unsigned int three_byte_sequences = 0;
-    for (std::string::size_type index = 0; index < input.size();) {
+    for (std::string::size_type index = 0; index < input.size();)
+    {
         const unsigned char first = static_cast<unsigned char>(input[index]);
-        if (first < 0x80u) {
+        if (first < 0x80u)
+        {
             ++index;
-        } else if (first >= 0xc2u && first <= 0xdfu) {
+        }
+        else if (first >= 0xc2u && first <= 0xdfu)
+        {
             index += 2u;
-        } else if (first >= 0xe0u && first <= 0xefu) {
+        }
+        else if (first >= 0xe0u && first <= 0xefu)
+        {
             ++three_byte_sequences;
             index += 3u;
-        } else if (first >= 0xf0u && first <= 0xf4u) {
+        }
+        else if (first >= 0xf0u && first <= 0xf4u)
+        {
             index += 4u;
-        } else {
+        }
+        else
+        {
             return false;
         }
     }
     return three_byte_sequences >= 2u;
 }
 
-std::string DecodeMixedGbkCp932Text(const std::string& input) {
+std::string DecodeMixedGbkCp932Text(const std::string &input)
+{
     const std::string cp932 = Cp932ToUtf8(input);
     const std::string gbk = GbkToUtf8(input);
 
-    // Some RPG Maker projects contain newer UTF-8 save strings alongside a
-    // legacy GBK database. A strong multi-byte UTF-8 payload is unambiguous
-    // enough to preserve before trying the legacy codecs.
     if (IsStrongUtf8CjkText(input))
         return input;
 
@@ -635,14 +800,15 @@ std::string DecodeMixedGbkCp932Text(const std::string& input) {
     return encoding == MixedCjkEncoding::Cp932 ? cp932 : gbk;
 }
 
-std::string PlatformLegacyToUtf8(const std::string& input, unsigned int codepage) {
+std::string PlatformLegacyToUtf8(const std::string &input, unsigned int codepage)
+{
     if (input.empty())
         return std::string();
     std::vector<unsigned short> utf16(input.size());
     unsigned int utf16_length = 0;
     const int status = EasyRpgPlatformLegacyToUtf16(
         codepage,
-        reinterpret_cast<const unsigned char*>(input.data()),
+        reinterpret_cast<const unsigned char *>(input.data()),
         static_cast<unsigned int>(input.size()),
         &utf16[0],
         static_cast<unsigned int>(utf16.size()),
@@ -657,15 +823,13 @@ std::string PlatformLegacyToUtf8(const std::string& input, unsigned int codepage
     return output;
 }
 
-std::string DecodeMixedLegacyText(const std::string& input) {
-    // Savegames written by older Symbian builds stored UTF-8 bytes even when
-    // the project encoding was EASYRPG_VI_CP932. Preserve valid UTF-8 here so
-    // those saves keep resource names (especially CharSet sprite names)
-    // intact instead of reinterpreting them as TCVN3/CP932.
+std::string DecodeMixedLegacyText(const std::string &input)
+{
     if (IsValidUtf8(input))
         return input;
 
-    switch (ClassifyMixedLegacyText(input)) {
+    switch (ClassifyMixedLegacyText(input))
+    {
     case MixedLegacyEncoding::Cp932: {
         const std::string decoded = Cp932ToUtf8(input);
         return decoded.empty() && !input.empty() ? Tcvn3ToUtf8(input) : decoded;
@@ -673,7 +837,8 @@ std::string DecodeMixedLegacyText(const std::string& input) {
     case MixedLegacyEncoding::Tcvn3:
         return Tcvn3ToUtf8(input);
     case MixedLegacyEncoding::Unknown:
-        for (std::string::size_type index = 0; index < input.size(); ++index) {
+        for (std::string::size_type index = 0; index < input.size(); ++index)
+        {
             if (static_cast<unsigned char>(input[index]) >= 0x80u)
                 return Tcvn3ToUtf8(input);
         }
@@ -682,57 +847,80 @@ std::string DecodeMixedLegacyText(const std::string& input) {
     return input;
 }
 
-bool Utf8ToUtf16(const std::string& input, std::vector<unsigned short>& output) {
+bool Utf8ToUtf16(const std::string &input, std::vector<unsigned short> &output)
+{
     output.clear();
-    for (std::string::size_type i = 0; i < input.size();) {
+    for (std::string::size_type i = 0; i < input.size();)
+    {
         const unsigned int first = static_cast<unsigned char>(input[i]);
         unsigned int codepoint = 0;
         unsigned int length = 0;
-        if (first < 0x80u) { codepoint = first; length = 1; }
-        else if (first >= 0xc2u && first <= 0xdfu) { codepoint = first & 0x1fu; length = 2; }
-        else if (first >= 0xe0u && first <= 0xefu) { codepoint = first & 0x0fu; length = 3; }
-        else return false;
-        if (i + length > input.size()) return false;
-        for (unsigned int offset = 1; offset < length; ++offset) {
+        if (first < 0x80u)
+        {
+            codepoint = first;
+            length = 1;
+        }
+        else if (first >= 0xc2u && first <= 0xdfu)
+        {
+            codepoint = first & 0x1fu;
+            length = 2;
+        }
+        else if (first >= 0xe0u && first <= 0xefu)
+        {
+            codepoint = first & 0x0fu;
+            length = 3;
+        }
+        else
+            return false;
+        if (i + length > input.size())
+            return false;
+        for (unsigned int offset = 1; offset < length; ++offset)
+        {
             const unsigned int next = static_cast<unsigned char>(input[i + offset]);
-            if ((next & 0xc0u) != 0x80u) return false;
+            if ((next & 0xc0u) != 0x80u)
+                return false;
             codepoint = (codepoint << 6) | (next & 0x3fu);
         }
-        if ((length == 3 && codepoint < 0x800u) || (codepoint >= 0xd800u && codepoint <= 0xdfffu) || codepoint > 0xffffu) return false;
+        if ((length == 3 && codepoint < 0x800u) || (codepoint >= 0xd800u && codepoint <= 0xdfffu) || codepoint > 0xffffu)
+            return false;
         output.push_back(static_cast<unsigned short>(codepoint));
         i += length;
     }
     return true;
 }
 
-namespace {
-typedef int (*LegacyEncodeFn)(const unsigned short*, unsigned int, unsigned char*, unsigned int, unsigned int*);
+namespace
+{
+typedef int (*LegacyEncodeFn)(const unsigned short *, unsigned int, unsigned char *, unsigned int, unsigned int *);
 
-std::string Utf8ToLegacyBytes(LegacyEncodeFn aEncode, const std::string& input) {
+std::string Utf8ToLegacyBytes(LegacyEncodeFn aEncode, const std::string &input)
+{
     std::vector<unsigned short> utf16;
     if (!Utf8ToUtf16(input, utf16) || utf16.empty())
         return std::string();
     std::vector<unsigned char> encoded(utf16.size() * 2u);
     unsigned int encoded_length = 0;
-    if (aEncode(&utf16[0], static_cast<unsigned int>(utf16.size()),
-                &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length) != 0)
+    if (aEncode(&utf16[0], static_cast<unsigned int>(utf16.size()), &encoded[0], static_cast<unsigned int>(encoded.size()), &encoded_length) != 0)
         return std::string();
-    return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+    return std::string(reinterpret_cast<const char *>(&encoded[0]), encoded_length);
 }
-}
+} // namespace
 
-std::string Utf8ToCp932(const std::string& input) {
+std::string Utf8ToCp932(const std::string &input)
+{
     return Utf8ToLegacyBytes(&EasyRpgCoreUtf16ToCp932, input);
 }
 
-std::string Utf8ToTcvn3(const std::string& input) {
+std::string Utf8ToTcvn3(const std::string &input)
+{
     std::vector<unsigned short> utf16;
     if (!Utf8ToUtf16(input, utf16) || utf16.empty())
         return std::string();
 
     std::string encoded;
     encoded.reserve(utf16.size());
-    for (std::vector<unsigned short>::const_iterator it = utf16.begin(); it != utf16.end(); ++it) {
+    for (std::vector<unsigned short>::const_iterator it = utf16.begin(); it != utf16.end(); ++it)
+    {
         const int value = EasyRpgTcvn3EncodeCodepoint(*it);
         if (value < 0)
             return std::string();
@@ -741,12 +929,8 @@ std::string Utf8ToTcvn3(const std::string& input) {
     return encoded;
 }
 
-std::string Utf8ToMixedVietnamese(const std::string& input) {
-    // Mixed Vietnamese projects contain per-string TCVN3 and CP932 data.
-    // Prefer TCVN3 when every codepoint is representable there (Vietnamese
-    // text and ASCII), otherwise use CP932 for Japanese resource/text names.
-    // If neither legacy encoding can represent the string, keep UTF-8; the
-    // matching decoder deliberately preserves valid UTF-8 for compatibility.
+std::string Utf8ToMixedVietnamese(const std::string &input)
+{
     const std::string tcvn3 = Utf8ToTcvn3(input);
     if (!tcvn3.empty())
         return tcvn3;
@@ -758,12 +942,15 @@ std::string Utf8ToMixedVietnamese(const std::string& input) {
     return input;
 }
 
-std::string Utf8ToGbk(const std::string& input) {
+std::string Utf8ToGbk(const std::string &input)
+{
     return Utf8ToLegacyBytes(&EasyRpgCoreUtf16ToGbk, input);
 }
 
-bool ContainsJapaneseKana(const std::vector<unsigned short>& utf16) {
-    for (std::vector<unsigned short>::const_iterator it = utf16.begin(); it != utf16.end(); ++it) {
+bool ContainsJapaneseKana(const std::vector<unsigned short> &utf16)
+{
+    for (std::vector<unsigned short>::const_iterator it = utf16.begin(); it != utf16.end(); ++it)
+    {
         if ((*it >= 0x3040u && *it <= 0x30ffu) ||
             (*it >= 0xff61u && *it <= 0xff9fu))
             return true;
@@ -771,7 +958,8 @@ bool ContainsJapaneseKana(const std::vector<unsigned short>& utf16) {
     return false;
 }
 
-std::string Utf8ToMixedGbkCp932(const std::string& input) {
+std::string Utf8ToMixedGbkCp932(const std::string &input)
+{
     const std::string cp932 = Utf8ToCp932(input);
     const std::string gbk = Utf8ToGbk(input);
     if (cp932.empty())
@@ -785,7 +973,8 @@ std::string Utf8ToMixedGbkCp932(const std::string& input) {
     return gbk;
 }
 
-std::string Utf8ToPlatformLegacy(const std::string& input, unsigned int codepage) {
+std::string Utf8ToPlatformLegacy(const std::string &input, unsigned int codepage)
+{
     std::vector<unsigned short> utf16;
     if (!Utf8ToUtf16(input, utf16) || utf16.empty())
         return std::string();
@@ -800,10 +989,11 @@ std::string Utf8ToPlatformLegacy(const std::string& input, unsigned int codepage
         &encoded_length);
     if (status != 0)
         return std::string();
-    return std::string(reinterpret_cast<const char*>(&encoded[0]), encoded_length);
+    return std::string(reinterpret_cast<const char *>(&encoded[0]), encoded_length);
 }
 
-void AppendDetectionSample(std::string& sample, const std::string& value) {
+void AppendDetectionSample(std::string &sample, const std::string &value)
+{
     const std::string::size_type limit = 65536u;
     if (value.empty() || sample.size() >= limit)
         return;
@@ -814,7 +1004,8 @@ void AppendDetectionSample(std::string& sample, const std::string& value) {
         sample.push_back('\n');
 }
 
-std::string BuildDetectionSample() {
+std::string BuildDetectionSample()
+{
     std::string sample;
     sample.reserve(65536u);
 
@@ -863,24 +1054,28 @@ std::string BuildDetectionSample() {
     AppendDetectionSample(sample, Data::system.battletest_background);
     AppendDetectionSample(sample, Data::system.frame_name);
 
-    for (std::vector<RPG::Actor>::const_iterator it = Data::actors.begin(); it != Data::actors.end(); ++it) {
+    for (std::vector<RPG::Actor>::const_iterator it = Data::actors.begin(); it != Data::actors.end(); ++it)
+    {
         AppendDetectionSample(sample, it->name);
         AppendDetectionSample(sample, it->title);
         AppendDetectionSample(sample, it->character_name);
         AppendDetectionSample(sample, it->face_name);
         AppendDetectionSample(sample, it->skill_name);
     }
-    for (std::vector<RPG::Skill>::const_iterator it = Data::skills.begin(); it != Data::skills.end(); ++it) {
+    for (std::vector<RPG::Skill>::const_iterator it = Data::skills.begin(); it != Data::skills.end(); ++it)
+    {
         AppendDetectionSample(sample, it->name);
         AppendDetectionSample(sample, it->description);
         AppendDetectionSample(sample, it->using_message1);
         AppendDetectionSample(sample, it->using_message2);
     }
-    for (std::vector<RPG::Item>::const_iterator it = Data::items.begin(); it != Data::items.end(); ++it) {
+    for (std::vector<RPG::Item>::const_iterator it = Data::items.begin(); it != Data::items.end(); ++it)
+    {
         AppendDetectionSample(sample, it->name);
         AppendDetectionSample(sample, it->description);
     }
-    for (std::vector<RPG::State>::const_iterator it = Data::states.begin(); it != Data::states.end(); ++it) {
+    for (std::vector<RPG::State>::const_iterator it = Data::states.begin(); it != Data::states.end(); ++it)
+    {
         AppendDetectionSample(sample, it->name);
         AppendDetectionSample(sample, it->message_actor);
         AppendDetectionSample(sample, it->message_enemy);
@@ -888,41 +1083,51 @@ std::string BuildDetectionSample() {
         AppendDetectionSample(sample, it->message_affected);
         AppendDetectionSample(sample, it->message_recovery);
     }
-    for (std::vector<RPG::Enemy>::const_iterator it = Data::enemies.begin(); it != Data::enemies.end(); ++it) {
+    for (std::vector<RPG::Enemy>::const_iterator it = Data::enemies.begin(); it != Data::enemies.end(); ++it)
+    {
         AppendDetectionSample(sample, it->name);
         AppendDetectionSample(sample, it->battler_name);
     }
-    for (std::vector<RPG::CommonEvent>::const_iterator it = Data::commonevents.begin(); it != Data::commonevents.end(); ++it) {
+    for (std::vector<RPG::CommonEvent>::const_iterator it = Data::commonevents.begin(); it != Data::commonevents.end(); ++it)
+    {
         AppendDetectionSample(sample, it->name);
         for (std::vector<RPG::EventCommand>::const_iterator command = it->event_commands.begin();
-             command != it->event_commands.end(); ++command)
+             command != it->event_commands.end();
+             ++command)
             AppendDetectionSample(sample, command->string);
     }
     return sample;
 }
 
-void PushEncoding(std::vector<std::string>& encodings, const std::string& encoding) {
+void PushEncoding(std::vector<std::string> &encodings, const std::string &encoding)
+{
     if (encoding.empty())
         return;
-    for (std::vector<std::string>::const_iterator it = encodings.begin(); it != encodings.end(); ++it) {
+    for (std::vector<std::string>::const_iterator it = encodings.begin(); it != encodings.end(); ++it)
+    {
         if (*it == encoding)
             return;
     }
     encodings.push_back(encoding);
 }
 
-bool HasNonAsciiByte(const std::string& value) {
-    for (std::string::const_iterator it = value.begin(); it != value.end(); ++it) {
+bool HasNonAsciiByte(const std::string &value)
+{
+    for (std::string::const_iterator it = value.begin(); it != value.end(); ++it)
+    {
         if (static_cast<unsigned char>(*it) >= 0x80u)
             return true;
     }
     return false;
 }
 
-bool IsValidUtf8(const std::string& value) {
-    for (std::string::size_type i = 0; i < value.size();) {
+bool IsValidUtf8(const std::string &value)
+{
+    for (std::string::size_type i = 0; i < value.size();)
+    {
         const unsigned char first = static_cast<unsigned char>(value[i]);
-        if (first <= 0x7fu) {
+        if (first <= 0x7fu)
+        {
             ++i;
             continue;
         }
@@ -930,17 +1135,28 @@ bool IsValidUtf8(const std::string& value) {
         unsigned int count = 0;
         unsigned char second_min = 0x80u;
         unsigned char second_max = 0xbfu;
-        if (first >= 0xc2u && first <= 0xdfu) {
+        if (first >= 0xc2u && first <= 0xdfu)
+        {
             count = 2u;
-        } else if (first >= 0xe0u && first <= 0xefu) {
+        }
+        else if (first >= 0xe0u && first <= 0xefu)
+        {
             count = 3u;
-            if (first == 0xe0u) second_min = 0xa0u;
-            if (first == 0xedu) second_max = 0x9fu;
-        } else if (first >= 0xf0u && first <= 0xf4u) {
+            if (first == 0xe0u)
+                second_min = 0xa0u;
+            if (first == 0xedu)
+                second_max = 0x9fu;
+        }
+        else if (first >= 0xf0u && first <= 0xf4u)
+        {
             count = 4u;
-            if (first == 0xf0u) second_min = 0x90u;
-            if (first == 0xf4u) second_max = 0x8fu;
-        } else {
+            if (first == 0xf0u)
+                second_min = 0x90u;
+            if (first == 0xf4u)
+                second_max = 0x8fu;
+        }
+        else
+        {
             return false;
         }
 
@@ -949,7 +1165,8 @@ bool IsValidUtf8(const std::string& value) {
         const unsigned char second = static_cast<unsigned char>(value[i + 1u]);
         if (second < second_min || second > second_max)
             return false;
-        for (unsigned int offset = 2u; offset < count; ++offset) {
+        for (unsigned int offset = 2u; offset < count; ++offset)
+        {
             const unsigned char continuation = static_cast<unsigned char>(value[i + offset]);
             if (continuation < 0x80u || continuation > 0xbfu)
                 return false;
@@ -959,7 +1176,8 @@ bool IsValidUtf8(const std::string& value) {
     return true;
 }
 
-std::string DetectIniTitleEncoding(INIReader& ini) {
+std::string DetectIniTitleEncoding(INIReader &ini)
+{
     const std::string title = ini.Get("RPG_RT", "GameTitle", std::string());
     if (title.empty() || !HasNonAsciiByte(title))
         return std::string();
@@ -974,7 +1192,8 @@ std::string DetectIniTitleEncoding(INIReader& ini) {
     return std::string();
 }
 
-void AppendMapDetectionSamples(std::string& sample, const std::string& database_file) {
+void AppendMapDetectionSamples(std::string &sample, const std::string &database_file)
+{
     if (sample.size() >= 65536u)
         return;
     std::string directory;
@@ -982,18 +1201,24 @@ void AppendMapDetectionSamples(std::string& sample, const std::string& database_
     if (slash != std::string::npos)
         directory = database_file.substr(0, slash + 1);
 
-    for (unsigned int index = 1u; index <= 12u; ++index) {
+    for (unsigned int index = 1u; index <= 12u; ++index)
+    {
         char digits[16];
         snprintf(digits, sizeof(digits), "%04u", index);
         std::unique_ptr<RPG::Map> map = LMU_Reader::Load(directory + "Map" + digits + ".lmu", std::string());
         if (!map)
             continue;
         for (std::vector<RPG::Event>::const_iterator event = map->events.begin();
-             event != map->events.end(); ++event) {
+             event != map->events.end();
+             ++event)
+        {
             for (std::vector<RPG::EventPage>::const_iterator page = event->pages.begin();
-                 page != event->pages.end(); ++page) {
+                 page != event->pages.end();
+                 ++page)
+            {
                 for (std::vector<RPG::EventCommand>::const_iterator command = page->event_commands.begin();
-                     command != page->event_commands.end(); ++command)
+                     command != page->event_commands.end();
+                     ++command)
                     AppendDetectionSample(sample, command->string);
             }
         }
@@ -1001,15 +1226,22 @@ void AppendMapDetectionSamples(std::string& sample, const std::string& database_
             break;
     }
 }
-}
+} // namespace
 
-std::string ReaderUtil::CodepageToEncoding(int codepage) {
-    if (codepage == 0) return std::string();
-    if (codepage == 932) return "SHIFT_JIS";
-    if (codepage == 936) return "GBK";
-    if (codepage == 950) return "BIG5";
-    if (codepage == 65001) return "UTF-8";
-    if (codepage == 949) return "cp949";
+std::string ReaderUtil::CodepageToEncoding(int codepage)
+{
+    if (codepage == 0)
+        return std::string();
+    if (codepage == 932)
+        return "SHIFT_JIS";
+    if (codepage == 936)
+        return "GBK";
+    if (codepage == 950)
+        return "BIG5";
+    if (codepage == 65001)
+        return "UTF-8";
+    if (codepage == 949)
+        return "cp949";
     std::string result("CP");
     char digits[16];
     snprintf(digits, sizeof(digits), "%d", codepage);
@@ -1017,12 +1249,14 @@ std::string ReaderUtil::CodepageToEncoding(int codepage) {
     return result;
 }
 
-std::string ReaderUtil::DetectEncoding(const std::string& database_file) {
+std::string ReaderUtil::DetectEncoding(const std::string &database_file)
+{
     std::vector<std::string> encodings = DetectEncodings(database_file);
     return encodings.empty() ? std::string() : encodings.front();
 }
 
-std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database_file) {
+std::vector<std::string> ReaderUtil::DetectEncodings(const std::string &database_file)
+{
     std::vector<std::string> encodings;
     if (database_file.empty() || !LDB_Reader::Load(database_file, std::string()))
         return encodings;
@@ -1038,10 +1272,10 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
         EasyRpgCharsetDetector::Detect(detection_sample);
     const bool mixed_vietnamese = IsMixedVietnameseSample(detection_sample);
     const bool strong_chinese = !guesses.empty() &&
-        (guesses.front().encoding == "GBK" || guesses.front().encoding == "BIG5") &&
-        guesses.front().confidence >= 0.80f;
+                                (guesses.front().encoding == "GBK" || guesses.front().encoding == "BIG5") &&
+                                guesses.front().confidence >= 0.80f;
     const bool mixed_gbk_cp932 = strong_chinese &&
-        IsMixedGbkCp932Sample(detection_sample);
+                                 IsMixedGbkCp932Sample(detection_sample);
 
     if (mixed_vietnamese && !strong_chinese)
         PushEncoding(encodings, "EASYRPG_VI_CP932");
@@ -1049,7 +1283,8 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
         PushEncoding(encodings, "EASYRPG_GBK_CP932");
 
     for (std::vector<EasyRpgCharsetDetector::Guess>::const_iterator it = guesses.begin();
-         it != guesses.end(); ++it)
+         it != guesses.end();
+         ++it)
         PushEncoding(encodings, it->encoding);
 
     PushEncoding(encodings, "SHIFT_JIS");
@@ -1059,46 +1294,65 @@ std::vector<std::string> ReaderUtil::DetectEncodings(const std::string& database
     return encodings;
 }
 
-std::string ReaderUtil::GetEncoding(const std::string& ini_file) {
-    if (ini_file.empty()) return std::string();
+std::string ReaderUtil::GetEncoding(const std::string &ini_file)
+{
+    if (ini_file.empty())
+        return std::string();
     INIReader ini(ini_file);
-    if (ini.ParseError() == -1) return std::string();
+    if (ini.ParseError() == -1)
+        return std::string();
     const std::string value = ini.Get("EasyRPG", "Encoding", std::string());
     if (!value.empty())
         return CodepageToEncoding(std::atoi(value.c_str()));
     return DetectIniTitleEncoding(ini);
 }
 
-std::string ReaderUtil::GetLocaleEncoding() { return "SHIFT_JIS"; }
+std::string ReaderUtil::GetLocaleEncoding()
+{
+    return "SHIFT_JIS";
+}
 
-std::string ReaderUtil::Recode(const std::string& str_to_encode, const std::string& source_encoding) {
+std::string ReaderUtil::Recode(const std::string &str_to_encode, const std::string &source_encoding)
+{
     return Recode(str_to_encode, source_encoding, "UTF-8");
 }
 
-std::string ReaderUtil::Recode(const std::string& str_to_encode, const std::string& src_enc, const std::string& dst_enc) {
-    if (src_enc.empty() || dst_enc.empty() || str_to_encode.empty()) return str_to_encode;
+std::string ReaderUtil::Recode(const std::string &str_to_encode, const std::string &src_enc, const std::string &dst_enc)
+{
+    if (src_enc.empty() || dst_enc.empty() || str_to_encode.empty())
+        return str_to_encode;
     std::string result = str_to_encode;
-    if (IsUtf8Encoding(src_enc) && IsUtf8Encoding(dst_enc)) {
+    if (IsUtf8Encoding(src_enc) && IsUtf8Encoding(dst_enc))
+    {
         result = str_to_encode;
     }
     if (IsMixedVietnameseEncoding(src_enc) && IsUtf8Encoding(dst_enc))
         result = DecodeMixedLegacyText(str_to_encode);
     else if (IsMixedGbkCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc))
         result = DecodeMixedGbkCp932Text(str_to_encode);
-    else if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc)) result = Cp932ToUtf8(str_to_encode);
-    else if (IsGbkEncoding(src_enc) && IsUtf8Encoding(dst_enc)) result = GbkToUtf8(str_to_encode);
-    else if (IsBig5Encoding(src_enc) && IsUtf8Encoding(dst_enc)) result = PlatformLegacyToUtf8(str_to_encode, 950);
-    else if (IsUtf8Encoding(src_enc) && IsMixedVietnameseEncoding(dst_enc)) result = Utf8ToMixedVietnamese(str_to_encode);
-    else if (IsUtf8Encoding(src_enc) && IsCp932Encoding(dst_enc)) result = Utf8ToCp932(str_to_encode);
-    else if (IsUtf8Encoding(src_enc) && IsGbkEncoding(dst_enc)) result = Utf8ToGbk(str_to_encode);
-    else if (IsUtf8Encoding(src_enc) && IsMixedGbkCp932Encoding(dst_enc)) result = Utf8ToMixedGbkCp932(str_to_encode);
-    else if (IsUtf8Encoding(src_enc) && IsBig5Encoding(dst_enc)) result = Utf8ToPlatformLegacy(str_to_encode, 950);
+    else if (IsCp932Encoding(src_enc) && IsUtf8Encoding(dst_enc))
+        result = Cp932ToUtf8(str_to_encode);
+    else if (IsGbkEncoding(src_enc) && IsUtf8Encoding(dst_enc))
+        result = GbkToUtf8(str_to_encode);
+    else if (IsBig5Encoding(src_enc) && IsUtf8Encoding(dst_enc))
+        result = PlatformLegacyToUtf8(str_to_encode, 950);
+    else if (IsUtf8Encoding(src_enc) && IsMixedVietnameseEncoding(dst_enc))
+        result = Utf8ToMixedVietnamese(str_to_encode);
+    else if (IsUtf8Encoding(src_enc) && IsCp932Encoding(dst_enc))
+        result = Utf8ToCp932(str_to_encode);
+    else if (IsUtf8Encoding(src_enc) && IsGbkEncoding(dst_enc))
+        result = Utf8ToGbk(str_to_encode);
+    else if (IsUtf8Encoding(src_enc) && IsMixedGbkCp932Encoding(dst_enc))
+        result = Utf8ToMixedGbkCp932(str_to_encode);
+    else if (IsUtf8Encoding(src_enc) && IsBig5Encoding(dst_enc))
+        result = Utf8ToPlatformLegacy(str_to_encode, 950);
 #ifdef EASYRPG_ENCODING_CORPUS_TEST
     EasyRpgEncodingCorpusRecord(
-        src_enc.c_str(), dst_enc.c_str(),
-        reinterpret_cast<const unsigned char*>(str_to_encode.data()),
+        src_enc.c_str(),
+        dst_enc.c_str(),
+        reinterpret_cast<const unsigned char *>(str_to_encode.data()),
         static_cast<unsigned int>(str_to_encode.size()),
-        reinterpret_cast<const unsigned char*>(result.data()),
+        reinterpret_cast<const unsigned char *>(result.data()),
         static_cast<unsigned int>(result.size()));
 #endif
     return result;

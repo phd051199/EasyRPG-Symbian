@@ -7,7 +7,7 @@ class CLauncherView;
 
 class CEasyRpgAppUi : public CAknAppUi
 {
-public:
+  public:
     CEasyRpgAppUi();
     ~CEasyRpgAppUi();
 
@@ -15,8 +15,8 @@ public:
     void HandleCommandL(TInt aCommand);
     void HandleStatusPaneSizeChange();
 
-private:
-    CLauncherView* iLauncherView;
+  private:
+    CLauncherView *iLauncherView;
 };
 
 #endif

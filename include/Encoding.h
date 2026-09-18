@@ -5,18 +5,18 @@
 
 class TEncoding
 {
-public:
-    static void ShiftJisToUnicodeL(const TDesC8& aSource,
-                                   TDes& aDestination);
-    static void Utf8ToUnicodeL(const TDesC8& aSource,
-                               TDes& aDestination);
-    static void Utf8CStringToUnicodeL(const char* aSource,
-                                      TDes& aDestination);
-    static void UnicodeToUtf8L(const TDesC& aSource,
-                               TDes8& aDestination);
-    static void UnicodeToUtf8CStringL(const TDesC& aSource,
-                                      TDes8& aDestination);
-    static void NormalizeJapaneseNfcInPlace(TDes& aText);
+  public:
+    static void ShiftJisToUnicodeL(const TDesC8 &aSource,
+                                   TDes &aDestination);
+    static void Utf8ToUnicodeL(const TDesC8 &aSource,
+                               TDes &aDestination);
+    static void Utf8CStringToUnicodeL(const char *aSource,
+                                      TDes &aDestination);
+    static void UnicodeToUtf8L(const TDesC &aSource,
+                               TDes8 &aDestination);
+    static void UnicodeToUtf8CStringL(const TDesC &aSource,
+                                      TDes8 &aDestination);
+    static void NormalizeJapaneseNfcInPlace(TDes &aText);
     static void Shutdown();
 };
 

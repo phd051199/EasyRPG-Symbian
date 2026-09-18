@@ -6,10 +6,10 @@ namespace
 const TUint32 KOutputReopenDelayMs = 250;
 }
 
-CAudioMixer* CAudioMixer::NewL(TStreamRefillCallback aRefillCallback,
-                               TAny* aRefillContext)
+CAudioMixer *CAudioMixer::NewL(TStreamRefillCallback aRefillCallback,
+                               TAny *aRefillContext)
 {
-    CAudioMixer* self = new (ELeave) CAudioMixer(aRefillCallback, aRefillContext);
+    CAudioMixer *self = new (ELeave) CAudioMixer(aRefillCallback, aRefillContext);
     CleanupStack::PushL(self);
     self->ConstructL();
     CleanupStack::Pop(self);
@@ -17,7 +17,7 @@ CAudioMixer* CAudioMixer::NewL(TStreamRefillCallback aRefillCallback,
 }
 
 CAudioMixer::CAudioMixer(TStreamRefillCallback aRefillCallback,
-                         TAny* aRefillContext)
+                         TAny *aRefillContext)
     : iStream(NULL),
       iQueuedOutputBufferCount(0),
       iClipCount(0),
@@ -59,8 +59,8 @@ CAudioMixer::CAudioMixer(TStreamRefillCallback aRefillCallback,
 void CAudioMixer::ConstructL()
 {
     iStream = CMdaAudioOutputStream::NewL(*this,
-                                         EMdaPriorityNormal,
-                                         EMdaPriorityPreferenceTime);
+                                          EMdaPriorityNormal,
+                                          EMdaPriorityPreferenceTime);
     OpenOutputStream();
 }
 
@@ -97,7 +97,7 @@ CAudioMixer::~CAudioMixer()
     }
 }
 
-TUint32 CAudioMixer::HashKey(const TDesC& aKey)
+TUint32 CAudioMixer::HashKey(const TDesC &aKey)
 {
     TUint32 hash = 2166136261u;
     TInt i;
@@ -112,7 +112,7 @@ TUint32 CAudioMixer::HashKey(const TDesC& aKey)
     return hash;
 }
 
-void CAudioMixer::WritePcm16(TUint8* aData, TInt aValue)
+void CAudioMixer::WritePcm16(TUint8 *aData, TInt aValue)
 {
     if (aValue > 32767)
         aValue = 32767;
@@ -123,13 +123,13 @@ void CAudioMixer::WritePcm16(TUint8* aData, TInt aValue)
     aData[1] = static_cast<TUint8>(value >> 8);
 }
 
-CAudioMixer::TCachedClip* CAudioMixer::FindCachedClip(const TDesC& aKey)
+CAudioMixer::TCachedClip *CAudioMixer::FindCachedClip(const TDesC &aKey)
 {
     const TUint32 hash = HashKey(aKey);
     TInt index = iClipHashBuckets[hash & (KClipHashBucketCount - 1)];
     while (index >= 0)
     {
-        TCachedClip& clip = iClips[index];
+        TCachedClip &clip = iClips[index];
         if (clip.iPcm16 && clip.iKeyHash == hash && clip.iKey.CompareF(aKey) == 0)
             return &clip;
         index = clip.iHashNext;
@@ -137,13 +137,13 @@ CAudioMixer::TCachedClip* CAudioMixer::FindCachedClip(const TDesC& aKey)
     return NULL;
 }
 
-const CAudioMixer::TCachedClip* CAudioMixer::FindCachedClip(const TDesC& aKey) const
+const CAudioMixer::TCachedClip *CAudioMixer::FindCachedClip(const TDesC &aKey) const
 {
     const TUint32 hash = HashKey(aKey);
     TInt index = iClipHashBuckets[hash & (KClipHashBucketCount - 1)];
     while (index >= 0)
     {
-        const TCachedClip& clip = iClips[index];
+        const TCachedClip &clip = iClips[index];
         if (clip.iPcm16 && clip.iKeyHash == hash && clip.iKey.CompareF(aKey) == 0)
             return &clip;
         index = clip.iHashNext;
@@ -153,7 +153,7 @@ const CAudioMixer::TCachedClip* CAudioMixer::FindCachedClip(const TDesC& aKey) c
 
 void CAudioMixer::LinkCachedClip(TInt aClipIndex)
 {
-    TCachedClip& clip = iClips[aClipIndex];
+    TCachedClip &clip = iClips[aClipIndex];
     const TInt bucket = static_cast<TInt>(clip.iKeyHash & (KClipHashBucketCount - 1));
     clip.iHashNext = iClipHashBuckets[bucket];
     iClipHashBuckets[bucket] = aClipIndex;
@@ -161,7 +161,7 @@ void CAudioMixer::LinkCachedClip(TInt aClipIndex)
 
 void CAudioMixer::UnlinkCachedClip(TInt aClipIndex)
 {
-    TCachedClip& clip = iClips[aClipIndex];
+    TCachedClip &clip = iClips[aClipIndex];
     const TInt bucket = static_cast<TInt>(clip.iKeyHash & (KClipHashBucketCount - 1));
     TInt previous = -1;
     TInt current = iClipHashBuckets[bucket];
@@ -182,13 +182,13 @@ void CAudioMixer::UnlinkCachedClip(TInt aClipIndex)
     clip.iHashNext = -1;
 }
 
-TBool CAudioMixer::VoiceIsActive(const TVoice& aVoice)
+TBool CAudioMixer::VoiceIsActive(const TVoice &aVoice)
 {
     return aVoice.iActive && aVoice.iClip && aVoice.iClip->iPcm16 &&
            aVoice.iPosition < aVoice.iClip->iFrameCount;
 }
 
-void CAudioMixer::ClearVoice(TVoice& aVoice)
+void CAudioMixer::ClearVoice(TVoice &aVoice)
 {
     aVoice.iClip = NULL;
     aVoice.iPosition = 0;
@@ -200,7 +200,7 @@ void CAudioMixer::ClearVoice(TVoice& aVoice)
 
 TBool CAudioMixer::ClipIsActive(TInt aClipIndex) const
 {
-    const TCachedClip* clip = &iClips[aClipIndex];
+    const TCachedClip *clip = &iClips[aClipIndex];
     TInt i;
     for (i = 0; i < KMaxVoices; ++i)
     {
@@ -217,7 +217,7 @@ TInt CAudioMixer::LeastRecentlyUsedClip() const
     TInt i;
     for (i = 0; i < KMaxCachedClips; ++i)
     {
-        const TCachedClip& clip = iClips[i];
+        const TCachedClip &clip = iClips[i];
         if (!clip.iPcm16 || clip.iPinned || ClipIsActive(i))
             continue;
         if (clip.iUseSerial < oldest)
@@ -233,7 +233,7 @@ void CAudioMixer::ReleaseClip(TInt aClipIndex)
 {
     if (aClipIndex < 0 || aClipIndex >= KMaxCachedClips)
         return;
-    TCachedClip& clip = iClips[aClipIndex];
+    TCachedClip &clip = iClips[aClipIndex];
     if (!clip.iPcm16 || ClipIsActive(aClipIndex))
         return;
     UnlinkCachedClip(aClipIndex);
@@ -252,8 +252,8 @@ void CAudioMixer::ReleaseClip(TInt aClipIndex)
         --iClipCount;
 }
 
-void CAudioMixer::CachePcm16L(const TDesC& aKey,
-                              const TInt16* aSamples,
+void CAudioMixer::CachePcm16L(const TDesC &aKey,
+                              const TInt16 *aSamples,
                               TInt aFrameCount,
                               TInt aSampleRate,
                               TInt aChannels,
@@ -264,7 +264,7 @@ void CAudioMixer::CachePcm16L(const TDesC& aKey,
     if (aKey.Length() <= 0 || aKey.Length() > KMaxCachedKeyLength)
         User::Leave(KErrTooBig);
 
-    TCachedClip* existing = FindCachedClip(aKey);
+    TCachedClip *existing = FindCachedClip(aKey);
     if (existing)
     {
         existing->iPinned = aPinned;
@@ -302,10 +302,10 @@ void CAudioMixer::CachePcm16L(const TDesC& aKey,
     if (slot < 0)
         User::Leave(KErrNoMemory);
 
-    HBufC8* pcm = HBufC8::NewLC(outputBytes);
+    HBufC8 *pcm = HBufC8::NewLC(outputBytes);
     TPtr8 output = pcm->Des();
     output.SetLength(outputBytes);
-    TUint8* destination = const_cast<TUint8*>(output.Ptr());
+    TUint8 *destination = const_cast<TUint8 *>(output.Ptr());
 
     if (aSampleRate == KOutputSampleRate && aChannels == KOutputChannels)
     {
@@ -348,7 +348,7 @@ void CAudioMixer::CachePcm16L(const TDesC& aKey,
         phase += step;
     }
 
-    TCachedClip& clip = iClips[slot];
+    TCachedClip &clip = iClips[slot];
     clip.iKey.Copy(aKey);
     clip.iPcm16 = pcm;
     clip.iFrameCount = outputFrames;
@@ -362,14 +362,14 @@ void CAudioMixer::CachePcm16L(const TDesC& aKey,
     CleanupStack::Pop(pcm);
 }
 
-void CAudioMixer::SetCachedPinned(const TDesC& aKey, TBool aPinned)
+void CAudioMixer::SetCachedPinned(const TDesC &aKey, TBool aPinned)
 {
-    TCachedClip* clip = FindCachedClip(aKey);
+    TCachedClip *clip = FindCachedClip(aKey);
     if (clip)
         clip->iPinned = aPinned;
 }
 
-TBool CAudioMixer::IsCached(const TDesC& aKey) const
+TBool CAudioMixer::IsCached(const TDesC &aKey) const
 {
     return FindCachedClip(aKey) != NULL;
 }
@@ -382,7 +382,7 @@ TInt CAudioMixer::SelectPlaybackVoice(TInt aPriority) const
     TInt i;
     for (i = 0; i < KMaxVoices; ++i)
     {
-        const TVoice& voice = iVoices[i];
+        const TVoice &voice = iVoices[i];
         if (!VoiceIsActive(voice))
             return i;
         if (voice.iPriority > aPriority)
@@ -398,9 +398,9 @@ TInt CAudioMixer::SelectPlaybackVoice(TInt aPriority) const
     return selected;
 }
 
-TBool CAudioMixer::PlaySe(const TDesC& aKey, TInt aVolume, TInt aPriority)
+TBool CAudioMixer::PlaySe(const TDesC &aKey, TInt aVolume, TInt aPriority)
 {
-    TCachedClip* clip = FindCachedClip(aKey);
+    TCachedClip *clip = FindCachedClip(aKey);
     if (!clip)
         return EFalse;
     const TInt selected = SelectPlaybackVoice(aPriority);
@@ -408,7 +408,7 @@ TBool CAudioMixer::PlaySe(const TDesC& aKey, TInt aVolume, TInt aPriority)
         return EFalse;
 
     clip->iUseSerial = ++iClipUseSerial;
-    TVoice& voice = iVoices[selected];
+    TVoice &voice = iVoices[selected];
     voice.iClip = clip;
     voice.iPosition = 0;
     voice.iVolume = TNativeAudio::ClampVolume(aVolume);
@@ -427,12 +427,12 @@ void CAudioMixer::StopSe()
 }
 
 TInt CAudioMixer::WriteStreamPcm16(TStreamBus aBus,
-                                   const TInt16* aSamples,
+                                   const TInt16 *aSamples,
                                    TInt aFrameCount)
 {
     if (aBus < 0 || aBus >= EStreamBusCount || !aSamples || aFrameCount <= 0)
         return 0;
-    TStreamState& stream = iStreams[aBus];
+    TStreamState &stream = iStreams[aBus];
     const TInt writable = Min(aFrameCount, KStreamBufferFrames - stream.iQueuedFrames);
     const TInt firstFrames = Min(writable, KStreamBufferFrames - stream.iWriteFrame);
     if (firstFrames > 0)
@@ -462,7 +462,7 @@ void CAudioMixer::ClearStream(TStreamBus aBus)
 {
     if (aBus < 0 || aBus >= EStreamBusCount)
         return;
-    TStreamState& stream = iStreams[aBus];
+    TStreamState &stream = iStreams[aBus];
     stream.iReadFrame = 0;
     stream.iWriteFrame = 0;
     stream.iQueuedFrames = 0;
@@ -502,16 +502,13 @@ void CAudioMixer::CommitStreams()
     QueueOutputBuffers();
 }
 
-// Q15 gain for a 0..100 volume at full scale; unity takes the raw-scale
-// shortcut ((x * scale) >> 15 with scale == 2^15 is exactly x).
 TInt CAudioMixer::VolumeGain(TInt aVolume, TInt aFullScale)
 {
     return aVolume >= 100 ? aFullScale : (aVolume * aFullScale + 50) / 100;
 }
 
-// Accumulates volume-scaled stereo frames into the 32-bit mix buffer.
-void CAudioMixer::AccumulateFrames(TInt* aMixedSamples,
-                                   const TInt16* aSource,
+void CAudioMixer::AccumulateFrames(TInt *aMixedSamples,
+                                   const TInt16 *aSource,
                                    TInt aFrameCount,
                                    TInt aVolume)
 {
@@ -526,10 +523,8 @@ void CAudioMixer::AccumulateFrames(TInt* aMixedSamples,
     }
 }
 
-// Writes volume-scaled stereo frames into a 16-bit output buffer. Volume 0
-// yields silence; full scale is 0.75 (same headroom as the mixed path).
-void CAudioMixer::WriteFrames(TInt16* aDestination,
-                              const TInt16* aSource,
+void CAudioMixer::WriteFrames(TInt16 *aDestination,
+                              const TInt16 *aSource,
                               TInt aFrameCount,
                               TInt aVolume)
 {
@@ -544,8 +539,8 @@ void CAudioMixer::WriteFrames(TInt16* aDestination,
     }
 }
 
-TBool CAudioMixer::MixStream(TStreamState& aStream,
-                             TInt* aMixedSamples,
+TBool CAudioMixer::MixStream(TStreamState &aStream,
+                             TInt *aMixedSamples,
                              TInt aFrameCount)
 {
     const TInt frames = Min(aFrameCount, aStream.iQueuedFrames);
@@ -568,8 +563,8 @@ TBool CAudioMixer::MixStream(TStreamState& aStream,
     return frames > 0;
 }
 
-TBool CAudioMixer::MixVoice(TVoice& aVoice,
-                            TInt* aMixedSamples,
+TBool CAudioMixer::MixVoice(TVoice &aVoice,
+                            TInt *aMixedSamples,
                             TInt aFrameCount)
 {
     if (!VoiceIsActive(aVoice))
@@ -580,7 +575,7 @@ TBool CAudioMixer::MixVoice(TVoice& aVoice,
 
     const TInt remaining = aVoice.iClip->iFrameCount - aVoice.iPosition;
     const TInt frames = Min(aFrameCount, remaining);
-    const TInt16* source = reinterpret_cast<const TInt16*>(aVoice.iClip->iPcm16->Ptr()) +
+    const TInt16 *source = reinterpret_cast<const TInt16 *>(aVoice.iClip->iPcm16->Ptr()) +
                            aVoice.iPosition * KOutputChannels;
     AccumulateFrames(aMixedSamples, source, frames, aVoice.iVolume);
     aVoice.iPosition += frames;
@@ -611,10 +606,10 @@ TBool CAudioMixer::FillSingleStreamOutput(TInt aBufferIndex, TInt aFrameCount)
     if (selected < 0)
         return EFalse;
 
-    TStreamState& stream = iStreams[selected];
-    TBuf8<KOutputBufferBytes>& output = iOutputBuffers[aBufferIndex];
+    TStreamState &stream = iStreams[selected];
+    TBuf8<KOutputBufferBytes> &output = iOutputBuffers[aBufferIndex];
     output.SetLength(KOutputBufferBytes);
-    TInt16* destination = reinterpret_cast<TInt16*>(const_cast<TUint8*>(output.Ptr()));
+    TInt16 *destination = reinterpret_cast<TInt16 *>(const_cast<TUint8 *>(output.Ptr()));
     TInt outputFrame = 0;
     TInt remaining = aFrameCount;
     while (remaining > 0)
@@ -640,7 +635,7 @@ void CAudioMixer::FillOutputBuffer(TInt aBufferIndex)
     if (FillSingleStreamOutput(aBufferIndex, frameCount))
         return;
 
-    TBuf8<KOutputBufferBytes>& output = iOutputBuffers[aBufferIndex];
+    TBuf8<KOutputBufferBytes> &output = iOutputBuffers[aBufferIndex];
     output.SetLength(KOutputBufferBytes);
     Mem::FillZ(iMixBuffer, sizeof(iMixBuffer));
 
@@ -652,7 +647,7 @@ void CAudioMixer::FillOutputBuffer(TInt aBufferIndex)
     for (voice = 0; voice < KMaxVoices; ++voice)
         MixVoice(iVoices[voice], iMixBuffer, frameCount);
 
-    TInt16* destination = reinterpret_cast<TInt16*>(const_cast<TUint8*>(output.Ptr()));
+    TInt16 *destination = reinterpret_cast<TInt16 *>(const_cast<TUint8 *>(output.Ptr()));
     const TInt sampleCount = KOutputBufferBytes / 2;
     for (TInt sample = 0; sample < sampleCount; ++sample)
     {
@@ -676,7 +671,7 @@ TInt CAudioMixer::FreeOutputBufferIndex() const
     return -1;
 }
 
-TInt CAudioMixer::OutputBufferIndex(const TDesC8& aBuffer) const
+TInt CAudioMixer::OutputBufferIndex(const TDesC8 &aBuffer) const
 {
     TInt i;
     for (i = 0; i < KOutputBufferCount; ++i)
@@ -734,7 +729,7 @@ TBool CAudioMixer::CanFillOutputBuffer() const
     TInt bus;
     for (bus = 0; bus < EStreamBusCount; ++bus)
     {
-        const TStreamState& stream = iStreams[bus];
+        const TStreamState &stream = iStreams[bus];
         if (stream.iActive && stream.iQueuedFrames < frameCount)
             return EFalse;
     }
@@ -753,10 +748,6 @@ void CAudioMixer::QueueOutputBuffers(TInt aMaxBuffers)
     TInt filled = 0;
     while (iQueuedOutputBufferCount < KOutputQueueDepth && filled < aMaxBuffers)
     {
-        // Refill from the already-decoded software source in the MMF
-        // callback path. Waiting for the next game tick here allowed map
-        // loads, rendering spikes and first-use SFX decoding to drain the
-        // stream ring and end playback with KErrUnderflow.
         if (NeedsStreamRefill() && iRefillCallback)
             iRefillCallback(iRefillContext);
         if (!CanFillOutputBuffer())
@@ -839,7 +830,7 @@ void CAudioMixer::MaoscOpenComplete(TInt aError)
     {
         TRAPD(propertyError,
               iStream->SetAudioPropertiesL(TMdaAudioDataSettings::ESampleRate22050Hz,
-                                            TMdaAudioDataSettings::EChannelsStereo));
+                                           TMdaAudioDataSettings::EChannelsStereo));
         if (propertyError != KErrNone)
         {
             iReady = EFalse;
@@ -859,7 +850,7 @@ void CAudioMixer::MaoscOpenComplete(TInt aError)
     }
 }
 
-void CAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
+void CAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8 &aBuffer)
 {
     const TInt bufferIndex = OutputBufferIndex(aBuffer);
     if (bufferIndex >= 0 && iOutputBufferQueued[bufferIndex])
@@ -877,8 +868,6 @@ void CAudioMixer::MaoscBufferCopied(TInt aError, const TDesC8& aBuffer)
     }
     if (aError == KErrNone && !iShuttingDown)
     {
-        // MMF returned one descriptor: prepare exactly one replacement here.
-        // Startup/game-loop commits can still prefill KOutputFillBurst buffers.
         QueueOutputBuffers(1);
     }
 }
@@ -891,10 +880,6 @@ void CAudioMixer::MaoscPlayComplete(TInt aError)
     ResetOutputQueue();
     if (aError == KErrNone || aError == KErrUnderflow)
     {
-        // KErrUnderflow is the documented end-of-data signal. It is normal
-        // after the final SFX, but indicates a real underrun while a looping
-        // software stream is still active. Keep the stream open and refill it
-        // immediately in either case.
         if (aError == KErrUnderflow && HasActiveStream())
             iLastError = KErrUnderflow;
         QueueOutputBuffers();

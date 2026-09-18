@@ -8,23 +8,22 @@
 #ifndef EASYRPG_SYMBIAN
 #include <zlib.h>
 #else
-// The S60 SDK links zlib but does not expose zlib.h on the application include
-// path. Keep the small ABI surface needed by the streaming decoders here.
 typedef unsigned char Bytef;
 typedef unsigned int uInt;
 typedef unsigned long uLong;
-typedef void* voidpf;
+typedef void *voidpf;
 typedef voidpf (*alloc_func)(voidpf opaque, uInt items, uInt size);
 typedef void (*free_func)(voidpf opaque, voidpf address);
-struct z_stream_s {
-    Bytef* next_in;
+struct z_stream_s
+{
+    Bytef *next_in;
     uInt avail_in;
     uLong total_in;
-    Bytef* next_out;
+    Bytef *next_out;
     uInt avail_out;
     uLong total_out;
-    char* msg;
-    void* state;
+    char *msg;
+    void *state;
     alloc_func zalloc;
     free_func zfree;
     voidpf opaque;
@@ -33,10 +32,10 @@ struct z_stream_s {
     uLong reserved;
 };
 typedef z_stream_s z_stream;
-extern "C" const char* zlibVersion(void);
-extern "C" int inflateInit_(z_stream* stream, const char* version, int stream_size);
-extern "C" int inflate(z_stream* stream, int flush);
-extern "C" int inflateEnd(z_stream* stream);
+extern "C" const char *zlibVersion(void);
+extern "C" int inflateInit_(z_stream *stream, const char *version, int stream_size);
+extern "C" int inflate(z_stream *stream, int flush);
+extern "C" int inflateEnd(z_stream *stream);
 #define Z_NO_FLUSH 0
 #define Z_OK 0
 #define Z_STREAM_END 1
@@ -48,8 +47,8 @@ extern "C" int inflateEnd(z_stream* stream);
 #include "image_xyz.h"
 #include "UpstreamPlayerBridge.h"
 
-extern "C" int uncompress(unsigned char* dest, unsigned long* dest_len, const unsigned char* source, unsigned long source_len);
-extern "C" int compress2(unsigned char* dest, unsigned long* dest_len, const unsigned char* source, unsigned long source_len, int level);
+extern "C" int uncompress(unsigned char *dest, unsigned long *dest_len, const unsigned char *source, unsigned long source_len);
+extern "C" int compress2(unsigned char *dest, unsigned long *dest_len, const unsigned char *source, unsigned long source_len, int level);
 extern "C" unsigned long compressBound(unsigned long source_len);
 
 #ifdef EASYRPG_SYMBIAN
@@ -58,37 +57,42 @@ extern "C" int EasyRpgUpstreamPlayerTrimMemory(int pressure_level);
 extern "C" int EasyRpgPlatformPrepareAllocation(int bytes);
 #endif
 
-namespace {
-unsigned short Read16(const unsigned char* p) {
+namespace
+{
+unsigned short Read16(const unsigned char *p)
+{
     return static_cast<unsigned short>(p[0] | (static_cast<unsigned short>(p[1]) << 8));
 }
 
-unsigned int Read32(const unsigned char* p) {
+unsigned int Read32(const unsigned char *p)
+{
     return static_cast<unsigned int>(p[0]) |
            (static_cast<unsigned int>(p[1]) << 8) |
            (static_cast<unsigned int>(p[2]) << 16) |
            (static_cast<unsigned int>(p[3]) << 24);
 }
 
-void PrepareImageAllocation(unsigned pixel_count, unsigned transient_bytes) {
+void PrepareImageAllocation(unsigned pixel_count, unsigned transient_bytes)
+{
 #ifdef EASYRPG_SYMBIAN
-	if (!pixel_count)
-		return;
-	const unsigned long long rgba_bytes = static_cast<unsigned long long>(pixel_count) * 4ull;
-	const unsigned long long final_bytes = static_cast<unsigned long long>(pixel_count) * 2ull;
-	const unsigned long long required = rgba_bytes + final_bytes + transient_bytes + 6ull * 1024ull * 1024ull;
-	const int free_ram = EasyRpgPlatformFreeRamBytes();
-	if (free_ram < 0 || static_cast<unsigned long long>(free_ram) >= required)
-		return;
-	const unsigned long long bounded = std::min<unsigned long long>(required, 0x7fffffffull);
-	EasyRpgPlatformPrepareAllocation(static_cast<int>(bounded));
+    if (!pixel_count)
+        return;
+    const unsigned long long rgba_bytes = static_cast<unsigned long long>(pixel_count) * 4ull;
+    const unsigned long long final_bytes = static_cast<unsigned long long>(pixel_count) * 2ull;
+    const unsigned long long required = rgba_bytes + final_bytes + transient_bytes + 6ull * 1024ull * 1024ull;
+    const int free_ram = EasyRpgPlatformFreeRamBytes();
+    if (free_ram < 0 || static_cast<unsigned long long>(free_ram) >= required)
+        return;
+    const unsigned long long bounded = std::min<unsigned long long>(required, 0x7fffffffull);
+    EasyRpgPlatformPrepareAllocation(static_cast<int>(bounded));
 #else
-	(void)pixel_count;
-	(void)transient_bytes;
+    (void)pixel_count;
+    (void)transient_bytes;
 #endif
 }
 
-unsigned DirectPixelBytes(int pixel_format) {
+unsigned DirectPixelBytes(int pixel_format)
+{
     if (pixel_format == EEasyRpgDirectImageRgb565 ||
         pixel_format == EEasyRpgDirectImageA1555)
         return 2u;
@@ -97,13 +101,15 @@ unsigned DirectPixelBytes(int pixel_format) {
     return 0u;
 }
 
-void StoreDirectPixel(unsigned char* destination,
+void StoreDirectPixel(unsigned char *destination,
                       int pixel_format,
                       unsigned char r,
                       unsigned char g,
                       unsigned char b,
-                      unsigned char a) {
-    if (pixel_format == EEasyRpgDirectImageBgra8888) {
+                      unsigned char a)
+{
+    if (pixel_format == EEasyRpgDirectImageBgra8888)
+    {
         const unsigned pr = (static_cast<unsigned>(r) * a + 127u) / 255u;
         const unsigned pg = (static_cast<unsigned>(g) * a + 127u) / 255u;
         const unsigned pb = (static_cast<unsigned>(b) * a + 127u) / 255u;
@@ -114,13 +120,17 @@ void StoreDirectPixel(unsigned char* destination,
         return;
     }
     unsigned short value = 0;
-    if (pixel_format == EEasyRpgDirectImageRgb565) {
+    if (pixel_format == EEasyRpgDirectImageRgb565)
+    {
         value = static_cast<unsigned short>(
             ((static_cast<unsigned>(r) >> 3) << 11) |
             ((static_cast<unsigned>(g) >> 2) << 5) |
             (static_cast<unsigned>(b) >> 3));
-    } else if (pixel_format == EEasyRpgDirectImageA1555) {
-        if (a >= 128) {
+    }
+    else if (pixel_format == EEasyRpgDirectImageA1555)
+    {
+        if (a >= 128)
+        {
             value = static_cast<unsigned short>(
                 0x8000u |
                 ((static_cast<unsigned>(r) >> 3) << 10) |
@@ -131,10 +141,12 @@ void StoreDirectPixel(unsigned char* destination,
     destination[0] = static_cast<unsigned char>(value & 0xffu);
     destination[1] = static_cast<unsigned char>(value >> 8);
 }
-}
+} // namespace
 
-namespace ImageXYZ {
-bool ReadXYZ(const uint8_t* data, unsigned len, bool transparent, int& width, int& height, void*& pixels) {
+namespace ImageXYZ
+{
+bool ReadXYZ(const uint8_t *data, unsigned len, bool transparent, int &width, int &height, void *&pixels)
+{
     pixels = 0;
     width = 0;
     height = 0;
@@ -151,29 +163,33 @@ bool ReadXYZ(const uint8_t* data, unsigned len, bool transparent, int& width, in
     const unsigned pixel_count = w * h;
     const unsigned raw_size = 768u + pixel_count;
     PrepareImageAllocation(pixel_count, raw_size);
-    unsigned char* raw = static_cast<unsigned char*>(malloc(raw_size));
+    unsigned char *raw = static_cast<unsigned char *>(malloc(raw_size));
     if (!raw)
         return false;
 
     unsigned long decoded = raw_size;
-    if (uncompress(raw, &decoded, data + 8, len - 8) != 0 || decoded != raw_size) {
+    if (uncompress(raw, &decoded, data + 8, len - 8) != 0 || decoded != raw_size)
+    {
         free(raw);
         return false;
     }
 
-    if (pixel_count > 0xffffffffu / 4u) {
+    if (pixel_count > 0xffffffffu / 4u)
+    {
         free(raw);
         return false;
     }
-    unsigned char* out = static_cast<unsigned char*>(malloc(pixel_count * 4u));
-    if (!out) {
+    unsigned char *out = static_cast<unsigned char *>(malloc(pixel_count * 4u));
+    if (!out)
+    {
         free(raw);
         return false;
     }
 
-    const unsigned char* palette = raw;
-    const unsigned char* indices = raw + 768;
-    for (unsigned i = 0; i < pixel_count; ++i) {
+    const unsigned char *palette = raw;
+    const unsigned char *indices = raw + 768;
+    for (unsigned i = 0; i < pixel_count; ++i)
+    {
         const unsigned index = indices[i];
         out[i * 4 + 0] = palette[index * 3 + 0];
         out[i * 4 + 1] = palette[index * 3 + 1];
@@ -188,16 +204,17 @@ bool ReadXYZ(const uint8_t* data, unsigned len, bool transparent, int& width, in
     return true;
 }
 
-bool ReadXYZStreamTarget(FILE* stream,
+bool ReadXYZStreamTarget(FILE *stream,
                          bool transparent,
-                         int& width,
-                         int& height,
-                         void*& pixels,
+                         int &width,
+                         int &height,
+                         void *&pixels,
                          int direct_format,
-                         void* direct_pixels,
+                         void *direct_pixels,
                          int direct_pitch,
                          int expected_width,
-                         int expected_height) {
+                         int expected_height)
+{
     width = 0;
     height = 0;
     pixels = 0;
@@ -214,17 +231,20 @@ bool ReadXYZStreamTarget(FILE* stream,
         return false;
     const unsigned pixel_count = w * h;
 
-    unsigned char* out = 0;
-    if (direct_format != EEasyRpgDirectImageNone) {
+    unsigned char *out = 0;
+    if (direct_format != EEasyRpgDirectImageNone)
+    {
         if (!direct_pixels || DirectPixelBytes(direct_format) != 2u ||
             expected_width != static_cast<int>(w) || expected_height != static_cast<int>(h) ||
             direct_pitch < static_cast<int>(w * 2u))
             return false;
-    } else {
+    }
+    else
+    {
         if (pixel_count > 0xffffffffu / 4u)
             return false;
         PrepareImageAllocation(pixel_count, 32u * 1024u);
-        out = static_cast<unsigned char*>(malloc(pixel_count * 4u));
+        out = static_cast<unsigned char *>(malloc(pixel_count * 4u));
         if (!out)
             return false;
     }
@@ -236,53 +256,64 @@ bool ReadXYZStreamTarget(FILE* stream,
     unsigned char decoded[8192];
     z_stream z;
     memset(&z, 0, sizeof(z));
-    if (inflateInit(&z) != Z_OK) {
+    if (inflateInit(&z) != Z_OK)
+    {
         free(out);
         return false;
     }
 
     bool valid = true;
     bool finished = false;
-    while (valid && !finished) {
+    while (valid && !finished)
+    {
         const size_t bytes = fread(input, 1, sizeof(input), stream);
-        if (bytes == 0) {
+        if (bytes == 0)
+        {
             valid = false;
             break;
         }
         z.next_in = input;
         z.avail_in = static_cast<uInt>(bytes);
-        while (valid && z.avail_in > 0) {
+        while (valid && z.avail_in > 0)
+        {
             z.next_out = decoded;
             z.avail_out = sizeof(decoded);
             const int result = inflate(&z, Z_NO_FLUSH);
-            if (result != Z_OK && result != Z_STREAM_END) {
+            if (result != Z_OK && result != Z_STREAM_END)
+            {
                 valid = false;
                 break;
             }
             const unsigned produced = static_cast<unsigned>(sizeof(decoded) - z.avail_out);
             unsigned offset = 0;
-            if (palette_filled < sizeof(palette)) {
+            if (palette_filled < sizeof(palette))
+            {
                 const unsigned copy = std::min<unsigned>(produced, sizeof(palette) - palette_filled);
                 memcpy(palette + palette_filled, decoded, copy);
                 palette_filled += copy;
                 offset += copy;
             }
-            while (offset < produced && valid) {
-                if (pixel_position >= pixel_count) {
+            while (offset < produced && valid)
+            {
+                if (pixel_position >= pixel_count)
+                {
                     valid = false;
                     break;
                 }
                 const unsigned index = decoded[offset++];
-                const unsigned char* color = palette + index * 3u;
+                const unsigned char *color = palette + index * 3u;
                 const unsigned char alpha = transparent && index == 0 ? 0 : 255;
-                if (direct_format != EEasyRpgDirectImageNone) {
+                if (direct_format != EEasyRpgDirectImageNone)
+                {
                     const unsigned y = pixel_position / w;
                     const unsigned x = pixel_position - y * w;
-                    unsigned char* destination = static_cast<unsigned char*>(direct_pixels) +
-                        y * direct_pitch + x * 2u;
+                    unsigned char *destination = static_cast<unsigned char *>(direct_pixels) +
+                                                 y * direct_pitch + x * 2u;
                     StoreDirectPixel(destination, direct_format, color[0], color[1], color[2], alpha);
-                } else {
-                    unsigned char* destination = out + pixel_position * 4u;
+                }
+                else
+                {
+                    unsigned char *destination = out + pixel_position * 4u;
                     destination[0] = color[0];
                     destination[1] = color[1];
                     destination[2] = color[2];
@@ -290,13 +321,15 @@ bool ReadXYZStreamTarget(FILE* stream,
                 }
                 ++pixel_position;
             }
-            if (result == Z_STREAM_END) {
+            if (result == Z_STREAM_END)
+            {
                 finished = true;
                 if (z.avail_in != 0)
                     valid = false;
                 break;
             }
-            if (produced == 0 && z.avail_in > 0) {
+            if (produced == 0 && z.avail_in > 0)
+            {
                 valid = false;
                 break;
             }
@@ -304,7 +337,8 @@ bool ReadXYZStreamTarget(FILE* stream,
     }
     inflateEnd(&z);
 
-    if (!valid || !finished || palette_filled != sizeof(palette) || pixel_position != pixel_count) {
+    if (!valid || !finished || palette_filled != sizeof(palette) || pixel_position != pixel_count)
+    {
         free(out);
         return false;
     }
@@ -314,28 +348,30 @@ bool ReadXYZStreamTarget(FILE* stream,
     return true;
 }
 
-bool ReadXYZ(FILE* stream, bool transparent, int& width, int& height, void*& pixels) {
-    return ReadXYZStreamTarget(stream, transparent, width, height, pixels,
-                               EEasyRpgDirectImageNone, 0, 0, 0, 0);
+bool ReadXYZ(FILE *stream, bool transparent, int &width, int &height, void *&pixels)
+{
+    return ReadXYZStreamTarget(stream, transparent, width, height, pixels, EEasyRpgDirectImageNone, 0, 0, 0, 0);
 }
 
-bool ReadXYZDirect(FILE* stream,
+bool ReadXYZDirect(FILE *stream,
                    bool transparent,
                    int pixel_format,
                    int width,
                    int height,
-                   void* pixels,
-                   int pitch_bytes) {
+                   void *pixels,
+                   int pitch_bytes)
+{
     int decoded_width = 0;
     int decoded_height = 0;
-    void* ignored = 0;
-    return ReadXYZStreamTarget(stream, transparent, decoded_width, decoded_height, ignored,
-                               pixel_format, pixels, pitch_bytes, width, height);
+    void *ignored = 0;
+    return ReadXYZStreamTarget(stream, transparent, decoded_width, decoded_height, ignored, pixel_format, pixels, pitch_bytes, width, height);
 }
-}
+} // namespace ImageXYZ
 
-namespace ImageBMP {
-bool ReadBMP(const uint8_t* data, unsigned len, bool transparent, int& width, int& height, void*& pixels) {
+namespace ImageBMP
+{
+bool ReadBMP(const uint8_t *data, unsigned len, bool transparent, int &width, int &height, void *&pixels)
+{
     pixels = 0;
     width = 0;
     height = 0;
@@ -367,32 +403,37 @@ bool ReadBMP(const uint8_t* data, unsigned len, bool transparent, int& width, in
     if (pixel_offset > len || h > (len - pixel_offset) / row_bytes)
         return false;
 
-    unsigned char* out = static_cast<unsigned char*>(malloc(pixel_count * 4u));
+    unsigned char *out = static_cast<unsigned char *>(malloc(pixel_count * 4u));
     if (!out)
         return false;
 
     const unsigned palette_offset = 14u + dib_size;
     unsigned palette_count = 0;
-    if (bpp <= 8) {
+    if (bpp <= 8)
+    {
         const unsigned max_palette = 1u << bpp;
         palette_count = Read32(data + 46);
         if (!palette_count)
             palette_count = max_palette;
-        if (palette_count > max_palette || palette_offset > len || palette_count > (len - palette_offset) / 4u) {
+        if (palette_count > max_palette || palette_offset > len || palette_count > (len - palette_offset) / 4u)
+        {
             free(out);
             return false;
         }
     }
 
-    for (unsigned y = 0; y < h; ++y) {
+    for (unsigned y = 0; y < h; ++y)
+    {
         const unsigned sy = bottom_up ? h - 1u - y : y;
-        const unsigned char* row = data + pixel_offset + sy * row_bytes;
-        for (int x = 0; x < w; ++x) {
+        const unsigned char *row = data + pixel_offset + sy * row_bytes;
+        for (int x = 0; x < w; ++x)
+        {
             unsigned char r;
             unsigned char g;
             unsigned char b;
             unsigned char a = 255;
-            if (bpp <= 8) {
+            if (bpp <= 8)
+            {
                 unsigned index = 0;
                 if (bpp == 8)
                     index = row[x];
@@ -400,29 +441,34 @@ bool ReadBMP(const uint8_t* data, unsigned len, bool transparent, int& width, in
                     index = (row[x >> 1] >> ((x & 1) ? 0 : 4)) & 0x0fu;
                 else
                     index = (row[x >> 3] >> (7 - (x & 7))) & 1u;
-                if (index >= palette_count) {
+                if (index >= palette_count)
+                {
                     free(out);
                     return false;
                 }
-                const unsigned char* entry = data + palette_offset + index * 4u;
+                const unsigned char *entry = data + palette_offset + index * 4u;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
                 if (transparent && index == 0)
                     a = 0;
-            } else if (bpp == 24) {
-                const unsigned char* entry = row + x * 3;
+            }
+            else if (bpp == 24)
+            {
+                const unsigned char *entry = row + x * 3;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
-            } else {
-                const unsigned char* entry = row + x * 4;
+            }
+            else
+            {
+                const unsigned char *entry = row + x * 4;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
                 a = transparent ? entry[3] : 255;
             }
-            unsigned char* dst = out + (y * static_cast<unsigned>(w) + static_cast<unsigned>(x)) * 4u;
+            unsigned char *dst = out + (y * static_cast<unsigned>(w) + static_cast<unsigned>(x)) * 4u;
             dst[0] = r;
             dst[1] = g;
             dst[2] = b;
@@ -436,7 +482,8 @@ bool ReadBMP(const uint8_t* data, unsigned len, bool transparent, int& width, in
     return true;
 }
 
-bool ReadBMP(FILE* stream, bool transparent, int& width, int& height, void*& pixels) {
+bool ReadBMP(FILE *stream, bool transparent, int &width, int &height, void *&pixels)
+{
     pixels = 0;
     width = 0;
     height = 0;
@@ -480,7 +527,8 @@ bool ReadBMP(FILE* stream, bool transparent, int& width, int& height, void*& pix
 
     unsigned char palette[256 * 4];
     unsigned palette_count = 0;
-    if (bpp <= 8) {
+    if (bpp <= 8)
+    {
         const unsigned max_palette = 1u << bpp;
         palette_count = Read32(header + 46);
         if (!palette_count)
@@ -494,32 +542,38 @@ bool ReadBMP(FILE* stream, bool transparent, int& width, int& height, void*& pix
     }
 
     PrepareImageAllocation(pixel_count, row_bytes);
-    unsigned char* out = static_cast<unsigned char*>(malloc(pixel_count * 4u));
-    unsigned char* row = static_cast<unsigned char*>(malloc(row_bytes));
-    if (!out || !row) {
+    unsigned char *out = static_cast<unsigned char *>(malloc(pixel_count * 4u));
+    unsigned char *row = static_cast<unsigned char *>(malloc(row_bytes));
+    if (!out || !row)
+    {
         free(row);
         free(out);
         return false;
     }
-    if (fseek(stream, static_cast<long>(pixel_offset), SEEK_SET) != 0) {
+    if (fseek(stream, static_cast<long>(pixel_offset), SEEK_SET) != 0)
+    {
         free(row);
         free(out);
         return false;
     }
 
     bool valid = true;
-    for (unsigned file_y = 0; file_y < h && valid; ++file_y) {
-        if (fread(row, 1, row_bytes, stream) != row_bytes) {
+    for (unsigned file_y = 0; file_y < h && valid; ++file_y)
+    {
+        if (fread(row, 1, row_bytes, stream) != row_bytes)
+        {
             valid = false;
             break;
         }
         const unsigned y = bottom_up ? h - 1u - file_y : file_y;
-        for (int x = 0; x < w; ++x) {
+        for (int x = 0; x < w; ++x)
+        {
             unsigned char r;
             unsigned char g;
             unsigned char b;
             unsigned char a = 255;
-            if (bpp <= 8) {
+            if (bpp <= 8)
+            {
                 unsigned index = 0;
                 if (bpp == 8)
                     index = row[x];
@@ -527,29 +581,34 @@ bool ReadBMP(FILE* stream, bool transparent, int& width, int& height, void*& pix
                     index = (row[x >> 1] >> ((x & 1) ? 0 : 4)) & 0x0fu;
                 else
                     index = (row[x >> 3] >> (7 - (x & 7))) & 1u;
-                if (index >= palette_count) {
+                if (index >= palette_count)
+                {
                     valid = false;
                     break;
                 }
-                const unsigned char* entry = palette + index * 4u;
+                const unsigned char *entry = palette + index * 4u;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
                 if (transparent && index == 0)
                     a = 0;
-            } else if (bpp == 24) {
-                const unsigned char* entry = row + x * 3;
+            }
+            else if (bpp == 24)
+            {
+                const unsigned char *entry = row + x * 3;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
-            } else {
-                const unsigned char* entry = row + x * 4;
+            }
+            else
+            {
+                const unsigned char *entry = row + x * 4;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
                 a = transparent ? entry[3] : 255;
             }
-            unsigned char* dst = out + (y * static_cast<unsigned>(w) + static_cast<unsigned>(x)) * 4u;
+            unsigned char *dst = out + (y * static_cast<unsigned>(w) + static_cast<unsigned>(x)) * 4u;
             dst[0] = r;
             dst[1] = g;
             dst[2] = b;
@@ -558,7 +617,8 @@ bool ReadBMP(FILE* stream, bool transparent, int& width, int& height, void*& pix
     }
 
     free(row);
-    if (!valid) {
+    if (!valid)
+    {
         free(out);
         return false;
     }
@@ -568,13 +628,14 @@ bool ReadBMP(FILE* stream, bool transparent, int& width, int& height, void*& pix
     return true;
 }
 
-bool ReadBMPDirect(FILE* stream,
+bool ReadBMPDirect(FILE *stream,
                    bool transparent,
                    int pixel_format,
                    int width,
                    int height,
-                   void* pixels,
-                   int pitch_bytes) {
+                   void *pixels,
+                   int pitch_bytes)
+{
     const unsigned destination_bpp = DirectPixelBytes(pixel_format);
     if (!stream || !pixels || width <= 0 || height <= 0 || !destination_bpp ||
         pitch_bytes < static_cast<int>(width * destination_bpp) || fseek(stream, 0, SEEK_END) != 0)
@@ -612,7 +673,8 @@ bool ReadBMPDirect(FILE* stream,
 
     unsigned char palette[256 * 4];
     unsigned palette_count = 0;
-    if (bpp <= 8) {
+    if (bpp <= 8)
+    {
         const unsigned max_palette = 1u << bpp;
         palette_count = Read32(header + 46);
         if (!palette_count)
@@ -626,27 +688,32 @@ bool ReadBMPDirect(FILE* stream,
     }
 
     PrepareImageAllocation(static_cast<unsigned>(width) * static_cast<unsigned>(height), row_bytes);
-    unsigned char* source_row = static_cast<unsigned char*>(malloc(row_bytes));
-    if (!source_row || fseek(stream, static_cast<long>(pixel_offset), SEEK_SET) != 0) {
+    unsigned char *source_row = static_cast<unsigned char *>(malloc(row_bytes));
+    if (!source_row || fseek(stream, static_cast<long>(pixel_offset), SEEK_SET) != 0)
+    {
         free(source_row);
         return false;
     }
 
-    unsigned char* destination = static_cast<unsigned char*>(pixels);
+    unsigned char *destination = static_cast<unsigned char *>(pixels);
     bool valid = true;
-    for (int file_y = 0; file_y < height && valid; ++file_y) {
-        if (fread(source_row, 1, row_bytes, stream) != row_bytes) {
+    for (int file_y = 0; file_y < height && valid; ++file_y)
+    {
+        if (fread(source_row, 1, row_bytes, stream) != row_bytes)
+        {
             valid = false;
             break;
         }
         const int y = bottom_up ? height - 1 - file_y : file_y;
-        unsigned char* destination_row = destination + y * pitch_bytes;
-        for (int x = 0; x < width; ++x) {
+        unsigned char *destination_row = destination + y * pitch_bytes;
+        for (int x = 0; x < width; ++x)
+        {
             unsigned char r = 0;
             unsigned char g = 0;
             unsigned char b = 0;
             unsigned char a = 255;
-            if (bpp <= 8) {
+            if (bpp <= 8)
+            {
                 unsigned index = 0;
                 if (bpp == 8)
                     index = source_row[x];
@@ -654,23 +721,28 @@ bool ReadBMPDirect(FILE* stream,
                     index = (source_row[x >> 1] >> ((x & 1) ? 0 : 4)) & 0x0fu;
                 else
                     index = (source_row[x >> 3] >> (7 - (x & 7))) & 1u;
-                if (index >= palette_count) {
+                if (index >= palette_count)
+                {
                     valid = false;
                     break;
                 }
-                const unsigned char* entry = palette + index * 4u;
+                const unsigned char *entry = palette + index * 4u;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
                 if (transparent && index == 0)
                     a = 0;
-            } else if (bpp == 24) {
-                const unsigned char* entry = source_row + x * 3;
+            }
+            else if (bpp == 24)
+            {
+                const unsigned char *entry = source_row + x * 3;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
-            } else {
-                const unsigned char* entry = source_row + x * 4;
+            }
+            else
+            {
+                const unsigned char *entry = source_row + x * 4;
                 b = entry[0];
                 g = entry[1];
                 r = entry[2];
@@ -682,17 +754,20 @@ bool ReadBMPDirect(FILE* stream,
     free(source_row);
     return valid;
 }
-}
+} // namespace ImageBMP
 
-namespace ImagePNG {
-unsigned int ReadBig32(const unsigned char* p) {
+namespace ImagePNG
+{
+unsigned int ReadBig32(const unsigned char *p)
+{
     return (static_cast<unsigned int>(p[0]) << 24) |
            (static_cast<unsigned int>(p[1]) << 16) |
            (static_cast<unsigned int>(p[2]) << 8) |
            static_cast<unsigned int>(p[3]);
 }
 
-unsigned char Paeth(unsigned char a, unsigned char b, unsigned char c) {
+unsigned char Paeth(unsigned char a, unsigned char b, unsigned char c)
+{
     const int p = static_cast<int>(a) + static_cast<int>(b) - static_cast<int>(c);
     const int pa = p > static_cast<int>(a) ? p - static_cast<int>(a) : static_cast<int>(a) - p;
     const int pb = p > static_cast<int>(b) ? p - static_cast<int>(b) : static_cast<int>(b) - p;
@@ -700,7 +775,8 @@ unsigned char Paeth(unsigned char a, unsigned char b, unsigned char c) {
     return pa <= pb && pa <= pc ? a : (pb <= pc ? b : c);
 }
 
-bool ValidBitDepth(unsigned color_type, unsigned bit_depth) {
+bool ValidBitDepth(unsigned color_type, unsigned bit_depth)
+{
     if (color_type == 0)
         return bit_depth == 1 || bit_depth == 2 || bit_depth == 4 || bit_depth == 8 || bit_depth == 16;
     if (color_type == 2 || color_type == 4 || color_type == 6)
@@ -710,7 +786,8 @@ bool ValidBitDepth(unsigned color_type, unsigned bit_depth) {
     return false;
 }
 
-unsigned ChannelCount(unsigned color_type) {
+unsigned ChannelCount(unsigned color_type)
+{
     if (color_type == 0 || color_type == 3)
         return 1;
     if (color_type == 2)
@@ -722,14 +799,17 @@ unsigned ChannelCount(unsigned color_type) {
     return 0;
 }
 
-unsigned PassExtent(unsigned size, unsigned start, unsigned step) {
+unsigned PassExtent(unsigned size, unsigned start, unsigned step)
+{
     return size <= start ? 0 : 1u + (size - 1u - start) / step;
 }
 
-unsigned ReadSample(const unsigned char* row, unsigned sample, unsigned bit_depth) {
+unsigned ReadSample(const unsigned char *row, unsigned sample, unsigned bit_depth)
+{
     if (bit_depth == 8)
         return row[sample];
-    if (bit_depth == 16) {
+    if (bit_depth == 16)
+    {
         const unsigned offset = sample * 2u;
         return (static_cast<unsigned>(row[offset]) << 8) | row[offset + 1u];
     }
@@ -738,7 +818,8 @@ unsigned ReadSample(const unsigned char* row, unsigned sample, unsigned bit_dept
     return (row[bit_offset >> 3] >> shift) & ((1u << bit_depth) - 1u);
 }
 
-unsigned char ScaleSample(unsigned value, unsigned bit_depth) {
+unsigned char ScaleSample(unsigned value, unsigned bit_depth)
+{
     if (bit_depth == 16)
         return static_cast<unsigned char>(value >> 8);
     if (bit_depth == 8)
@@ -747,15 +828,17 @@ unsigned char ScaleSample(unsigned value, unsigned bit_depth) {
     return static_cast<unsigned char>((value * 255u + maximum / 2u) / maximum);
 }
 
-bool UnfilterRow(unsigned char* destination,
-                 const unsigned char* source,
-                 const unsigned char* previous,
+bool UnfilterRow(unsigned char *destination,
+                 const unsigned char *source,
+                 const unsigned char *previous,
                  unsigned row_bytes,
                  unsigned bytes_per_pixel,
-                 unsigned filter) {
+                 unsigned filter)
+{
     if (filter > 4)
         return false;
-    for (unsigned x = 0; x < row_bytes; ++x) {
+    for (unsigned x = 0; x < row_bytes; ++x)
+    {
         const unsigned char left = x >= bytes_per_pixel ? destination[x - bytes_per_pixel] : 0;
         const unsigned char up = previous ? previous[x] : 0;
         const unsigned char upper_left = previous && x >= bytes_per_pixel ? previous[x - bytes_per_pixel] : 0;
@@ -773,17 +856,18 @@ bool UnfilterRow(unsigned char* destination,
     return true;
 }
 
-bool DecodePixel(const unsigned char* row,
+bool DecodePixel(const unsigned char *row,
                  unsigned x,
                  unsigned color_type,
                  unsigned bit_depth,
-                 const unsigned char* palette,
+                 const unsigned char *palette,
                  unsigned palette_bytes,
                  bool transparent,
-                 unsigned char& out_r,
-                 unsigned char& out_g,
-                 unsigned char& out_b,
-                 unsigned char& out_a) {
+                 unsigned char &out_r,
+                 unsigned char &out_g,
+                 unsigned char &out_b,
+                 unsigned char &out_a)
+{
     unsigned char r = 0;
     unsigned char g = 0;
     unsigned char b = 0;
@@ -791,18 +875,23 @@ bool DecodePixel(const unsigned char* row,
     const unsigned channels = ChannelCount(color_type);
     const unsigned sample = x * channels;
 
-    if (color_type == 0) {
+    if (color_type == 0)
+    {
         const unsigned char gray = ScaleSample(ReadSample(row, sample, bit_depth), bit_depth);
         r = gray;
         g = gray;
         b = gray;
         if (transparent && gray == 0)
             a = 0;
-    } else if (color_type == 2) {
+    }
+    else if (color_type == 2)
+    {
         r = ScaleSample(ReadSample(row, sample, bit_depth), bit_depth);
         g = ScaleSample(ReadSample(row, sample + 1u, bit_depth), bit_depth);
         b = ScaleSample(ReadSample(row, sample + 2u, bit_depth), bit_depth);
-    } else if (color_type == 3) {
+    }
+    else if (color_type == 3)
+    {
         const unsigned index = ReadSample(row, x, bit_depth);
         const unsigned palette_count = palette_bytes / 3u;
         if (!palette || index >= palette_count)
@@ -812,18 +901,24 @@ bool DecodePixel(const unsigned char* row,
         b = palette[index * 3u + 2u];
         if (transparent && index == 0)
             a = 0;
-    } else if (color_type == 4) {
+    }
+    else if (color_type == 4)
+    {
         const unsigned char gray = ScaleSample(ReadSample(row, sample, bit_depth), bit_depth);
         r = gray;
         g = gray;
         b = gray;
         a = ScaleSample(ReadSample(row, sample + 1u, bit_depth), bit_depth);
-    } else if (color_type == 6) {
+    }
+    else if (color_type == 6)
+    {
         r = ScaleSample(ReadSample(row, sample, bit_depth), bit_depth);
         g = ScaleSample(ReadSample(row, sample + 1u, bit_depth), bit_depth);
         b = ScaleSample(ReadSample(row, sample + 2u, bit_depth), bit_depth);
         a = ScaleSample(ReadSample(row, sample + 3u, bit_depth), bit_depth);
-    } else {
+    }
+    else
+    {
         return false;
     }
 
@@ -834,7 +929,8 @@ bool DecodePixel(const unsigned char* row,
     return true;
 }
 
-struct PngStreamRows {
+struct PngStreamRows
+{
     unsigned width;
     unsigned height;
     unsigned bit_depth;
@@ -849,26 +945,29 @@ struct PngStreamRows {
     unsigned bytes_per_pixel;
     unsigned row_fill;
     unsigned max_row_bytes;
-    unsigned char* scanline;
-    unsigned char* previous;
-    unsigned char* current;
+    unsigned char *scanline;
+    unsigned char *previous;
+    unsigned char *current;
     bool rows_done;
 };
 
-bool SetupPngStreamPass(PngStreamRows& state) {
+bool SetupPngStreamPass(PngStreamRows &state)
+{
     static const unsigned pass_x[7] = {0, 4, 0, 2, 0, 1, 0};
     static const unsigned pass_y[7] = {0, 0, 4, 0, 2, 0, 1};
     static const unsigned pass_dx[7] = {8, 8, 4, 4, 2, 2, 1};
     static const unsigned pass_dy[7] = {8, 8, 8, 4, 4, 2, 2};
     const unsigned pass_count = state.interlace ? 7u : 1u;
-    while (state.pass < pass_count) {
+    while (state.pass < pass_count)
+    {
         const unsigned start_x = state.interlace ? pass_x[state.pass] : 0;
         const unsigned start_y = state.interlace ? pass_y[state.pass] : 0;
         const unsigned step_x = state.interlace ? pass_dx[state.pass] : 1;
         const unsigned step_y = state.interlace ? pass_dy[state.pass] : 1;
         state.pass_width = PassExtent(state.width, start_x, step_x);
         state.pass_height = PassExtent(state.height, start_y, step_y);
-        if (!state.pass_width || !state.pass_height) {
+        if (!state.pass_width || !state.pass_height)
+        {
             ++state.pass;
             continue;
         }
@@ -892,14 +991,15 @@ bool SetupPngStreamPass(PngStreamRows& state) {
     return true;
 }
 
-bool ProcessPngStreamRow(PngStreamRows& state,
-                         const unsigned char* palette,
+bool ProcessPngStreamRow(PngStreamRows &state,
+                         const unsigned char *palette,
                          unsigned palette_bytes,
                          bool transparent,
-                         unsigned char* out,
+                         unsigned char *out,
                          int direct_format,
-                         void* direct_pixels,
-                         int direct_pitch) {
+                         void *direct_pixels,
+                         int direct_pitch)
+{
     static const unsigned pass_x[7] = {0, 4, 0, 2, 0, 1, 0};
     static const unsigned pass_y[7] = {0, 0, 4, 0, 2, 0, 1};
     static const unsigned pass_dx[7] = {8, 8, 4, 4, 2, 2, 1};
@@ -907,9 +1007,7 @@ bool ProcessPngStreamRow(PngStreamRows& state,
     if (state.rows_done || state.row_fill != state.row_bytes + 1u)
         return false;
     const unsigned filter = state.scanline[0];
-    if (!UnfilterRow(state.current, state.scanline + 1,
-                     state.pass_row == 0 ? 0 : state.previous,
-                     state.row_bytes, state.bytes_per_pixel, filter))
+    if (!UnfilterRow(state.current, state.scanline + 1, state.pass_row == 0 ? 0 : state.previous, state.row_bytes, state.bytes_per_pixel, filter))
         return false;
 
     const unsigned start_x = state.interlace ? pass_x[state.pass] : 0;
@@ -917,23 +1015,26 @@ bool ProcessPngStreamRow(PngStreamRows& state,
     const unsigned step_x = state.interlace ? pass_dx[state.pass] : 1;
     const unsigned step_y = state.interlace ? pass_dy[state.pass] : 1;
     const unsigned destination_y = start_y + state.pass_row * step_y;
-    for (unsigned x = 0; x < state.pass_width; ++x) {
+    for (unsigned x = 0; x < state.pass_width; ++x)
+    {
         const unsigned destination_x = start_x + x * step_x;
         unsigned char r = 0;
         unsigned char g = 0;
         unsigned char b = 0;
         unsigned char a = 255;
-        if (!DecodePixel(state.current, x, state.color_type, state.bit_depth,
-                         palette, palette_bytes, transparent, r, g, b, a))
+        if (!DecodePixel(state.current, x, state.color_type, state.bit_depth, palette, palette_bytes, transparent, r, g, b, a))
             return false;
-        if (direct_format != EEasyRpgDirectImageNone) {
+        if (direct_format != EEasyRpgDirectImageNone)
+        {
             const unsigned destination_bpp = DirectPixelBytes(direct_format);
-            unsigned char* destination = static_cast<unsigned char*>(direct_pixels) +
-                destination_y * direct_pitch + destination_x * destination_bpp;
+            unsigned char *destination = static_cast<unsigned char *>(direct_pixels) +
+                                         destination_y * direct_pitch + destination_x * destination_bpp;
             StoreDirectPixel(destination, direct_format, r, g, b, a);
-        } else {
-            unsigned char* destination = out +
-                (destination_y * state.width + destination_x) * 4u;
+        }
+        else
+        {
+            unsigned char *destination = out +
+                                         (destination_y * state.width + destination_x) * 4u;
             destination[0] = r;
             destination[1] = g;
             destination[2] = b;
@@ -941,21 +1042,24 @@ bool ProcessPngStreamRow(PngStreamRows& state,
         }
     }
 
-    unsigned char* swap = state.previous;
+    unsigned char *swap = state.previous;
     state.previous = state.current;
     state.current = swap;
     state.row_fill = 0;
     ++state.pass_row;
-    if (state.pass_row >= state.pass_height) {
+    if (state.pass_row >= state.pass_height)
+    {
         ++state.pass;
         return SetupPngStreamPass(state);
     }
     return true;
 }
 
-bool SkipPngFileBytes(FILE* stream, unsigned bytes) {
+bool SkipPngFileBytes(FILE *stream, unsigned bytes)
+{
     unsigned char discard[1024];
-    while (bytes > 0) {
+    while (bytes > 0)
+    {
         const unsigned chunk = std::min<unsigned>(bytes, sizeof(discard));
         if (fread(discard, 1, chunk, stream) != chunk)
             return false;
@@ -964,16 +1068,17 @@ bool SkipPngFileBytes(FILE* stream, unsigned bytes) {
     return true;
 }
 
-bool ReadPNGStreamTarget(FILE* stream,
+bool ReadPNGStreamTarget(FILE *stream,
                          bool transparent,
-                         int& width,
-                         int& height,
-                         void*& pixels,
+                         int &width,
+                         int &height,
+                         void *&pixels,
                          int direct_format,
-                         void* direct_pixels,
+                         void *direct_pixels,
                          int direct_pitch,
                          int expected_width,
-                         int expected_height) {
+                         int expected_height)
+{
     width = 0;
     height = 0;
     pixels = 0;
@@ -997,28 +1102,34 @@ bool ReadPNGStreamTarget(FILE* stream,
     bool saw_iend = false;
     bool stream_finished = false;
     bool decoder_ready = false;
-    unsigned char* out = 0;
-    unsigned char* row_storage = 0;
+    unsigned char *out = 0;
+    unsigned char *row_storage = 0;
     z_stream z;
     memset(&z, 0, sizeof(z));
     PngStreamRows rows;
     memset(&rows, 0, sizeof(rows));
 
     bool valid = true;
-    while (valid && !saw_iend) {
+    while (valid && !saw_iend)
+    {
         unsigned char chunk_header[8];
-        if (fread(chunk_header, 1, sizeof(chunk_header), stream) != sizeof(chunk_header)) {
+        if (fread(chunk_header, 1, sizeof(chunk_header), stream) != sizeof(chunk_header))
+        {
             valid = false;
             break;
         }
         const unsigned chunk_size = ReadBig32(chunk_header);
-        const unsigned char* type = chunk_header + 4;
-        if (memcmp(type, "IHDR", 4) == 0) {
+        const unsigned char *type = chunk_header + 4;
+        if (memcmp(type, "IHDR", 4) == 0)
+        {
             unsigned char ihdr[13];
             if (saw_ihdr || chunk_size != sizeof(ihdr) ||
-                fread(ihdr, 1, sizeof(ihdr), stream) != sizeof(ihdr)) {
+                fread(ihdr, 1, sizeof(ihdr), stream) != sizeof(ihdr))
+            {
                 valid = false;
-            } else {
+            }
+            else
+            {
                 w = ReadBig32(ihdr);
                 h = ReadBig32(ihdr + 4);
                 bit_depth = ihdr[8];
@@ -1031,46 +1142,69 @@ bool ReadPNGStreamTarget(FILE* stream,
                 else
                     saw_ihdr = true;
             }
-        } else if (memcmp(type, "PLTE", 4) == 0) {
+        }
+        else if (memcmp(type, "PLTE", 4) == 0)
+        {
             if (!saw_ihdr || saw_idat || chunk_size == 0 || chunk_size > sizeof(palette) ||
-                chunk_size % 3u != 0 || fread(palette, 1, chunk_size, stream) != chunk_size) {
+                chunk_size % 3u != 0 || fread(palette, 1, chunk_size, stream) != chunk_size)
+            {
                 valid = false;
-            } else {
+            }
+            else
+            {
                 palette_bytes = chunk_size;
             }
-        } else if (memcmp(type, "IDAT", 4) == 0) {
-            if (!saw_ihdr || stream_finished) {
+        }
+        else if (memcmp(type, "IDAT", 4) == 0)
+        {
+            if (!saw_ihdr || stream_finished)
+            {
                 valid = false;
-            } else {
-                if (!decoder_ready) {
-                    if (color_type == 3 && palette_bytes == 0) {
+            }
+            else
+            {
+                if (!decoder_ready)
+                {
+                    if (color_type == 3 && palette_bytes == 0)
+                    {
                         valid = false;
-                    } else {
+                    }
+                    else
+                    {
                         const unsigned channels = ChannelCount(color_type);
                         const unsigned bits_per_pixel = channels * bit_depth;
                         const unsigned long long max_row_bits = static_cast<unsigned long long>(w) * bits_per_pixel;
                         const unsigned long long max_row_bytes = (max_row_bits + 7u) >> 3;
                         const unsigned pixel_count = w * h;
                         if (!channels || !bits_per_pixel || !max_row_bytes || max_row_bytes > 0x7fffffffu ||
-                            pixel_count > 0xffffffffu / 4u) {
+                            pixel_count > 0xffffffffu / 4u)
+                        {
                             valid = false;
-                        } else if (direct_format != EEasyRpgDirectImageNone &&
-                                   (!direct_pixels || DirectPixelBytes(direct_format) == 0u ||
-                                    expected_width != static_cast<int>(w) || expected_height != static_cast<int>(h) ||
-                                    direct_pitch < static_cast<int>(w * DirectPixelBytes(direct_format)))) {
+                        }
+                        else if (direct_format != EEasyRpgDirectImageNone &&
+                                 (!direct_pixels || DirectPixelBytes(direct_format) == 0u ||
+                                  expected_width != static_cast<int>(w) || expected_height != static_cast<int>(h) ||
+                                  direct_pitch < static_cast<int>(w * DirectPixelBytes(direct_format))))
+                        {
                             valid = false;
-                        } else {
+                        }
+                        else
+                        {
                             const unsigned transient = static_cast<unsigned>(max_row_bytes) * 3u + 16u * 1024u;
                             PrepareImageAllocation(pixel_count, transient);
-                            if (direct_format == EEasyRpgDirectImageNone) {
-                                out = static_cast<unsigned char*>(malloc(pixel_count * 4u));
+                            if (direct_format == EEasyRpgDirectImageNone)
+                            {
+                                out = static_cast<unsigned char *>(malloc(pixel_count * 4u));
                                 if (out)
                                     memset(out, 0, pixel_count * 4u);
                             }
-                            row_storage = static_cast<unsigned char*>(malloc(static_cast<size_t>(max_row_bytes) * 3u + 1u));
-                            if ((direct_format == EEasyRpgDirectImageNone && !out) || !row_storage) {
+                            row_storage = static_cast<unsigned char *>(malloc(static_cast<size_t>(max_row_bytes) * 3u + 1u));
+                            if ((direct_format == EEasyRpgDirectImageNone && !out) || !row_storage)
+                            {
                                 valid = false;
-                            } else {
+                            }
+                            else
+                            {
                                 rows.width = w;
                                 rows.height = h;
                                 rows.bit_depth = bit_depth;
@@ -1094,44 +1228,53 @@ bool ReadPNGStreamTarget(FILE* stream,
 
                 unsigned remaining = chunk_size;
                 unsigned char input[8192];
-                while (valid && remaining > 0) {
+                while (valid && remaining > 0)
+                {
                     const unsigned input_size = std::min<unsigned>(remaining, sizeof(input));
-                    if (fread(input, 1, input_size, stream) != input_size) {
+                    if (fread(input, 1, input_size, stream) != input_size)
+                    {
                         valid = false;
                         break;
                     }
                     remaining -= input_size;
                     z.next_in = input;
                     z.avail_in = input_size;
-                    while (valid && z.avail_in > 0) {
+                    while (valid && z.avail_in > 0)
+                    {
                         unsigned char dummy = 0;
                         const uInt output_capacity = rows.rows_done
-                            ? 1u : static_cast<uInt>(rows.row_bytes + 1u - rows.row_fill);
+                                                         ? 1u
+                                                         : static_cast<uInt>(rows.row_bytes + 1u - rows.row_fill);
                         z.next_out = rows.rows_done ? &dummy : rows.scanline + rows.row_fill;
                         z.avail_out = output_capacity;
                         const int result = inflate(&z, Z_NO_FLUSH);
-                        if (result != Z_OK && result != Z_STREAM_END) {
+                        if (result != Z_OK && result != Z_STREAM_END)
+                        {
                             valid = false;
                             break;
                         }
                         const unsigned produced = output_capacity - z.avail_out;
-                        if (rows.rows_done) {
+                        if (rows.rows_done)
+                        {
                             if (produced != 0)
                                 valid = false;
-                        } else {
+                        }
+                        else
+                        {
                             rows.row_fill += produced;
                             if (rows.row_fill == rows.row_bytes + 1u &&
-                                !ProcessPngStreamRow(rows, palette, palette_bytes, transparent,
-                                                     out, direct_format, direct_pixels, direct_pitch))
+                                !ProcessPngStreamRow(rows, palette, palette_bytes, transparent, out, direct_format, direct_pixels, direct_pitch))
                                 valid = false;
                         }
-                        if (result == Z_STREAM_END) {
+                        if (result == Z_STREAM_END)
+                        {
                             stream_finished = true;
                             if (!rows.rows_done || z.avail_in != 0 || remaining != 0)
                                 valid = false;
                             break;
                         }
-                        if (produced == 0 && z.avail_in == input_size) {
+                        if (produced == 0 && z.avail_in == input_size)
+                        {
                             valid = false;
                             break;
                         }
@@ -1139,11 +1282,15 @@ bool ReadPNGStreamTarget(FILE* stream,
                 }
                 saw_idat = true;
             }
-        } else if (memcmp(type, "IEND", 4) == 0) {
+        }
+        else if (memcmp(type, "IEND", 4) == 0)
+        {
             if (chunk_size != 0 || !saw_idat || !stream_finished || !rows.rows_done)
                 valid = false;
             saw_iend = true;
-        } else {
+        }
+        else
+        {
             if (!SkipPngFileBytes(stream, chunk_size))
                 valid = false;
         }
@@ -1156,7 +1303,8 @@ bool ReadPNGStreamTarget(FILE* stream,
     if (decoder_ready)
         inflateEnd(&z);
     free(row_storage);
-    if (!valid || !saw_iend) {
+    if (!valid || !saw_iend)
+    {
         free(out);
         return false;
     }
@@ -1166,17 +1314,18 @@ bool ReadPNGStreamTarget(FILE* stream,
     return true;
 }
 
-bool ReadPNGBytesTarget(const uint8_t* data,
+bool ReadPNGBytesTarget(const uint8_t *data,
                         unsigned len,
                         bool transparent,
-                        int& width,
-                        int& height,
-                        void*& pixels,
+                        int &width,
+                        int &height,
+                        void *&pixels,
                         int direct_format,
-                        void* direct_pixels,
+                        void *direct_pixels,
                         int direct_pitch,
                         int expected_width,
-                        int expected_height) {
+                        int expected_height)
+{
     width = 0;
     height = 0;
     pixels = 0;
@@ -1189,22 +1338,24 @@ bool ReadPNGBytesTarget(const uint8_t* data,
     unsigned bit_depth = 0;
     unsigned color_type = 0;
     unsigned interlace = 0;
-    const unsigned char* palette = 0;
+    const unsigned char *palette = 0;
     unsigned palette_bytes = 0;
     unsigned compressed_size = 0;
     unsigned idat_count = 0;
-    const unsigned char* single_idat = 0;
+    const unsigned char *single_idat = 0;
     bool saw_ihdr = false;
     bool saw_iend = false;
 
     unsigned position = 8;
-    while (position <= len - 12) {
+    while (position <= len - 12)
+    {
         const unsigned chunk_size = ReadBig32(data + position);
         if (chunk_size > len - position - 12)
             return false;
-        const unsigned char* type = data + position + 4;
-        const unsigned char* chunk = data + position + 8;
-        if (memcmp(type, "IHDR", 4) == 0) {
+        const unsigned char *type = data + position + 4;
+        const unsigned char *chunk = data + position + 8;
+        if (memcmp(type, "IHDR", 4) == 0)
+        {
             if (chunk_size != 13 || saw_ihdr)
                 return false;
             w = ReadBig32(chunk);
@@ -1215,10 +1366,14 @@ bool ReadPNGBytesTarget(const uint8_t* data,
                 return false;
             interlace = chunk[12];
             saw_ihdr = true;
-        } else if (memcmp(type, "PLTE", 4) == 0) {
+        }
+        else if (memcmp(type, "PLTE", 4) == 0)
+        {
             palette = chunk;
             palette_bytes = chunk_size;
-        } else if (memcmp(type, "IDAT", 4) == 0) {
+        }
+        else if (memcmp(type, "IDAT", 4) == 0)
+        {
             if (chunk_size > 0xffffffffu - compressed_size)
                 return false;
             compressed_size += chunk_size;
@@ -1227,7 +1382,9 @@ bool ReadPNGBytesTarget(const uint8_t* data,
                 single_idat = chunk;
             else
                 single_idat = 0;
-        } else if (memcmp(type, "IEND", 4) == 0) {
+        }
+        else if (memcmp(type, "IEND", 4) == 0)
+        {
             saw_iend = true;
             break;
         }
@@ -1252,7 +1409,8 @@ bool ReadPNGBytesTarget(const uint8_t* data,
     static const unsigned pass_dy[7] = {8, 8, 8, 4, 4, 2, 2};
     const unsigned pass_count = interlace ? 7u : 1u;
     unsigned long long decoded_size64 = 0;
-    for (unsigned pass = 0; pass < pass_count; ++pass) {
+    for (unsigned pass = 0; pass < pass_count; ++pass)
+    {
         const unsigned start_x = interlace ? pass_x[pass] : 0;
         const unsigned start_y = interlace ? pass_y[pass] : 0;
         const unsigned step_x = interlace ? pass_dx[pass] : 1;
@@ -1275,25 +1433,29 @@ bool ReadPNGBytesTarget(const uint8_t* data,
     if (pixel_count > 0xffffffffu / 4u)
         return false;
     PrepareImageAllocation(pixel_count,
-        decoded_size + (idat_count > 1 ? compressed_size : 0u));
+                           decoded_size + (idat_count > 1 ? compressed_size : 0u));
 
-    unsigned char* compressed = idat_count > 1
-        ? static_cast<unsigned char*>(malloc(compressed_size))
-        : 0;
-    unsigned char* decoded = static_cast<unsigned char*>(malloc(decoded_size));
-    if ((idat_count > 1 && !compressed) || !decoded) {
+    unsigned char *compressed = idat_count > 1
+                                    ? static_cast<unsigned char *>(malloc(compressed_size))
+                                    : 0;
+    unsigned char *decoded = static_cast<unsigned char *>(malloc(decoded_size));
+    if ((idat_count > 1 && !compressed) || !decoded)
+    {
         free(compressed);
         free(decoded);
         return false;
     }
 
-    if (idat_count > 1) {
+    if (idat_count > 1)
+    {
         unsigned write_position = 0;
         position = 8;
-        while (position <= len - 12) {
+        while (position <= len - 12)
+        {
             const unsigned chunk_size = ReadBig32(data + position);
-            const unsigned char* type = data + position + 4;
-            if (memcmp(type, "IDAT", 4) == 0) {
+            const unsigned char *type = data + position + 4;
+            if (memcmp(type, "IDAT", 4) == 0)
+            {
                 memcpy(compressed + write_position, data + position + 8, chunk_size);
                 write_position += chunk_size;
             }
@@ -1304,28 +1466,34 @@ bool ReadPNGBytesTarget(const uint8_t* data,
     }
 
     unsigned long actual_size = decoded_size;
-    const unsigned char* compressed_source = idat_count == 1 ? single_idat : compressed;
+    const unsigned char *compressed_source = idat_count == 1 ? single_idat : compressed;
     if (!compressed_source ||
         uncompress(decoded, &actual_size, compressed_source, compressed_size) != 0 ||
-        actual_size != decoded_size) {
+        actual_size != decoded_size)
+    {
         free(compressed);
         free(decoded);
         return false;
     }
     free(compressed);
 
-    unsigned char* out = 0;
-    if (direct_format != EEasyRpgDirectImageNone) {
+    unsigned char *out = 0;
+    if (direct_format != EEasyRpgDirectImageNone)
+    {
         if (!direct_pixels || DirectPixelBytes(direct_format) != 2u ||
             expected_width != static_cast<int>(w) || expected_height != static_cast<int>(h) ||
-            direct_pitch < static_cast<int>(w * 2u)) {
+            direct_pitch < static_cast<int>(w * 2u))
+        {
             free(decoded);
             return false;
         }
         memset(direct_pixels, 0, static_cast<size_t>(direct_pitch) * h);
-    } else {
-        out = static_cast<unsigned char*>(malloc(pixel_count * 4u));
-        if (!out) {
+    }
+    else
+    {
+        out = static_cast<unsigned char *>(malloc(pixel_count * 4u));
+        if (!out)
+        {
             free(decoded);
             return false;
         }
@@ -1334,14 +1502,16 @@ bool ReadPNGBytesTarget(const uint8_t* data,
 
     const unsigned long long max_row_bits64 = static_cast<unsigned long long>(w) * bits_per_pixel;
     const unsigned long long max_row_bytes64 = (max_row_bits64 + 7u) >> 3;
-    if (!max_row_bytes64 || max_row_bytes64 > 0x7fffffffu) {
+    if (!max_row_bytes64 || max_row_bytes64 > 0x7fffffffu)
+    {
         free(decoded);
         free(out);
         return false;
     }
     const unsigned max_row_bytes = static_cast<unsigned>(max_row_bytes64);
-    unsigned char* rows = static_cast<unsigned char*>(malloc(max_row_bytes * 2u));
-    if (!rows) {
+    unsigned char *rows = static_cast<unsigned char *>(malloc(max_row_bytes * 2u));
+    if (!rows)
+    {
         free(decoded);
         free(out);
         return false;
@@ -1349,7 +1519,8 @@ bool ReadPNGBytesTarget(const uint8_t* data,
 
     unsigned decoded_position = 0;
     bool valid = true;
-    for (unsigned pass = 0; pass < pass_count && valid; ++pass) {
+    for (unsigned pass = 0; pass < pass_count && valid; ++pass)
+    {
         const unsigned start_x = interlace ? pass_x[pass] : 0;
         const unsigned start_y = interlace ? pass_y[pass] : 0;
         const unsigned step_x = interlace ? pass_dx[pass] : 1;
@@ -1362,46 +1533,53 @@ bool ReadPNGBytesTarget(const uint8_t* data,
         unsigned bytes_per_pixel = (bits_per_pixel + 7u) >> 3;
         if (!bytes_per_pixel)
             bytes_per_pixel = 1;
-        unsigned char* previous = rows;
-        unsigned char* current = rows + max_row_bytes;
+        unsigned char *previous = rows;
+        unsigned char *current = rows + max_row_bytes;
         memset(previous, 0, row_bytes);
-        for (unsigned y = 0; y < pass_height; ++y) {
-            if (decoded_position >= decoded_size || row_bytes > decoded_size - decoded_position - 1u) {
+        for (unsigned y = 0; y < pass_height; ++y)
+        {
+            if (decoded_position >= decoded_size || row_bytes > decoded_size - decoded_position - 1u)
+            {
                 valid = false;
                 break;
             }
             const unsigned filter = decoded[decoded_position++];
-            const unsigned char* source = decoded + decoded_position;
+            const unsigned char *source = decoded + decoded_position;
             decoded_position += row_bytes;
-            if (!UnfilterRow(current, source, y == 0 ? 0 : previous, row_bytes, bytes_per_pixel, filter)) {
+            if (!UnfilterRow(current, source, y == 0 ? 0 : previous, row_bytes, bytes_per_pixel, filter))
+            {
                 valid = false;
                 break;
             }
             const unsigned destination_y = start_y + y * step_y;
-            for (unsigned x = 0; x < pass_width; ++x) {
+            for (unsigned x = 0; x < pass_width; ++x)
+            {
                 const unsigned destination_x = start_x + x * step_x;
                 unsigned char r = 0;
                 unsigned char g = 0;
                 unsigned char b = 0;
                 unsigned char a = 255;
-                if (!DecodePixel(current, x, color_type, bit_depth, palette, palette_bytes,
-                                 transparent, r, g, b, a)) {
+                if (!DecodePixel(current, x, color_type, bit_depth, palette, palette_bytes, transparent, r, g, b, a))
+                {
                     valid = false;
                     break;
                 }
-                if (direct_format != EEasyRpgDirectImageNone) {
-                    unsigned char* destination = static_cast<unsigned char*>(direct_pixels) +
-                        destination_y * direct_pitch + destination_x * 2u;
+                if (direct_format != EEasyRpgDirectImageNone)
+                {
+                    unsigned char *destination = static_cast<unsigned char *>(direct_pixels) +
+                                                 destination_y * direct_pitch + destination_x * 2u;
                     StoreDirectPixel(destination, direct_format, r, g, b, a);
-                } else {
-                    unsigned char* destination = out + (destination_y * w + destination_x) * 4u;
+                }
+                else
+                {
+                    unsigned char *destination = out + (destination_y * w + destination_x) * 4u;
                     destination[0] = r;
                     destination[1] = g;
                     destination[2] = b;
                     destination[3] = a;
                 }
             }
-            unsigned char* swap = previous;
+            unsigned char *swap = previous;
             previous = current;
             current = swap;
         }
@@ -1409,7 +1587,8 @@ bool ReadPNGBytesTarget(const uint8_t* data,
 
     free(rows);
     free(decoded);
-    if (!valid || decoded_position != decoded_size) {
+    if (!valid || decoded_position != decoded_size)
+    {
         free(out);
         return false;
     }
@@ -1419,46 +1598,46 @@ bool ReadPNGBytesTarget(const uint8_t* data,
     return true;
 }
 
-bool ReadPNGBytes(const uint8_t* data,
+bool ReadPNGBytes(const uint8_t *data,
                   unsigned len,
                   bool transparent,
-                  int& width,
-                  int& height,
-                  void*& pixels) {
-    return ReadPNGBytesTarget(data, len, transparent, width, height, pixels,
-                              EEasyRpgDirectImageNone, 0, 0, 0, 0);
+                  int &width,
+                  int &height,
+                  void *&pixels)
+{
+    return ReadPNGBytesTarget(data, len, transparent, width, height, pixels, EEasyRpgDirectImageNone, 0, 0, 0, 0);
 }
 
-bool ReadPNGDirect(FILE* stream,
+bool ReadPNGDirect(FILE *stream,
                    bool transparent,
                    int pixel_format,
                    int width,
                    int height,
-                   void* pixels,
-                   int pitch_bytes) {
+                   void *pixels,
+                   int pitch_bytes)
+{
     int decoded_width = 0;
     int decoded_height = 0;
-    void* ignored = 0;
-    return ReadPNGStreamTarget(stream, transparent,
-                               decoded_width, decoded_height, ignored,
-                               pixel_format, pixels, pitch_bytes,
-                               width, height);
+    void *ignored = 0;
+    return ReadPNGStreamTarget(stream, transparent, decoded_width, decoded_height, ignored, pixel_format, pixels, pitch_bytes, width, height);
 }
 
-bool ReadPNG(FILE* stream, const void* buffer, bool transparent, int& width, int& height, void*& pixels) {
+bool ReadPNG(FILE *stream, const void *buffer, bool transparent, int &width, int &height, void *&pixels)
+{
     if (stream)
-        return ReadPNGStreamTarget(stream, transparent, width, height, pixels,
-                                   EEasyRpgDirectImageNone, 0, 0, 0, 0);
+        return ReadPNGStreamTarget(stream, transparent, width, height, pixels, EEasyRpgDirectImageNone, 0, 0, 0, 0);
     width = 0;
     height = 0;
     pixels = 0;
-    (void)buffer; // ponytail: memory-buffer path unsupported, signature kept for upstream ABI
+    (void)buffer;
     return false;
 }
 
-unsigned int Crc32(const unsigned char* data, unsigned length) {
+unsigned int Crc32(const unsigned char *data, unsigned length)
+{
     unsigned int crc = 0xffffffffu;
-    for (unsigned i = 0; i < length; ++i) {
+    for (unsigned i = 0; i < length; ++i)
+    {
         crc ^= data[i];
         for (unsigned bit = 0; bit < 8; ++bit)
             crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
@@ -1466,22 +1645,24 @@ unsigned int Crc32(const unsigned char* data, unsigned length) {
     return crc ^ 0xffffffffu;
 }
 
-void StoreBig32(unsigned char* out, unsigned int value) {
+void StoreBig32(unsigned char *out, unsigned int value)
+{
     out[0] = static_cast<unsigned char>(value >> 24);
     out[1] = static_cast<unsigned char>(value >> 16);
     out[2] = static_cast<unsigned char>(value >> 8);
     out[3] = static_cast<unsigned char>(value);
 }
 
-bool WriteChunk(std::ostream& stream, const char type[4], const unsigned char* data, unsigned length) {
+bool WriteChunk(std::ostream &stream, const char type[4], const unsigned char *data, unsigned length)
+{
     unsigned char header[8];
     StoreBig32(header, length);
     memcpy(header + 4, type, 4);
-    stream.write(reinterpret_cast<const char*>(header), sizeof(header));
+    stream.write(reinterpret_cast<const char *>(header), sizeof(header));
     if (length)
-        stream.write(reinterpret_cast<const char*>(data), length);
+        stream.write(reinterpret_cast<const char *>(data), length);
 
-    unsigned char* crc_data = static_cast<unsigned char*>(malloc(length + 4u));
+    unsigned char *crc_data = static_cast<unsigned char *>(malloc(length + 4u));
     if (!crc_data)
         return false;
     memcpy(crc_data, type, 4);
@@ -1491,11 +1672,12 @@ bool WriteChunk(std::ostream& stream, const char type[4], const unsigned char* d
     free(crc_data);
     unsigned char crc_bytes[4];
     StoreBig32(crc_bytes, crc);
-    stream.write(reinterpret_cast<const char*>(crc_bytes), sizeof(crc_bytes));
+    stream.write(reinterpret_cast<const char *>(crc_bytes), sizeof(crc_bytes));
     return static_cast<bool>(stream);
 }
 
-bool WritePNG(std::ostream& stream, uint32_t width, uint32_t height, uint32_t* data) {
+bool WritePNG(std::ostream &stream, uint32_t width, uint32_t height, uint32_t *data)
+{
     if (!data || width == 0 || height == 0 || width > 4096 || height > 4096)
         return false;
     if (width > (0xffffffffu - 1u) / 4u)
@@ -1504,27 +1686,32 @@ bool WritePNG(std::ostream& stream, uint32_t width, uint32_t height, uint32_t* d
     if (height > 0xffffffffu / (row_bytes + 1u))
         return false;
     const unsigned raw_size = height * (row_bytes + 1u);
-    unsigned char* raw = static_cast<unsigned char*>(malloc(raw_size));
+    unsigned char *raw = static_cast<unsigned char *>(malloc(raw_size));
     if (!raw)
         return false;
 
-    for (unsigned y = 0; y < height; ++y) {
-        unsigned char* row = raw + y * (row_bytes + 1u);
+    for (unsigned y = 0; y < height; ++y)
+    {
+        unsigned char *row = raw + y * (row_bytes + 1u);
         row[0] = 0;
-        for (unsigned x = 0; x < width; ++x) {
+        for (unsigned x = 0; x < width; ++x)
+        {
             const uint32_t pixel = data[y * width + x];
             const unsigned alpha = (pixel >> 24) & 0xffu;
             unsigned red = (pixel >> 16) & 0xffu;
             unsigned green = (pixel >> 8) & 0xffu;
             unsigned blue = pixel & 0xffu;
-            if (alpha) {
+            if (alpha)
+            {
                 red = std::min(255u, (red * 255u + alpha / 2u) / alpha);
                 green = std::min(255u, (green * 255u + alpha / 2u) / alpha);
                 blue = std::min(255u, (blue * 255u + alpha / 2u) / alpha);
-            } else {
+            }
+            else
+            {
                 red = green = blue = 0;
             }
-            unsigned char* out = row + 1u + x * 4u;
+            unsigned char *out = row + 1u + x * 4u;
             out[0] = static_cast<unsigned char>(red);
             out[1] = static_cast<unsigned char>(green);
             out[2] = static_cast<unsigned char>(blue);
@@ -1533,21 +1720,23 @@ bool WritePNG(std::ostream& stream, uint32_t width, uint32_t height, uint32_t* d
     }
 
     unsigned long compressed_capacity = compressBound(raw_size);
-    unsigned char* compressed = static_cast<unsigned char*>(malloc(compressed_capacity));
-    if (!compressed) {
+    unsigned char *compressed = static_cast<unsigned char *>(malloc(compressed_capacity));
+    if (!compressed)
+    {
         free(raw);
         return false;
     }
     unsigned long compressed_size = compressed_capacity;
     const int zlib_result = compress2(compressed, &compressed_size, raw, raw_size, 1);
     free(raw);
-    if (zlib_result != 0 || compressed_size > 0xffffffffu) {
+    if (zlib_result != 0 || compressed_size > 0xffffffffu)
+    {
         free(compressed);
         return false;
     }
 
     static const unsigned char signature[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
-    stream.write(reinterpret_cast<const char*>(signature), sizeof(signature));
+    stream.write(reinterpret_cast<const char *>(signature), sizeof(signature));
     unsigned char ihdr[13];
     StoreBig32(ihdr, width);
     StoreBig32(ihdr + 4, height);
@@ -1557,23 +1746,24 @@ bool WritePNG(std::ostream& stream, uint32_t width, uint32_t height, uint32_t* d
     ihdr[11] = 0;
     ihdr[12] = 0;
     const bool okay = WriteChunk(stream, "IHDR", ihdr, sizeof(ihdr)) &&
-        WriteChunk(stream, "IDAT", compressed, static_cast<unsigned>(compressed_size)) &&
-        WriteChunk(stream, "IEND", NULL, 0);
+                      WriteChunk(stream, "IDAT", compressed, static_cast<unsigned>(compressed_size)) &&
+                      WriteChunk(stream, "IEND", NULL, 0);
     free(compressed);
     return okay && static_cast<bool>(stream);
 }
-}
+} // namespace ImagePNG
 
-extern "C" int EasyRpgPlatformProbeDirectImage(void* stream_ptr,
-                                                 int transparent,
-                                                 unsigned int flags,
-                                                 int* width,
-                                                 int* height,
-                                                 int* pixel_format) {
+extern "C" int EasyRpgPlatformProbeDirectImage(void *stream_ptr,
+                                               int transparent,
+                                               unsigned int flags,
+                                               int *width,
+                                               int *height,
+                                               int *pixel_format)
+{
     if (!stream_ptr || !width || !height || !pixel_format || (flags & 2u) != 0)
         return 0;
 
-    FILE* stream = static_cast<FILE*>(stream_ptr);
+    FILE *stream = static_cast<FILE *>(stream_ptr);
     if (fseek(stream, 0, SEEK_SET) != 0)
         return 0;
     unsigned char header[54];
@@ -1583,11 +1773,14 @@ extern "C" int EasyRpgPlatformProbeDirectImage(void* stream_ptr,
     int w = 0;
     int h = 0;
     int format = EEasyRpgDirectImageNone;
-    if (read >= 8 && memcmp(header, "XYZ1", 4) == 0) {
+    if (read >= 8 && memcmp(header, "XYZ1", 4) == 0)
+    {
         w = static_cast<int>(Read16(header + 4));
         h = static_cast<int>(Read16(header + 6));
         format = transparent ? EEasyRpgDirectImageA1555 : EEasyRpgDirectImageRgb565;
-    } else if (read >= 54 && header[0] == 'B' && header[1] == 'M') {
+    }
+    else if (read >= 54 && header[0] == 'B' && header[1] == 'M')
+    {
         const unsigned dib_size = Read32(header + 14);
         const int signed_h = static_cast<int>(Read32(header + 22));
         const unsigned bpp = Read16(header + 28);
@@ -1598,9 +1791,11 @@ extern "C" int EasyRpgPlatformProbeDirectImage(void* stream_ptr,
             return 0;
         h = signed_h > 0 ? signed_h : -signed_h;
         format = transparent
-            ? (bpp == 32 ? EEasyRpgDirectImageBgra8888 : EEasyRpgDirectImageA1555)
-            : EEasyRpgDirectImageRgb565;
-    } else if (read >= 33) {
+                     ? (bpp == 32 ? EEasyRpgDirectImageBgra8888 : EEasyRpgDirectImageA1555)
+                     : EEasyRpgDirectImageRgb565;
+    }
+    else if (read >= 33)
+    {
         static const unsigned char png_signature[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
         if (memcmp(header, png_signature, sizeof(png_signature)) != 0 ||
             ImagePNG::ReadBig32(header + 8) != 13u || memcmp(header + 12, "IHDR", 4) != 0)
@@ -1613,9 +1808,10 @@ extern "C" int EasyRpgPlatformProbeDirectImage(void* stream_ptr,
             !ImagePNG::ValidBitDepth(color_type, bit_depth))
             return 0;
         format = transparent
-            ? ((color_type == 4 || color_type == 6)
-                ? EEasyRpgDirectImageBgra8888 : EEasyRpgDirectImageA1555)
-            : EEasyRpgDirectImageRgb565;
+                     ? ((color_type == 4 || color_type == 6)
+                            ? EEasyRpgDirectImageBgra8888
+                            : EEasyRpgDirectImageA1555)
+                     : EEasyRpgDirectImageRgb565;
     }
 
     if (w <= 0 || h <= 0 || format == EEasyRpgDirectImageNone)
@@ -1626,18 +1822,19 @@ extern "C" int EasyRpgPlatformProbeDirectImage(void* stream_ptr,
     return 1;
 }
 
-extern "C" int EasyRpgPlatformDecodeDirectImage(void* stream_ptr,
-                                                  int transparent,
-                                                  int pixel_format,
-                                                  int width,
-                                                  int height,
-                                                  void* pixels,
-                                                  int pitch_bytes) {
+extern "C" int EasyRpgPlatformDecodeDirectImage(void *stream_ptr,
+                                                int transparent,
+                                                int pixel_format,
+                                                int width,
+                                                int height,
+                                                void *pixels,
+                                                int pitch_bytes)
+{
     const unsigned destination_bpp = DirectPixelBytes(pixel_format);
     if (!stream_ptr || !pixels || width <= 0 || height <= 0 || !destination_bpp ||
         pitch_bytes < static_cast<int>(width * destination_bpp))
         return 0;
-    FILE* stream = static_cast<FILE*>(stream_ptr);
+    FILE *stream = static_cast<FILE *>(stream_ptr);
     if (fseek(stream, 0, SEEK_SET) != 0)
         return 0;
     unsigned char signature[8];
@@ -1645,14 +1842,11 @@ extern "C" int EasyRpgPlatformDecodeDirectImage(void* stream_ptr,
     if (fseek(stream, 0, SEEK_SET) != 0)
         return 0;
     if (read >= 4 && memcmp(signature, "XYZ1", 4) == 0)
-        return ImageXYZ::ReadXYZDirect(stream, transparent != 0, pixel_format,
-                                       width, height, pixels, pitch_bytes) ? 1 : 0;
+        return ImageXYZ::ReadXYZDirect(stream, transparent != 0, pixel_format, width, height, pixels, pitch_bytes) ? 1 : 0;
     if (read >= 2 && signature[0] == 'B' && signature[1] == 'M')
-        return ImageBMP::ReadBMPDirect(stream, transparent != 0, pixel_format,
-                                       width, height, pixels, pitch_bytes) ? 1 : 0;
+        return ImageBMP::ReadBMPDirect(stream, transparent != 0, pixel_format, width, height, pixels, pitch_bytes) ? 1 : 0;
     static const unsigned char png_signature[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
     if (read == sizeof(png_signature) && memcmp(signature, png_signature, sizeof(png_signature)) == 0)
-        return ImagePNG::ReadPNGDirect(stream, transparent != 0, pixel_format,
-                                       width, height, pixels, pitch_bytes) ? 1 : 0;
+        return ImagePNG::ReadPNGDirect(stream, transparent != 0, pixel_format, width, height, pixels, pitch_bytes) ? 1 : 0;
     return 0;
 }

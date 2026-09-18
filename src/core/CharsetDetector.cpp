@@ -7,14 +7,17 @@
 #include "nsSJISProber.h"
 #include "nsUTF8Prober.h"
 
-namespace {
+namespace
+{
 
-void AddGuess(std::vector<EasyRpgCharsetDetector::Guess>& guesses,
-              nsCharSetProber& prober,
-              const char* encoding,
-              const std::string& sample) {
+void AddGuess(std::vector<EasyRpgCharsetDetector::Guess> &guesses,
+              nsCharSetProber &prober,
+              const char *encoding,
+              const std::string &sample)
+{
     const nsProbingState state = prober.HandleData(
-        sample.data(), static_cast<PRUint32>(sample.size()));
+        sample.data(),
+        static_cast<PRUint32>(sample.size()));
     if (state == eNotMe)
         return;
 
@@ -30,15 +33,17 @@ void AddGuess(std::vector<EasyRpgCharsetDetector::Guess>& guesses,
     guesses.push_back(guess);
 }
 
-bool HigherConfidence(const EasyRpgCharsetDetector::Guess& left,
-                      const EasyRpgCharsetDetector::Guess& right) {
+bool HigherConfidence(const EasyRpgCharsetDetector::Guess &left,
+                      const EasyRpgCharsetDetector::Guess &right)
+{
     return left.confidence > right.confidence;
 }
 
-}
+} // namespace
 
 std::vector<EasyRpgCharsetDetector::Guess>
-EasyRpgCharsetDetector::Detect(const std::string& sample) {
+EasyRpgCharsetDetector::Detect(const std::string &sample)
+{
     std::vector<Guess> guesses;
     if (sample.empty())
         return guesses;

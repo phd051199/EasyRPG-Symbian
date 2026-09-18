@@ -22,7 +22,7 @@ _LIT(KDoubleListItemFormat, "\t%S\t%S");
 _LIT(KNoGamesFound, "No games found");
 _LIT(KEmptyListSubtitle, "");
 
-void CopyGameListText(const TDesC& aSource, TDes& aTarget)
+void CopyGameListText(const TDesC &aSource, TDes &aTarget)
 {
     aTarget.Copy(aSource.Left(aTarget.MaxLength()));
     for (TInt index = 0; index < aTarget.Length(); ++index)
@@ -33,7 +33,7 @@ void CopyGameListText(const TDesC& aSource, TDes& aTarget)
     }
 }
 
-void FormatArchiveSize(TInt aBytes, TDes& aText)
+void FormatArchiveSize(TInt aBytes, TDes &aText)
 {
     if (aBytes < 0)
         aBytes = 0;
@@ -44,11 +44,11 @@ void FormatArchiveSize(TInt aBytes, TDes& aText)
                  static_cast<TInt>(tenths % 10));
 }
 
-}
+} // namespace
 
-CLauncherView* CLauncherView::NewL(const TRect& aRect)
+CLauncherView *CLauncherView::NewL(const TRect &aRect)
 {
-    CLauncherView* self = new (ELeave) CLauncherView;
+    CLauncherView *self = new (ELeave) CLauncherView;
     CleanupStack::PushL(self);
     self->ConstructL(aRect);
     CleanupStack::Pop(self);
@@ -66,7 +66,7 @@ CLauncherView::CLauncherView()
 {
 }
 
-void CLauncherView::ConstructL(const TRect& aRect)
+void CLauncherView::ConstructL(const TRect &aRect)
 {
     CreateWindowL();
     User::LeaveIfError(iFs.Connect());
@@ -78,7 +78,8 @@ void CLauncherView::ConstructL(const TRect& aRect)
     iListBox->SetListBoxObserver(this);
     iListBox->CreateScrollBarFrameL(ETrue);
     iListBox->ScrollBarFrame()->SetScrollBarVisibilityL(
-        CEikScrollBarFrame::EOff, CEikScrollBarFrame::EAuto);
+        CEikScrollBarFrame::EOff,
+        CEikScrollBarFrame::EAuto);
 
     iListItems = new (ELeave) CDesCArrayFlat(16);
     iArchivePaths = new (ELeave) CDesCArrayFlat(16);
@@ -112,9 +113,9 @@ void CLauncherView::BuildGameListL()
     iListItems->Reset();
     iArchivePaths->Reset();
 
-    CDesCArrayFlat* displayNames = new (ELeave) CDesCArrayFlat(16);
+    CDesCArrayFlat *displayNames = new (ELeave) CDesCArrayFlat(16);
     CleanupStack::PushL(displayNames);
-    CDesCArrayFlat* sourcePaths = new (ELeave) CDesCArrayFlat(16);
+    CDesCArrayFlat *sourcePaths = new (ELeave) CDesCArrayFlat(16);
     CleanupStack::PushL(sourcePaths);
     RArray<TInt> archiveSizes;
     CleanupClosePushL(archiveSizes);
@@ -155,7 +156,8 @@ void CLauncherView::ShowLoadingDialogL()
     if (iLoadingDialog)
         return;
     iLoadingDialog = new (ELeave) CAknProgressDialog(
-        reinterpret_cast<CEikDialog**>(&iLoadingDialog), ETrue);
+        reinterpret_cast<CEikDialog **>(&iLoadingDialog),
+        ETrue);
     iLoadingDialog->PrepareLC(R_EASYRPG_LOADING_WAIT_NOTE);
     iLoadingProgress = iLoadingDialog->GetProgressInfoL();
     iLoadingProgress->SetFinalValue(100);
@@ -183,7 +185,7 @@ void CLauncherView::DismissLoadingDialog()
     iLoadingDialog = NULL;
 }
 
-void CLauncherView::LaunchArchiveL(const TDesC& aArchivePath)
+void CLauncherView::LaunchArchiveL(const TDesC &aArchivePath)
 {
     const TFileName currentExecutable = RProcess().FileName();
     const TParsePtrC currentParse(currentExecutable);
@@ -208,16 +210,15 @@ void CLauncherView::PlaySelectedGameL()
 
     iLaunching = ETrue;
     TRAPD(error,
-        ShowLoadingDialogL();
-        LaunchArchiveL((*iArchivePaths)[index]);
-    );
+          ShowLoadingDialogL();
+          LaunchArchiveL((*iArchivePaths)[index]););
     if (error != KErrNone)
     {
         iLaunching = EFalse;
         DismissLoadingDialog();
         TBuf<48> message;
         message.Format(_L("Start failed (%d)"), error);
-        CAknErrorNote* note = new (ELeave) CAknErrorNote;
+        CAknErrorNote *note = new (ELeave) CAknErrorNote;
         note->ExecuteLD(message);
     }
 }
@@ -232,19 +233,18 @@ void CLauncherView::GameLaunchCompleted(TInt aError)
     if (aError != KErrNone)
     {
         const TGameLaunchStage stage = iLaunchWatcher ? iLaunchWatcher->FailureStage() : ELaunchStageNone;
-        const TDesC& exitCategory = iLaunchWatcher ? iLaunchWatcher->ExitCategory() : KNullDesC;
+        const TDesC &exitCategory = iLaunchWatcher ? iLaunchWatcher->ExitCategory() : KNullDesC;
         const TInt exitReason = iLaunchWatcher ? iLaunchWatcher->ExitReason() : 0;
         TRAP_IGNORE(
             TBuf<96> message;
-            const TDesC& stageName = GameLaunchStageName(stage);
+            const TDesC &stageName = GameLaunchStageName(stage);
             message.Format(_L("%S failed (%d) [%S %d]"), &stageName, aError, &exitCategory, exitReason);
-            CAknErrorNote* note = new (ELeave) CAknErrorNote;
-            note->ExecuteLD(message);
-        );
+            CAknErrorNote *note = new (ELeave) CAknErrorNote;
+            note->ExecuteLD(message););
         return;
     }
 
-    CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
+    CAknAppUi *appUi = static_cast<CAknAppUi *>(CEikonEnv::Static()->EikAppUi());
     appUi->PrepareToExit();
     if (CActiveScheduler::Current())
         CActiveScheduler::Stop();
@@ -252,7 +252,7 @@ void CLauncherView::GameLaunchCompleted(TInt aError)
 
 void CLauncherView::UpdateLayout()
 {
-    CAknAppUi* appUi = static_cast<CAknAppUi*>(CEikonEnv::Static()->EikAppUi());
+    CAknAppUi *appUi = static_cast<CAknAppUi *>(CEikonEnv::Static()->EikAppUi());
     SetRect(appUi->ClientRect());
 }
 
@@ -267,17 +267,17 @@ TInt CLauncherView::CountComponentControls() const
     return iListBox ? 1 : 0;
 }
 
-CCoeControl* CLauncherView::ComponentControl(TInt aIndex) const
+CCoeControl *CLauncherView::ComponentControl(TInt aIndex) const
 {
     return aIndex == 0 ? iListBox : NULL;
 }
 
-TKeyResponse CLauncherView::HandleKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType)
+TKeyResponse CLauncherView::HandleKeyEventL(const TKeyEvent &aKeyEvent, TEventCode aType)
 {
     return OfferKeyEventL(aKeyEvent, aType);
 }
 
-TKeyResponse CLauncherView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType)
+TKeyResponse CLauncherView::OfferKeyEventL(const TKeyEvent &aKeyEvent, TEventCode aType)
 {
     if (!iListBox)
         return EKeyWasNotConsumed;
@@ -293,7 +293,7 @@ TKeyResponse CLauncherView::OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCod
     return iListBox->OfferKeyEventL(aKeyEvent, aType);
 }
 
-void CLauncherView::HandleListBoxEventL(CEikListBox*, TListBoxEvent aEventType)
+void CLauncherView::HandleListBoxEventL(CEikListBox *, TListBoxEvent aEventType)
 {
     if (aEventType == EEventEnterKeyPressed || aEventType == EEventItemClicked)
         PlaySelectedGameL();

@@ -2,7 +2,7 @@
 #define EASYRPG_APP_HRH
 
 // Must match EasyRpgApp::KLauncherUid (include/AppConfig.h),
-// target/group/Launcher.mmp and target/package/App.pkg.
+// symbian/group/Launcher.mmp and symbian/package/App.pkg.
 #define _UID3 0xE31EA5A1
 #define KEasyRpgLocalisableAppInfoResourceId 6
 

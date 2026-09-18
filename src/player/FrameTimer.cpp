@@ -4,16 +4,16 @@
 #include "FrameTimer.h"
 #include "PlayerConfig.h"
 
-CFrameTimer* CFrameTimer::NewL(MFrameTimerObserver& aObserver)
+CFrameTimer *CFrameTimer::NewL(MFrameTimerObserver &aObserver)
 {
-    CFrameTimer* self = new (ELeave) CFrameTimer(aObserver);
+    CFrameTimer *self = new (ELeave) CFrameTimer(aObserver);
     CleanupStack::PushL(self);
     self->ConstructL();
     CleanupStack::Pop(self);
     return self;
 }
 
-CFrameTimer::CFrameTimer(MFrameTimerObserver& aObserver)
+CFrameTimer::CFrameTimer(MFrameTimerObserver &aObserver)
     : CActive(CActive::EPriorityHigh),
       iObserver(aObserver),
       iCounterFrequency(0),
@@ -42,9 +42,6 @@ void CFrameTimer::ConstructL()
     iCounterCountsUp = counterCountsUp != 0;
     if (iCounterFrequency < EasyRpgPlayerConfig::KLogicFps)
         User::Leave(KErrNotSupported);
-    // 16.16 fixed-point reciprocal: Symbian fast counters run at 1 MHz or
-    // 32768 Hz on target hardware, where this is exact and the per-tick
-    // 64-bit divide becomes a multiply+shift (no FPU, soft __aeabi_ldivmod).
     iMicrosPerTickX65536 = (static_cast<TInt64>(1000000) << 16) / iCounterFrequency;
     iFramePeriodCounter = iCounterFrequency / EasyRpgPlayerConfig::KLogicFps;
     iFramePeriodRemainder = iCounterFrequency % EasyRpgPlayerConfig::KLogicFps;
@@ -110,8 +107,8 @@ void CFrameTimer::AdvanceDeadline()
 TUint32 CFrameTimer::CounterDelta(TUint32 aCurrent, TUint32 aPrevious) const
 {
     return iCounterCountsUp
-        ? static_cast<TUint32>(aCurrent - aPrevious)
-        : static_cast<TUint32>(aPrevious - aCurrent);
+               ? static_cast<TUint32>(aCurrent - aPrevious)
+               : static_cast<TUint32>(aPrevious - aCurrent);
 }
 
 void CFrameTimer::UpdateElapsedCounter(TUint32 aCounter)
@@ -145,7 +142,7 @@ void CFrameTimer::ScheduleNext()
             ++iImmediateCatchUpTicks;
             iStatus = KRequestPending;
             SetActive();
-            TRequestStatus* status = &iStatus;
+            TRequestStatus *status = &iStatus;
             User::RequestComplete(status, KErrNone);
         }
         else
@@ -201,7 +198,7 @@ void CFrameTimer::RunL()
         static_cast<TInt64>(iFramePeriodCounter) *
         EasyRpgPlayerConfig::KLogicTicksPerRender;
     const TBool renderFrame = scheduledRender &&
-        renderLagTicks < renderBudgetTicks;
+                              renderLagTicks < renderBudgetTicks;
     if (renderFrame)
         iLogicTicksSinceRender = 0;
 

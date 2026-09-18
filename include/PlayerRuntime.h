@@ -8,7 +8,7 @@ class CZipVfs;
 
 class CPlayerRuntime : public CBase
 {
-public:
+  public:
     enum TPlayerKey
     {
         EKeyUp = 0x00000001,
@@ -35,9 +35,9 @@ public:
         EKeyPeriod = 0x00400000
     };
 
-    static CPlayerRuntime* NewL(CZipVfs* aResources,
-                                const TDesC& aGameSource,
-                                CDisplaySurface& aDisplaySurface);
+    static CPlayerRuntime *NewL(CZipVfs *aResources,
+                                const TDesC &aGameSource,
+                                CDisplaySurface &aDisplaySurface);
     ~CPlayerRuntime();
 
     void SetKeyState(TUint32 aKey, TBool aPressed);
@@ -47,14 +47,14 @@ public:
     void TickL(TUint32 aLogicFrame, TBool aRenderFrame);
     TBool IsRunning() const;
 
-private:
-    CPlayerRuntime(CZipVfs* aResources, CDisplaySurface& aDisplaySurface);
-    void ConstructL(const TDesC& aGameSource);
-    void PrepareProjectRootL(const TDesC& aGameSource, TDes8& aProjectPath, TDes8& aSavePath);
+  private:
+    CPlayerRuntime(CZipVfs *aResources, CDisplaySurface &aDisplaySurface);
+    void ConstructL(const TDesC &aGameSource);
+    void PrepareProjectRootL(const TDesC &aGameSource, TDes8 &aProjectPath, TDes8 &aSavePath);
 
-private:
-    CZipVfs* iResources;
-    CDisplaySurface& iDisplaySurface;
+  private:
+    CZipVfs *iResources;
+    CDisplaySurface &iDisplaySurface;
     TUint32 iUpstreamKeys0;
     TUint32 iUpstreamKeys1;
     TUint32 iUpstreamKeys2;

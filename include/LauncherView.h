@@ -15,37 +15,38 @@ class CLauncherView : public CCoeControl,
                       public MEikListBoxObserver
 {
     friend class CGameLaunchWatcher;
-public:
-    static CLauncherView* NewL(const TRect& aRect);
+
+  public:
+    static CLauncherView *NewL(const TRect &aRect);
     ~CLauncherView();
 
     void PlaySelectedGameL();
     void UpdateLayout();
-    TKeyResponse HandleKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType);
+    TKeyResponse HandleKeyEventL(const TKeyEvent &aKeyEvent, TEventCode aType);
 
-private:
+  private:
     CLauncherView();
-    void ConstructL(const TRect& aRect);
+    void ConstructL(const TRect &aRect);
     void BuildGameListL();
-    void LaunchArchiveL(const TDesC& aArchivePath);
+    void LaunchArchiveL(const TDesC &aArchivePath);
     void ShowLoadingDialogL();
     void UpdateLoadingProgress(TInt aValue);
     void DismissLoadingDialog();
     void GameLaunchCompleted(TInt aError);
     void SizeChanged();
     TInt CountComponentControls() const;
-    CCoeControl* ComponentControl(TInt aIndex) const;
-    TKeyResponse OfferKeyEventL(const TKeyEvent& aKeyEvent, TEventCode aType);
-    void HandleListBoxEventL(CEikListBox* aListBox, TListBoxEvent aEventType);
+    CCoeControl *ComponentControl(TInt aIndex) const;
+    TKeyResponse OfferKeyEventL(const TKeyEvent &aKeyEvent, TEventCode aType);
+    void HandleListBoxEventL(CEikListBox *aListBox, TListBoxEvent aEventType);
 
-private:
+  private:
     RFs iFs;
-    CAknDoubleStyleListBox* iListBox;
-    CDesCArrayFlat* iListItems;
-    CDesCArrayFlat* iArchivePaths;
-    CAknProgressDialog* iLoadingDialog;
-    CEikProgressInfo* iLoadingProgress;
-    CGameLaunchWatcher* iLaunchWatcher;
+    CAknDoubleStyleListBox *iListBox;
+    CDesCArrayFlat *iListItems;
+    CDesCArrayFlat *iArchivePaths;
+    CAknProgressDialog *iLoadingDialog;
+    CEikProgressInfo *iLoadingProgress;
+    CGameLaunchWatcher *iLaunchWatcher;
     TBool iLaunching;
 };
 

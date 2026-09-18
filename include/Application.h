@@ -7,8 +7,8 @@
 
 class CEasyRpgApplication : public CAknApplication
 {
-private:
-    CApaDocument* CreateDocumentL();
+  private:
+    CApaDocument *CreateDocumentL();
     TUid AppDllUid() const;
 };
 

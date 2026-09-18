@@ -5,15 +5,15 @@
 
 class MFrameTimerObserver
 {
-public:
+  public:
     virtual void FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame) = 0;
     virtual void FrameError(TInt aError) = 0;
 };
 
 class CFrameTimer : public CActive
 {
-public:
-    static CFrameTimer* NewL(MFrameTimerObserver& aObserver);
+  public:
+    static CFrameTimer *NewL(MFrameTimerObserver &aObserver);
     ~CFrameTimer();
 
     void Start();
@@ -21,8 +21,8 @@ public:
     TBool Running() const;
     TInt TimeUntilNextTickMicroseconds() const;
 
-private:
-    explicit CFrameTimer(MFrameTimerObserver& aObserver);
+  private:
+    explicit CFrameTimer(MFrameTimerObserver &aObserver);
     void ConstructL();
     void RunL();
     void DoCancel();
@@ -32,8 +32,8 @@ private:
     TUint32 CounterDelta(TUint32 aCurrent, TUint32 aPrevious) const;
     TInt CounterTicksToMicroseconds(TInt64 aTicks) const;
 
-private:
-    MFrameTimerObserver& iObserver;
+  private:
+    MFrameTimerObserver &iObserver;
     RTimer iTimer;
     TInt iCounterFrequency;
     TInt64 iMicrosPerTickX65536;

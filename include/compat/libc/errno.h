@@ -2,10 +2,11 @@
 #define EASYRPG_SYMBIAN_LIBC_COMPAT_ERRNO_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-int* __errno(void);
+    int *__errno(void);
 
 #ifdef __cplusplus
 }

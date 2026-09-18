@@ -12,11 +12,11 @@ const TInt KSampleIntervalUs = 1000000;
 const TUint16 KTextColor = 0xffffu;
 const TInt KGlyphWidth = 6;
 const TInt KGlyphHeight = 11;
-}
+} // namespace
 
-CPerfOverlay* CPerfOverlay::NewL()
+CPerfOverlay *CPerfOverlay::NewL()
 {
-    CPerfOverlay* self = new (ELeave) CPerfOverlay;
+    CPerfOverlay *self = new (ELeave) CPerfOverlay;
     CleanupStack::PushL(self);
     self->ConstructL();
     CleanupStack::Pop(self);
@@ -155,7 +155,7 @@ void CPerfOverlay::ClearDirty()
     iDirty = EFalse;
 }
 
-void CPerfOverlay::Compose(const CFbsBitmap& aFrameBitmap,
+void CPerfOverlay::Compose(const CFbsBitmap &aFrameBitmap,
                            TInt aX,
                            TInt aY)
 {
@@ -168,12 +168,9 @@ void CPerfOverlay::Compose(const CFbsBitmap& aFrameBitmap,
         aY + KOverlayHeight > frameSize.iHeight)
         return;
 
-    // One shared FBS heap lock covers both bitmaps' addresses: copy the
-    // frame backdrop straight into the overlay bitmap and draw on top,
-    // with no intermediate staging buffer.
     aFrameBitmap.LockHeap();
-    TUint8* overlayPixels = reinterpret_cast<TUint8*>(iBitmap->DataAddress());
-    const TUint8* framePixels = reinterpret_cast<const TUint8*>(aFrameBitmap.DataAddress());
+    TUint8 *overlayPixels = reinterpret_cast<TUint8 *>(iBitmap->DataAddress());
+    const TUint8 *framePixels = reinterpret_cast<const TUint8 *>(aFrameBitmap.DataAddress());
     const TInt overlayStride = iBitmap->DataStride();
     const TInt frameStride = aFrameBitmap.DataStride();
     if (overlayPixels && framePixels && overlayStride > 0 && frameStride > 0)
@@ -189,7 +186,7 @@ void CPerfOverlay::Compose(const CFbsBitmap& aFrameBitmap,
     aFrameBitmap.UnlockHeap();
 }
 
-const CFbsBitmap& CPerfOverlay::Bitmap() const
+const CFbsBitmap &CPerfOverlay::Bitmap() const
 {
     return *iBitmap;
 }
@@ -220,7 +217,7 @@ void CPerfOverlay::ReadRam()
     }
 }
 
-void CPerfOverlay::DrawMetricsTo(TUint8* aPixels,
+void CPerfOverlay::DrawMetricsTo(TUint8 *aPixels,
                                  TInt aStride,
                                  TInt aX,
                                  TInt aY)
@@ -251,25 +248,26 @@ void CPerfOverlay::DrawMetricsTo(TUint8* aPixels,
     DrawText(aPixels, aStride, aX + 2, aY + 15, line);
 }
 
-void CPerfOverlay::DrawText(TUint8* aPixels,
+void CPerfOverlay::DrawText(TUint8 *aPixels,
                             TInt aStride,
                             TInt aX,
                             TInt aY,
-                            const TDesC8& aText)
+                            const TDesC8 &aText)
 {
     for (TInt index = 0; index < aText.Length(); ++index)
     {
         const TUint8 character = aText[index];
         if (character == ' ')
             continue;
-        const TUint8* rows = EasyRpgGohuGlyphRows(character);
+        const TUint8 *rows = EasyRpgGohuGlyphRows(character);
         if (!rows)
             continue;
         for (TInt row = 0; row < KGlyphHeight; ++row)
         {
             const TUint8 bits = rows[row];
-            TUint16* destination = reinterpret_cast<TUint16*>(
-                aPixels + (aY + row) * aStride) + aX + index * KGlyphWidth;
+            TUint16 *destination = reinterpret_cast<TUint16 *>(
+                                       aPixels + (aY + row) * aStride) +
+                                   aX + index * KGlyphWidth;
             for (TInt column = 0; column < KGlyphWidth; ++column)
             {
                 if ((bits & (1u << column)) != 0)

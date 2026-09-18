@@ -21,14 +21,14 @@ class CRuntimeEngine : public CBase,
                        public MFrameTimerObserver,
                        public MGameMenuHost
 {
-public:
-    static CRuntimeEngine* NewL();
+  public:
+    static CRuntimeEngine *NewL();
     ~CRuntimeEngine();
     void Run();
     TBool ReturnToLauncher() const;
-    void HandleWindowEvent(const TWsEvent& aEvent);
+    void HandleWindowEvent(const TWsEvent &aEvent);
 
-private:
+  private:
     CRuntimeEngine();
     void ConstructL();
     void StartDirectScreenL();
@@ -38,7 +38,7 @@ private:
     void RaisePriority();
     void RestorePriority();
     void RequestExit(TBool aReturnToLauncher);
-    void HandleKeyEvent(TInt aType, const TKeyEvent& aKey);
+    void HandleKeyEvent(TInt aType, const TKeyEvent &aKey);
     void SetPlayerKeyMask(TUint32 aMask, TBool aPressed);
     void ClearPlayerInput();
     void MaintainMemory(TUint32 aLogicFrame);
@@ -52,20 +52,20 @@ private:
     void FrameTickL(TUint32 aLogicFrame, TBool aRenderFrame);
     void FrameError(TInt aError);
 
-private:
+  private:
     RFs iFs;
     RWsSession iWs;
-    RWindowGroup* iWindowGroup;
-    RWindow* iWindow;
-    CWsScreenDevice* iScreenDevice;
-    CDisplaySurface* iDisplaySurface;
-    CZipVfs* iResources;
-    CPlayerRuntime* iRuntime;
-    CFrameTimer* iFrameTimer;
-    CWindowEventPump* iEventPump;
-    CRawDirectScreenAccess* iDirectScreen;
-    CPerfOverlay* iPerfOverlay;
-    CGameMenu* iGameMenu;
+    RWindowGroup *iWindowGroup;
+    RWindow *iWindow;
+    CWsScreenDevice *iScreenDevice;
+    CDisplaySurface *iDisplaySurface;
+    CZipVfs *iResources;
+    CPlayerRuntime *iRuntime;
+    CFrameTimer *iFrameTimer;
+    CWindowEventPump *iEventPump;
+    CRawDirectScreenAccess *iDirectScreen;
+    CPerfOverlay *iPerfOverlay;
+    CGameMenu *iGameMenu;
     TFileName iGamePath;
     TBool iDirectScreenActive;
     TBool iNeedsFullRedraw;

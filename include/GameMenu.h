@@ -20,15 +20,35 @@ enum TGameMenuFeature
 
 class MGameMenuHost
 {
-public:
-    virtual TUint32 GameMenuFeatures() const { return 0; }
-    virtual void GameMenuSetSoundEnabledL(TBool) {}
-    virtual void GameMenuSetVolumeL(TInt) {}
-    virtual void GameMenuSetFpsEnabledL(TBool) {}
-    virtual void GameMenuResetL() {}
-    virtual TInt GameMenuCustomItemCount() const { return 0; }
-    virtual void GameMenuCustomItemText(TInt, TDes8& aText) const { aText.Zero(); }
-    virtual TBool GameMenuCustomActivateL(TInt) { return ETrue; }
+  public:
+    virtual TUint32 GameMenuFeatures() const
+    {
+        return 0;
+    }
+    virtual void GameMenuSetSoundEnabledL(TBool)
+    {
+    }
+    virtual void GameMenuSetVolumeL(TInt)
+    {
+    }
+    virtual void GameMenuSetFpsEnabledL(TBool)
+    {
+    }
+    virtual void GameMenuResetL()
+    {
+    }
+    virtual TInt GameMenuCustomItemCount() const
+    {
+        return 0;
+    }
+    virtual void GameMenuCustomItemText(TInt, TDes8 &aText) const
+    {
+        aText.Zero();
+    }
+    virtual TBool GameMenuCustomActivateL(TInt)
+    {
+        return ETrue;
+    }
     virtual void GameMenuPauseL(TBool aPaused) = 0;
     virtual void GameMenuExitL() = 0;
     virtual void GameMenuRequestRedraw() = 0;
@@ -36,18 +56,18 @@ public:
 
 class CGameMenu : public CBase
 {
-public:
-    static CGameMenu* NewL(MGameMenuHost& aHost, RFs& aFs);
+  public:
+    static CGameMenu *NewL(MGameMenuHost &aHost, RFs &aFs);
     ~CGameMenu();
 
     TBool IsOpen() const;
     void OpenL();
     void CloseL();
     void ResetInputState();
-    TBool HandleKeyEventL(TInt aType, const TKeyEvent& aKey);
-    void DrawL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
+    TBool HandleKeyEventL(TInt aType, const TKeyEvent &aKey);
+    void DrawL(CGraphicsContext &aGc, CBitmapDevice &aDevice);
 
-private:
+  private:
     enum TItemKind
     {
         EItemInvalid = 0,
@@ -61,14 +81,14 @@ private:
         EItemExit
     };
 
-    CGameMenu(MGameMenuHost& aHost, RFs& aFs);
+    CGameMenu(MGameMenuHost &aHost, RFs &aFs);
     void ConstructL();
     void LoadSettings();
     void SaveSettings();
     void ApplySettingsL();
     TInt ItemCount() const;
-    TItemKind ItemKindAt(TInt aIndex, TInt& aCustomIndex) const;
-    void ItemText(TInt aIndex, TDes8& aText) const;
+    TItemKind ItemKindAt(TInt aIndex, TInt &aCustomIndex) const;
+    void ItemText(TInt aIndex, TDes8 &aText) const;
     TBool ItemAdjustable(TInt aIndex) const;
     void ActivateSelectionL();
     void AdjustSelectionL(TInt aDelta);
@@ -77,18 +97,18 @@ private:
     void NormalizeControlSelection();
     void MoveControlSelection(TInt aDelta);
     void ActivateControlSelectionL();
-    TBool HandleControlCaptureL(TInt aType, const TKeyEvent& aKey);
-    void ControlItemText(TInt aIndex, TDes8& aText) const;
-    TInt MapMenuKey(const TKeyEvent& aKey) const;
-    TBool HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent& aKey);
-    TBool TriggerMenuKey(TInt aMenuKey, TInt aType, const TKeyEvent& aKey);
-    void DrawMenuL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
-    void DrawHelpL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
-    void DrawControlsL(CGraphicsContext& aGc, CBitmapDevice& aDevice);
+    TBool HandleControlCaptureL(TInt aType, const TKeyEvent &aKey);
+    void ControlItemText(TInt aIndex, TDes8 &aText) const;
+    TInt MapMenuKey(const TKeyEvent &aKey) const;
+    TBool HandleSoftKeyL(TBool aLeft, TInt aType, const TKeyEvent &aKey);
+    TBool TriggerMenuKey(TInt aMenuKey, TInt aType, const TKeyEvent &aKey);
+    void DrawMenuL(CGraphicsContext &aGc, CBitmapDevice &aDevice);
+    void DrawHelpL(CGraphicsContext &aGc, CBitmapDevice &aDevice);
+    void DrawControlsL(CGraphicsContext &aGc, CBitmapDevice &aDevice);
 
-private:
-    MGameMenuHost& iHost;
-    RFs& iFs;
+  private:
+    MGameMenuHost &iHost;
+    RFs &iFs;
     TBool iOpen;
     TBool iHelpVisible;
     TBool iControlsVisible;

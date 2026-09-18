@@ -6,36 +6,36 @@
 
 class CPerfOverlay : public CBase
 {
-public:
-    static CPerfOverlay* NewL();
+  public:
+    static CPerfOverlay *NewL();
     ~CPerfOverlay();
 
     void Reset();
     void FrameRendered();
     TBool IsDirty() const;
     void ClearDirty();
-    void Compose(const CFbsBitmap& aFrameBitmap,
+    void Compose(const CFbsBitmap &aFrameBitmap,
                  TInt aX,
                  TInt aY);
-    const CFbsBitmap& Bitmap() const;
+    const CFbsBitmap &Bitmap() const;
 
-private:
+  private:
     CPerfOverlay();
     void ConstructL();
     TUint32 ReadCounter() const;
     void ReadRam();
-    void DrawMetricsTo(TUint8* aPixels,
+    void DrawMetricsTo(TUint8 *aPixels,
                        TInt aStride,
                        TInt aX,
                        TInt aY);
-    static void DrawText(TUint8* aPixels,
+    static void DrawText(TUint8 *aPixels,
                          TInt aStride,
                          TInt aX,
                          TInt aY,
-                         const TDesC8& aText);
+                         const TDesC8 &aText);
 
-private:
-    CFbsBitmap* iBitmap;
+  private:
+    CFbsBitmap *iBitmap;
     RThread iThread;
     TInt iCounterPeriodUs;
     TBool iUseNanoCounter;

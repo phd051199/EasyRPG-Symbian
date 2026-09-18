@@ -7,18 +7,18 @@
 
 class TGameLocator
 {
-public:
-    static void ListGameArchivesL(RFs& aFs,
-                                  CDesCArrayFlat& aDisplayNames,
-                                  CDesCArrayFlat& aArchivePaths,
-                                  RArray<TInt>& aArchiveSizes);
+  public:
+    static void ListGameArchivesL(RFs &aFs,
+                                  CDesCArrayFlat &aDisplayNames,
+                                  CDesCArrayFlat &aArchivePaths,
+                                  RArray<TInt> &aArchiveSizes);
 
-private:
-    static void AppendGameArchivesL(RFs& aFs,
-                                    const TDesC& aDirectory,
-                                    CDesCArrayFlat& aDisplayNames,
-                                    CDesCArrayFlat& aArchivePaths,
-                                    RArray<TInt>& aArchiveSizes);
+  private:
+    static void AppendGameArchivesL(RFs &aFs,
+                                    const TDesC &aDirectory,
+                                    CDesCArrayFlat &aDisplayNames,
+                                    CDesCArrayFlat &aArchivePaths,
+                                    RArray<TInt> &aArchiveSizes);
 };
 
 #endif

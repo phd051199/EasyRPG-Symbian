@@ -5,27 +5,22 @@
 
 namespace
 {
-// Region budgets, kept separate from PlayerConfig.h::KMaximumScreenUpdateRegions
-// (upstream damage tracking cap): these bound what presentation can batch.
-// ponytail: per-frame merging lives in core RenderDamage::OptimizeDirty; here
-// we only cap accumulation — more than KMaximumPresentRegions pending rects
-// means a heavy-change burst, which a full paint serves just as well.
 const TInt KDirtyRegionCapacity = 16;
 const TInt KMaximumPresentRegions = 4;
 
-TBool RectsEqual(const TRect& aFirst, const TRect& aSecond)
+TBool RectsEqual(const TRect &aFirst, const TRect &aSecond)
 {
     return aFirst.iTl.iX == aSecond.iTl.iX &&
-        aFirst.iTl.iY == aSecond.iTl.iY &&
-        aFirst.iBr.iX == aSecond.iBr.iX &&
-        aFirst.iBr.iY == aSecond.iBr.iY;
+           aFirst.iTl.iY == aSecond.iTl.iY &&
+           aFirst.iBr.iX == aSecond.iBr.iX &&
+           aFirst.iBr.iY == aSecond.iBr.iY;
 }
 
-}
+} // namespace
 
-CDisplaySurface* CDisplaySurface::NewL(const TSize& aSize)
+CDisplaySurface *CDisplaySurface::NewL(const TSize &aSize)
 {
-    CDisplaySurface* self = new (ELeave) CDisplaySurface;
+    CDisplaySurface *self = new (ELeave) CDisplaySurface;
     CleanupStack::PushL(self);
     self->ConstructL(aSize);
     CleanupStack::Pop(self);
@@ -43,7 +38,7 @@ CDisplaySurface::CDisplaySurface()
 {
 }
 
-void CDisplaySurface::ConstructL(const TSize& aSize)
+void CDisplaySurface::ConstructL(const TSize &aSize)
 {
     if (aSize.iWidth <= 0 || aSize.iHeight <= 0)
         User::Leave(KErrArgument);
@@ -61,12 +56,12 @@ CDisplaySurface::~CDisplaySurface()
     iBitmap = NULL;
 }
 
-const TSize& CDisplaySurface::Size() const
+const TSize &CDisplaySurface::Size() const
 {
     return iSize;
 }
 
-const CFbsBitmap& CDisplaySurface::Bitmap() const
+const CFbsBitmap &CDisplaySurface::Bitmap() const
 {
     return *iBitmap;
 }
@@ -86,7 +81,7 @@ TInt CDisplaySurface::DirtyRegionCount() const
     return iDirtyRegionCount;
 }
 
-const TRect& CDisplaySurface::DirtyRegion(TInt aIndex) const
+const TRect &CDisplaySurface::DirtyRegion(TInt aIndex) const
 {
     return iDirtyRegions[aIndex].iRect;
 }
@@ -96,7 +91,7 @@ TBool CDisplaySurface::HasPresentScroll() const
     return iPresentScrollX != 0 || iPresentScrollY != 0;
 }
 
-void CDisplaySurface::PresentScroll(TInt& aShiftX, TInt& aShiftY) const
+void CDisplaySurface::PresentScroll(TInt &aShiftX, TInt &aShiftY) const
 {
     aShiftX = iPresentScrollX;
     aShiftY = iPresentScrollY;
@@ -111,7 +106,7 @@ void CDisplaySurface::ClearDirtyRegions()
 
 void CDisplaySurface::ClearL()
 {
-    TUint16* destination = BeginRenderL();
+    TUint16 *destination = BeginRenderL();
     Mem::FillZ(destination, RenderStrideBytes() * iSize.iHeight);
     EndRender();
     iHasFrame = EFalse;
@@ -120,13 +115,13 @@ void CDisplaySurface::ClearL()
     iPresentScrollY = 0;
 }
 
-TUint16* CDisplaySurface::BeginRenderL()
+TUint16 *CDisplaySurface::BeginRenderL()
 {
     if (!iBitmap || iBitmapLocked)
         User::Leave(KErrNotReady);
     iBitmap->LockHeap();
     iBitmapLocked = ETrue;
-    TUint16* pixels = reinterpret_cast<TUint16*>(iBitmap->DataAddress());
+    TUint16 *pixels = reinterpret_cast<TUint16 *>(iBitmap->DataAddress());
     if (!pixels)
     {
         EndRender();

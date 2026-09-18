@@ -5,12 +5,12 @@
 
 class CEasyRpgDocument : public CAknDocument
 {
-public:
-    static CEasyRpgDocument* NewL(CEikApplication& aApplication);
+  public:
+    static CEasyRpgDocument *NewL(CEikApplication &aApplication);
 
-private:
-    explicit CEasyRpgDocument(CEikApplication& aApplication);
-    CEikAppUi* CreateAppUiL();
+  private:
+    explicit CEasyRpgDocument(CEikApplication &aApplication);
+    CEikAppUi *CreateAppUiL();
 };
 
 #endif

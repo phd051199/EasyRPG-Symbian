@@ -17,10 +17,10 @@ _LIT(KMovieTempBase, "movie");
 class CMovieBridge : public CBase,
                      public MVideoPlayerUtilityObserver
 {
-public:
-    static CMovieBridge* NewL(RWsSession& aWs,
-                              CWsScreenDevice& aScreenDevice,
-                              RWindowBase& aWindow)
+  public:
+    static CMovieBridge *NewL(RWsSession &aWs,
+                              CWsScreenDevice &aScreenDevice,
+                              RWindowBase &aWindow)
     {
         return new (ELeave) CMovieBridge(aWs, aScreenDevice, aWindow);
     }
@@ -32,7 +32,7 @@ public:
         iPlayer = NULL;
     }
 
-    void PlayL(const TDesC& aPath,
+    void PlayL(const TDesC &aPath,
                TInt aX,
                TInt aY,
                TInt aWidth,
@@ -126,7 +126,7 @@ public:
         return result;
     }
 
-private:
+  private:
     enum TState
     {
         EIdle = 0,
@@ -134,9 +134,9 @@ private:
         EDone = 2
     };
 
-    CMovieBridge(RWsSession& aWs,
-                 CWsScreenDevice& aScreenDevice,
-                 RWindowBase& aWindow)
+    CMovieBridge(RWsSession &aWs,
+                 CWsScreenDevice &aScreenDevice,
+                 RWindowBase &aWindow)
         : iWs(aWs),
           iScreenDevice(aScreenDevice),
           iWindow(aWindow),
@@ -234,7 +234,7 @@ private:
             iPlayer->Play();
     }
 
-    void MvpuoFrameReady(CFbsBitmap&, TInt)
+    void MvpuoFrameReady(CFbsBitmap &, TInt)
     {
     }
 
@@ -243,15 +243,15 @@ private:
         Finish(aError);
     }
 
-    void MvpuoEvent(const TMMFEvent&)
+    void MvpuoEvent(const TMMFEvent &)
     {
     }
 
-private:
-    RWsSession& iWs;
-    CWsScreenDevice& iScreenDevice;
-    RWindowBase& iWindow;
-    CVideoPlayerUtility* iPlayer;
+  private:
+    RWsSession &iWs;
+    CWsScreenDevice &iScreenDevice;
+    RWindowBase &iWindow;
+    CVideoPlayerUtility *iPlayer;
     TInt iState;
     TInt iError;
     TBool iDeleteFile;
@@ -262,12 +262,12 @@ private:
     TRect iTargetRect;
 };
 
-CMovieBridge* gMovieBridge = NULL;
-}
+CMovieBridge *gMovieBridge = NULL;
+} // namespace
 
-void EasyRpgMovieInitializeL(RWsSession& aWs,
-                             CWsScreenDevice& aScreenDevice,
-                             RWindowBase& aWindow)
+void EasyRpgMovieInitializeL(RWsSession &aWs,
+                             CWsScreenDevice &aScreenDevice,
+                             RWindowBase &aWindow)
 {
     delete gMovieBridge;
     gMovieBridge = CMovieBridge::NewL(aWs, aScreenDevice, aWindow);
@@ -295,22 +295,22 @@ TBool EasyRpgMovieConsumeRedraw(void)
     return gMovieBridge && gMovieBridge->ConsumeRedraw();
 }
 
-extern "C" int EasyRpgMovieStart(const char* aPath,
-                                  int aX,
-                                  int aY,
-                                  int aWidth,
-                                  int aHeight)
+extern "C" int EasyRpgMovieStart(const char *aPath,
+                                 int aX,
+                                 int aY,
+                                 int aWidth,
+                                 int aHeight)
 {
     if (!gMovieBridge || !aPath || !aPath[0])
         return KErrNotReady;
 
     TInt error = KErrNone;
     TRAP(error,
-    {
-        TFileName path;
-        TEncoding::Utf8CStringToUnicodeL(aPath, path);
-        gMovieBridge->PlayL(path, aX, aY, aWidth, aHeight);
-    });
+         {
+             TFileName path;
+             TEncoding::Utf8CStringToUnicodeL(aPath, path);
+             gMovieBridge->PlayL(path, aX, aY, aWidth, aHeight);
+         });
     if (error != KErrNone)
         gMovieBridge->Stop(ETrue);
     return error;

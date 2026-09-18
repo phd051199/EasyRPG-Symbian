@@ -4,10 +4,11 @@
 #define F_OK 0
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-int access(const char* path, int mode);
+    int access(const char *path, int mode);
 
 #ifdef __cplusplus
 }

@@ -9,18 +9,22 @@ namespace
 {
 RFs gLegacyEncodingFs;
 TBool gLegacyEncodingFsConnected = EFalse;
-CCnvCharacterSetConverter* gLegacyEncodingConverter = NULL;
-CArrayFix<CCnvCharacterSetConverter::SCharacterSet>* gLegacyEncodingCharsets = NULL;
+CCnvCharacterSetConverter *gLegacyEncodingConverter = NULL;
+CArrayFix<CCnvCharacterSetConverter::SCharacterSet> *gLegacyEncodingCharsets = NULL;
 TUint gLegacyEncodingPrepared = 0;
 
 TUint CharacterSetForCodepage(TUint aCodepage)
 {
     switch (aCodepage)
     {
-    case 932: return KCharacterSetIdentifierShiftJis;
-    case 936: return KCharacterSetIdentifierGbk;
-    case 950: return KCharacterSetIdentifierBig5;
-    default: return 0;
+    case 932:
+        return KCharacterSetIdentifierShiftJis;
+    case 936:
+        return KCharacterSetIdentifierGbk;
+    case 950:
+        return KCharacterSetIdentifierBig5;
+    default:
+        return 0;
     }
 }
 
@@ -72,15 +76,15 @@ TInt CoreEncodingStatus(TInt aError)
 }
 
 void LegacyToUtf16L(TUint aCodepage,
-                    const unsigned char* aSource,
+                    const unsigned char *aSource,
                     TUint aSourceLength,
-                    unsigned short* aDestination,
+                    unsigned short *aDestination,
                     TUint aDestinationCapacity,
-                    unsigned int& aDestinationLength)
+                    unsigned int &aDestinationLength)
 {
     PrepareLegacyEncodingL(aCodepage);
-    TPtrC8 source(reinterpret_cast<const TUint8*>(aSource), static_cast<TInt>(aSourceLength));
-    TPtr16 destination(reinterpret_cast<TUint16*>(aDestination), 0, static_cast<TInt>(aDestinationCapacity));
+    TPtrC8 source(reinterpret_cast<const TUint8 *>(aSource), static_cast<TInt>(aSourceLength));
+    TPtr16 destination(reinterpret_cast<TUint16 *>(aDestination), 0, static_cast<TInt>(aDestinationCapacity));
     TInt state = CCnvCharacterSetConverter::KStateDefault;
     TInt unconvertible = 0;
     const TInt remaining = gLegacyEncodingConverter->ConvertToUnicode(destination, source, state, unconvertible);
@@ -94,15 +98,15 @@ void LegacyToUtf16L(TUint aCodepage,
 }
 
 void Utf16ToLegacyL(TUint aCodepage,
-                    const unsigned short* aSource,
+                    const unsigned short *aSource,
                     TUint aSourceLength,
-                    unsigned char* aDestination,
+                    unsigned char *aDestination,
                     TUint aDestinationCapacity,
-                    unsigned int& aDestinationLength)
+                    unsigned int &aDestinationLength)
 {
     PrepareLegacyEncodingL(aCodepage);
-    TPtrC16 source(reinterpret_cast<const TUint16*>(aSource), static_cast<TInt>(aSourceLength));
-    TPtr8 destination(reinterpret_cast<TUint8*>(aDestination), 0, static_cast<TInt>(aDestinationCapacity));
+    TPtrC16 source(reinterpret_cast<const TUint16 *>(aSource), static_cast<TInt>(aSourceLength));
+    TPtr8 destination(reinterpret_cast<TUint8 *>(aDestination), 0, static_cast<TInt>(aDestinationCapacity));
     TInt unconvertible = 0;
     const TInt remaining = gLegacyEncodingConverter->ConvertFromUnicode(destination, source, unconvertible);
     if (remaining < 0)
@@ -123,26 +127,52 @@ TUint16 ComposeJapaneseKana(TUint16 aBase, TUint16 aMark)
 
     if (dakuten)
     {
-        if (aBase == 0x3046) return 0x3094;
-        if (aBase == 0x309d) return 0x309e;
-        if (aBase == 0x30a6) return 0x30f4;
-        if (aBase == 0x30fd) return 0x30fe;
+        if (aBase == 0x3046)
+            return 0x3094;
+        if (aBase == 0x309d)
+            return 0x309e;
+        if (aBase == 0x30a6)
+            return 0x30f4;
+        if (aBase == 0x30fd)
+            return 0x30fe;
         if (aBase >= 0x30ef && aBase <= 0x30f2)
             return static_cast<TUint16>(0x30f7 + (aBase - 0x30ef));
     }
 
     const TUint16 hiraganaDakuten[] =
-    {
-        0x304b,0x304d,0x304f,0x3051,0x3053,
-        0x3055,0x3057,0x3059,0x305b,0x305d,
-        0x305f,0x3061,0x3064,0x3066,0x3068
-    };
+        {
+            0x304b,
+            0x304d,
+            0x304f,
+            0x3051,
+            0x3053,
+            0x3055,
+            0x3057,
+            0x3059,
+            0x305b,
+            0x305d,
+            0x305f,
+            0x3061,
+            0x3064,
+            0x3066,
+            0x3068};
     const TUint16 katakanaDakuten[] =
-    {
-        0x30ab,0x30ad,0x30af,0x30b1,0x30b3,
-        0x30b5,0x30b7,0x30b9,0x30bb,0x30bd,
-        0x30bf,0x30c1,0x30c4,0x30c6,0x30c8
-    };
+        {
+            0x30ab,
+            0x30ad,
+            0x30af,
+            0x30b1,
+            0x30b3,
+            0x30b5,
+            0x30b7,
+            0x30b9,
+            0x30bb,
+            0x30bd,
+            0x30bf,
+            0x30c1,
+            0x30c4,
+            0x30c6,
+            0x30c8};
 
     if (dakuten)
     {
@@ -153,8 +183,8 @@ TUint16 ComposeJapaneseKana(TUint16 aBase, TUint16 aMark)
         }
     }
 
-    const TUint16 hiraganaH[] = {0x306f,0x3072,0x3075,0x3078,0x307b};
-    const TUint16 katakanaH[] = {0x30cf,0x30d2,0x30d5,0x30d8,0x30db};
+    const TUint16 hiraganaH[] = {0x306f, 0x3072, 0x3075, 0x3078, 0x307b};
+    const TUint16 katakanaH[] = {0x30cf, 0x30d2, 0x30d5, 0x30d8, 0x30db};
     for (TInt index = 0; index < 5; ++index)
     {
         if (aBase == hiraganaH[index] || aBase == katakanaH[index])
@@ -163,15 +193,15 @@ TUint16 ComposeJapaneseKana(TUint16 aBase, TUint16 aMark)
 
     return 0;
 }
-}
+} // namespace
 
 #ifndef EASYRPG_LAUNCHER_PROCESS
 extern "C" int EasyRpgPlatformLegacyToUtf16(unsigned int aCodepage,
-                                             const unsigned char* aSource,
-                                             unsigned int aSourceLength,
-                                             unsigned short* aDestination,
-                                             unsigned int aDestinationCapacity,
-                                             unsigned int* aDestinationLength)
+                                            const unsigned char *aSource,
+                                            unsigned int aSourceLength,
+                                            unsigned short *aDestination,
+                                            unsigned int aDestinationCapacity,
+                                            unsigned int *aDestinationLength)
 {
     if (!aDestinationLength || (!aSource && aSourceLength != 0) ||
         (!aDestination && aDestinationCapacity != 0))
@@ -179,19 +209,18 @@ extern "C" int EasyRpgPlatformLegacyToUtf16(unsigned int aCodepage,
     *aDestinationLength = 0;
     unsigned int written = 0;
     TInt error = KErrNone;
-    TRAP(error, LegacyToUtf16L(aCodepage, aSource, aSourceLength,
-                               aDestination, aDestinationCapacity, written));
+    TRAP(error, LegacyToUtf16L(aCodepage, aSource, aSourceLength, aDestination, aDestinationCapacity, written));
     if (error == KErrNone)
         *aDestinationLength = written;
     return CoreEncodingStatus(error);
 }
 
 extern "C" int EasyRpgPlatformUtf16ToLegacy(unsigned int aCodepage,
-                                             const unsigned short* aSource,
-                                             unsigned int aSourceLength,
-                                             unsigned char* aDestination,
-                                             unsigned int aDestinationCapacity,
-                                             unsigned int* aDestinationLength)
+                                            const unsigned short *aSource,
+                                            unsigned int aSourceLength,
+                                            unsigned char *aDestination,
+                                            unsigned int aDestinationCapacity,
+                                            unsigned int *aDestinationLength)
 {
     if (!aDestinationLength || (!aSource && aSourceLength != 0) ||
         (!aDestination && aDestinationCapacity != 0))
@@ -199,16 +228,15 @@ extern "C" int EasyRpgPlatformUtf16ToLegacy(unsigned int aCodepage,
     *aDestinationLength = 0;
     unsigned int written = 0;
     TInt error = KErrNone;
-    TRAP(error, Utf16ToLegacyL(aCodepage, aSource, aSourceLength,
-                               aDestination, aDestinationCapacity, written));
+    TRAP(error, Utf16ToLegacyL(aCodepage, aSource, aSourceLength, aDestination, aDestinationCapacity, written));
     if (error == KErrNone)
         *aDestinationLength = written;
     return CoreEncodingStatus(error);
 }
 #endif
 
-void TEncoding::ShiftJisToUnicodeL(const TDesC8& aSource,
-                                   TDes& aDestination)
+void TEncoding::ShiftJisToUnicodeL(const TDesC8 &aSource,
+                                   TDes &aDestination)
 {
     aDestination.Zero();
     if (aSource.Length() == 0)
@@ -219,7 +247,10 @@ void TEncoding::ShiftJisToUnicodeL(const TDesC8& aSource,
     TInt state = CCnvCharacterSetConverter::KStateDefault;
     TInt unconvertible = 0;
     const TInt remaining = gLegacyEncodingConverter->ConvertToUnicode(
-        aDestination, aSource, state, unconvertible);
+        aDestination,
+        aSource,
+        state,
+        unconvertible);
     if (remaining < 0)
         User::Leave(remaining);
     if (remaining != 0)
@@ -228,11 +259,11 @@ void TEncoding::ShiftJisToUnicodeL(const TDesC8& aSource,
         User::Leave(KErrCorrupt);
 #else
     unsigned int written = 0;
-    TUint16* destination = const_cast<TUint16*>(aDestination.Ptr());
+    TUint16 *destination = const_cast<TUint16 *>(aDestination.Ptr());
     const TInt result = EasyRpgCoreCp932ToUtf16(
-        reinterpret_cast<const unsigned char*>(aSource.Ptr()),
+        reinterpret_cast<const unsigned char *>(aSource.Ptr()),
         static_cast<unsigned int>(aSource.Length()),
-        reinterpret_cast<unsigned short*>(destination),
+        reinterpret_cast<unsigned short *>(destination),
         static_cast<unsigned int>(aDestination.MaxLength()),
         &written);
 
@@ -248,8 +279,8 @@ void TEncoding::ShiftJisToUnicodeL(const TDesC8& aSource,
     NormalizeJapaneseNfcInPlace(aDestination);
 }
 
-void TEncoding::Utf8ToUnicodeL(const TDesC8& aSource,
-                               TDes& aDestination)
+void TEncoding::Utf8ToUnicodeL(const TDesC8 &aSource,
+                               TDes &aDestination)
 {
     aDestination.Zero();
     if (aSource.Length() == 0)
@@ -264,26 +295,26 @@ void TEncoding::Utf8ToUnicodeL(const TDesC8& aSource,
     NormalizeJapaneseNfcInPlace(aDestination);
 }
 
-void TEncoding::Utf8CStringToUnicodeL(const char* aSource,
-                                      TDes& aDestination)
+void TEncoding::Utf8CStringToUnicodeL(const char *aSource,
+                                      TDes &aDestination)
 {
     if (!aSource)
         User::Leave(KErrArgument);
 
     const TInt maxSourceBytes = aDestination.MaxLength() > KMaxTInt / 4
-        ? KMaxTInt
-        : aDestination.MaxLength() * 4;
+                                    ? KMaxTInt
+                                    : aDestination.MaxLength() * 4;
     TInt length = 0;
     while (length < maxSourceBytes && aSource[length] != 0)
         ++length;
     if (length == maxSourceBytes)
         User::Leave(KErrOverflow);
-    const TPtrC8 source(reinterpret_cast<const TUint8*>(aSource), length);
+    const TPtrC8 source(reinterpret_cast<const TUint8 *>(aSource), length);
     Utf8ToUnicodeL(source, aDestination);
 }
 
-void TEncoding::UnicodeToUtf8L(const TDesC& aSource,
-                               TDes8& aDestination)
+void TEncoding::UnicodeToUtf8L(const TDesC &aSource,
+                               TDes8 &aDestination)
 {
     aDestination.Zero();
     const TInt remaining = CnvUtfConverter::ConvertFromUnicodeToUtf8(aDestination, aSource);
@@ -293,8 +324,8 @@ void TEncoding::UnicodeToUtf8L(const TDesC& aSource,
         User::Leave(KErrOverflow);
 }
 
-void TEncoding::UnicodeToUtf8CStringL(const TDesC& aSource,
-                                      TDes8& aDestination)
+void TEncoding::UnicodeToUtf8CStringL(const TDesC &aSource,
+                                      TDes8 &aDestination)
 {
     UnicodeToUtf8L(aSource, aDestination);
     if (aDestination.Length() >= aDestination.MaxLength())
@@ -302,7 +333,7 @@ void TEncoding::UnicodeToUtf8CStringL(const TDesC& aSource,
     aDestination.Append(static_cast<TUint8>(0));
 }
 
-void TEncoding::NormalizeJapaneseNfcInPlace(TDes& aText)
+void TEncoding::NormalizeJapaneseNfcInPlace(TDes &aText)
 {
     TInt writePosition = 0;
     for (TInt readPosition = 0; readPosition < aText.Length(); ++readPosition)

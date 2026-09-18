@@ -2,13 +2,13 @@
 
 namespace
 {
-TUint16 ReadLittleEndian16(const TUint8* aData)
+TUint16 ReadLittleEndian16(const TUint8 *aData)
 {
     return static_cast<TUint16>(aData[0]) |
            static_cast<TUint16>(static_cast<TUint16>(aData[1]) << 8);
 }
 
-TUint32 ReadLittleEndian32(const TUint8* aData)
+TUint32 ReadLittleEndian32(const TUint8 *aData)
 {
     return static_cast<TUint32>(aData[0]) |
            (static_cast<TUint32>(aData[1]) << 8) |
@@ -34,16 +34,29 @@ struct TAdpcmState
     TInt iCoef2;
 };
 
-TInt DecodeAdpcmNibble(TAdpcmState& aState, TUint8 aNibble)
+TInt DecodeAdpcmNibble(TAdpcmState &aState, TUint8 aNibble)
 {
     static const TInt KAdaptation[16] =
-    {
-        230, 230, 230, 230, 307, 409, 512, 614,
-        768, 614, 512, 409, 307, 230, 230, 230
-    };
+        {
+            230,
+            230,
+            230,
+            230,
+            307,
+            409,
+            512,
+            614,
+            768,
+            614,
+            512,
+            409,
+            307,
+            230,
+            230,
+            230};
     const TInt signedNibble = (aNibble & 8u)
-        ? static_cast<TInt>(aNibble) - 16
-        : aNibble;
+                                  ? static_cast<TInt>(aNibble) - 16
+                                  : aNibble;
     const TInt64 predictor =
         static_cast<TInt64>(aState.iSample1) * aState.iCoef1 +
         static_cast<TInt64>(aState.iSample2) * aState.iCoef2;
@@ -61,7 +74,7 @@ TInt DecodeAdpcmNibble(TAdpcmState& aState, TUint8 aNibble)
     return prediction;
 }
 
-void WritePcm16Sample(TUint8* aDestination, TInt& aSampleIndex, TInt aValue)
+void WritePcm16Sample(TUint8 *aDestination, TInt &aSampleIndex, TInt aValue)
 {
     const TUint16 encoded = static_cast<TUint16>(static_cast<TInt16>(aValue));
     aDestination[aSampleIndex * 2] = static_cast<TUint8>(encoded & 0xffu);
@@ -69,13 +82,13 @@ void WritePcm16Sample(TUint8* aDestination, TInt& aSampleIndex, TInt aValue)
     ++aSampleIndex;
 }
 
-HBufC8* DecodeMsAdpcmLC(const TUint8* aFormat,
+HBufC8 *DecodeMsAdpcmLC(const TUint8 *aFormat,
                         TUint32 aFormatBytes,
-                        const TUint8* aData,
+                        const TUint8 *aData,
                         TUint32 aDataBytes,
-                        TInt& aFrameCount,
-                        TInt& aSampleRate,
-                        TInt& aChannels)
+                        TInt &aFrameCount,
+                        TInt &aSampleRate,
+                        TInt &aChannels)
 {
     if (!aFormat || aFormatBytes < 22 || !aData || aDataBytes == 0)
         User::Leave(KErrCorrupt);
@@ -100,10 +113,10 @@ HBufC8* DecodeMsAdpcmLC(const TUint8* aFormat,
     if (maxFrames64 <= 0 || maxFrames64 > KMaxTInt / (channels * 2))
         User::Leave(KErrTooBig);
 
-    HBufC8* pcm = HBufC8::NewLC(static_cast<TInt>(maxFrames64) * channels * 2);
+    HBufC8 *pcm = HBufC8::NewLC(static_cast<TInt>(maxFrames64) * channels * 2);
     TPtr8 output = pcm->Des();
     output.SetLength(output.MaxLength());
-    TUint8* destination = const_cast<TUint8*>(output.Ptr());
+    TUint8 *destination = const_cast<TUint8 *>(output.Ptr());
     TInt writeSample = 0;
     TUint32 dataOffset = 0;
 
@@ -112,7 +125,7 @@ HBufC8* DecodeMsAdpcmLC(const TUint8* aFormat,
         TUint32 blockBytes = aDataBytes - dataOffset;
         if (blockBytes > static_cast<TUint32>(blockAlign))
             blockBytes = blockAlign;
-        const TUint8* block = aData + dataOffset;
+        const TUint8 *block = aData + dataOffset;
         const TInt headerBytes = channels * 7;
         if (blockBytes < static_cast<TUint32>(headerBytes))
             User::Leave(KErrCorrupt);
@@ -124,7 +137,7 @@ HBufC8* DecodeMsAdpcmLC(const TUint8* aFormat,
             const TInt predictor = block[channel];
             if (predictor >= coefficientCount)
                 User::Leave(KErrCorrupt);
-            const TUint8* coefficient = aFormat + 22 + predictor * 4;
+            const TUint8 *coefficient = aFormat + 22 + predictor * 4;
             state[channel].iCoef1 = static_cast<TInt16>(ReadLittleEndian16(coefficient));
             state[channel].iCoef2 = static_cast<TInt16>(ReadLittleEndian16(coefficient + 2));
         }
@@ -196,46 +209,46 @@ HBufC8* DecodeMsAdpcmLC(const TUint8* aFormat,
     aChannels = channels;
     return pcm;
 }
-}
+} // namespace
 
-HBufC8* TAudioDecode::DecodeWavePcm16LC(const TDesC8& aFile,
-                                        TInt& aFrameCount,
-                                        TInt& aSampleRate,
-                                        TInt& aChannels)
+HBufC8 *TAudioDecode::DecodeWavePcm16LC(const TDesC8 &aFile,
+                                        TInt &aFrameCount,
+                                        TInt &aSampleRate,
+                                        TInt &aChannels)
 {
     aFrameCount = 0;
     aSampleRate = 0;
     aChannels = 0;
 
     if (aFile.Length() < 12 ||
-        Mem::Compare(aFile.Ptr(), 4, reinterpret_cast<const TUint8*>("RIFF"), 4) != 0 ||
-        Mem::Compare(aFile.Ptr() + 8, 4, reinterpret_cast<const TUint8*>("WAVE"), 4) != 0)
+        Mem::Compare(aFile.Ptr(), 4, reinterpret_cast<const TUint8 *>("RIFF"), 4) != 0 ||
+        Mem::Compare(aFile.Ptr() + 8, 4, reinterpret_cast<const TUint8 *>("WAVE"), 4) != 0)
         User::Leave(KErrCorrupt);
 
     TUint16 format = 0;
-    const TUint8* formatData = NULL;
+    const TUint8 *formatData = NULL;
     TUint32 formatBytes = 0;
     TUint16 channels = 0;
     TUint32 sampleRate = 0;
     TUint16 blockAlign = 0;
     TUint16 bits = 0;
-    const TUint8* sampleData = NULL;
+    const TUint8 *sampleData = NULL;
     TUint32 sampleBytes = 0;
 
     TInt position = 12;
     while (position <= aFile.Length() - 8)
     {
-        const TUint8* chunk = aFile.Ptr() + position;
+        const TUint8 *chunk = aFile.Ptr() + position;
         const TUint32 chunkSize = ReadLittleEndian32(chunk + 4);
         position += 8;
         if (chunkSize > static_cast<TUint32>(aFile.Length() - position))
             User::Leave(KErrCorrupt);
 
-        if (Mem::Compare(chunk, 4, reinterpret_cast<const TUint8*>("fmt "), 4) == 0)
+        if (Mem::Compare(chunk, 4, reinterpret_cast<const TUint8 *>("fmt "), 4) == 0)
         {
             if (chunkSize < 16)
                 User::Leave(KErrCorrupt);
-            const TUint8* fmt = aFile.Ptr() + position;
+            const TUint8 *fmt = aFile.Ptr() + position;
             formatData = fmt;
             formatBytes = chunkSize;
             format = ReadLittleEndian16(fmt);
@@ -244,7 +257,7 @@ HBufC8* TAudioDecode::DecodeWavePcm16LC(const TDesC8& aFile,
             blockAlign = ReadLittleEndian16(fmt + 12);
             bits = ReadLittleEndian16(fmt + 14);
         }
-        else if (Mem::Compare(chunk, 4, reinterpret_cast<const TUint8*>("data"), 4) == 0)
+        else if (Mem::Compare(chunk, 4, reinterpret_cast<const TUint8 *>("data"), 4) == 0)
         {
             sampleData = aFile.Ptr() + position;
             sampleBytes = chunkSize;
@@ -288,10 +301,10 @@ HBufC8* TAudioDecode::DecodeWavePcm16LC(const TDesC8& aFile,
         User::Leave(KErrTooBig);
 
     const TInt pcmBytes = static_cast<TInt>(frames) * channels * 2;
-    HBufC8* pcm = HBufC8::NewLC(pcmBytes);
+    HBufC8 *pcm = HBufC8::NewLC(pcmBytes);
     TPtr8 output = pcm->Des();
     output.SetLength(pcmBytes);
-    TUint8* destination = const_cast<TUint8*>(output.Ptr());
+    TUint8 *destination = const_cast<TUint8 *>(output.Ptr());
     Mem::Copy(destination, sampleData, pcmBytes);
 
     aFrameCount = static_cast<TInt>(frames);

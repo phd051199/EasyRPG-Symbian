@@ -8,41 +8,46 @@ class CUpstreamPlayer;
 
 struct TEasyRpgDirtyRegionSlot
 {
-    TEasyRpgDirtyRegionSlot() : iRect(0, 0, 0, 0) {}
+    TEasyRpgDirtyRegionSlot() : iRect(0, 0, 0, 0)
+    {
+    }
     TRect iRect;
 };
 
 class CDisplaySurface : public CBase
 {
-public:
-    static CDisplaySurface* NewL(const TSize& aSize);
+  public:
+    static CDisplaySurface *NewL(const TSize &aSize);
     ~CDisplaySurface();
 
     void ClearL();
-    TUint16* BeginRenderL();
+    TUint16 *BeginRenderL();
     void EndRender();
     TInt RenderStrideBytes() const;
     void PresentL();
-    const TSize& Size() const;
-    const CFbsBitmap& Bitmap() const;
+    const TSize &Size() const;
+    const CFbsBitmap &Bitmap() const;
     TBool HasFrame() const;
     TBool HasDirtyRegions() const;
     TInt DirtyRegionCount() const;
-    const TRect& DirtyRegion(TInt aIndex) const;
+    const TRect &DirtyRegion(TInt aIndex) const;
     TBool HasPresentScroll() const;
-    void PresentScroll(TInt& aShiftX, TInt& aShiftY) const;
+    void PresentScroll(TInt &aShiftX, TInt &aShiftY) const;
     void ClearDirtyRegions();
 
-private:
+  private:
     CDisplaySurface();
-    void ConstructL(const TSize& aSize);
+    void ConstructL(const TSize &aSize);
 
-private:
-    CFbsBitmap* iBitmap;
+  private:
+    CFbsBitmap *iBitmap;
     TBool iBitmapLocked;
     TSize iSize;
     TBool iHasFrame;
-    enum { KMaxDirtyRegions = 16 };
+    enum
+    {
+        KMaxDirtyRegions = 16
+    };
     TEasyRpgDirtyRegionSlot iDirtyRegions[KMaxDirtyRegions];
     TInt iDirtyRegionCount;
     TInt iPresentScrollX;

@@ -32,9 +32,9 @@ inline TInt ClampVolume(TInt aVolume)
     return aVolume;
 }
 
-HBufC8* ReadAudioFileLC(const TDesC& aPath, TInt aMaxBytes);
+HBufC8 *ReadAudioFileLC(const TDesC &aPath, TInt aMaxBytes);
 
-void PlayBgmL(const TDesC& aPath, TInt aVolume, TInt aPitch, TInt aFadeIn);
+void PlayBgmL(const TDesC &aPath, TInt aVolume, TInt aPitch, TInt aFadeIn);
 void StopBgm();
 void PauseBgm();
 void ResumeBgm();
@@ -45,22 +45,22 @@ TBool IsBgmPlaying();
 TBool BgmPlayedOnce();
 TUint32 BgmTicks();
 
-void PlayBgsL(const TDesC& aPath, TInt aVolume, TInt aPitch);
+void PlayBgsL(const TDesC &aPath, TInt aVolume, TInt aPitch);
 void StopBgs();
 void SetBgsVolumeSmoothed(TInt aVolume);
 TBool IsBgsActive();
 
-void PlayMeL(const TDesC& aPath, TInt aVolume, TInt aPitch);
+void PlayMeL(const TDesC &aPath, TInt aVolume, TInt aPitch);
 void StopMe();
 void SetMeVolumeSmoothed(TInt aVolume);
 TBool IsMeActive();
 
-void PlaySeL(const TDesC& aPath, TInt aVolume);
+void PlaySeL(const TDesC &aPath, TInt aVolume);
 void StopSe();
 
 void SetMasterVolume(TInt aVolume);
 TInt ConsumeError();
 void Shutdown();
-}
+} // namespace TNativeAudio
 
 #endif

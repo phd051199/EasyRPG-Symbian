@@ -15,23 +15,134 @@ const int KGainScale = 2048;
 const uint32_t KInitialPhase = 0x40000000u;
 
 const uint32_t KNoteStep[128] = {
-1592507, 1687203, 1787529, 1893821, 2006434, 2125742, 2252146, 2386065,
-2527948, 2678268, 2837526, 3006254, 3185015, 3374406, 3575058, 3787642,
-4012867, 4251485, 4504291, 4772130, 5055896, 5356535, 5675051, 6012507,
-6370030, 6748811, 7150117, 7575285, 8025735, 8502970, 9008582, 9544261,
-10111792, 10713070, 11350103, 12025015, 12740059, 13497623, 14300233, 15150569,
-16051469, 17005939, 18017165, 19088521, 20223584, 21426141, 22700205, 24050030,
-25480119, 26995246, 28600467, 30301139, 32102938, 34011878, 36034330, 38177043,
-40447168, 42852281, 45400411, 48100060, 50960238, 53990491, 57200933, 60602278,
-64205876, 68023757, 72068660, 76354085, 80894335, 85704563, 90800821, 96200119,
-101920476, 107980983, 114401866, 121204555, 128411753, 136047513, 144137319, 152708170,
-161788671, 171409126, 181601643, 192400238, 203840952, 215961966, 228803732, 242409110,
-256823506, 272095026, 288274639, 305416341, 323577341, 342818251, 363203285, 384800477,
-407681904, 431923931, 457607465, 484818220, 513647012, 544190053, 576549277, 610832681,
-647154683, 685636503, 726406571, 769600953, 815363807, 863847862, 915214929, 969636441,
-1027294024, 1088380105, 1153098554, 1221665363, 1294309365, 1371273005, 1452813141, 1539201906,
-1630727614, 1727695724, 1830429858, 1939272882, 2054588048, 2176760211, 2306197109, 2443330725
-};
+    1592507,
+    1687203,
+    1787529,
+    1893821,
+    2006434,
+    2125742,
+    2252146,
+    2386065,
+    2527948,
+    2678268,
+    2837526,
+    3006254,
+    3185015,
+    3374406,
+    3575058,
+    3787642,
+    4012867,
+    4251485,
+    4504291,
+    4772130,
+    5055896,
+    5356535,
+    5675051,
+    6012507,
+    6370030,
+    6748811,
+    7150117,
+    7575285,
+    8025735,
+    8502970,
+    9008582,
+    9544261,
+    10111792,
+    10713070,
+    11350103,
+    12025015,
+    12740059,
+    13497623,
+    14300233,
+    15150569,
+    16051469,
+    17005939,
+    18017165,
+    19088521,
+    20223584,
+    21426141,
+    22700205,
+    24050030,
+    25480119,
+    26995246,
+    28600467,
+    30301139,
+    32102938,
+    34011878,
+    36034330,
+    38177043,
+    40447168,
+    42852281,
+    45400411,
+    48100060,
+    50960238,
+    53990491,
+    57200933,
+    60602278,
+    64205876,
+    68023757,
+    72068660,
+    76354085,
+    80894335,
+    85704563,
+    90800821,
+    96200119,
+    101920476,
+    107980983,
+    114401866,
+    121204555,
+    128411753,
+    136047513,
+    144137319,
+    152708170,
+    161788671,
+    171409126,
+    181601643,
+    192400238,
+    203840952,
+    215961966,
+    228803732,
+    242409110,
+    256823506,
+    272095026,
+    288274639,
+    305416341,
+    323577341,
+    342818251,
+    363203285,
+    384800477,
+    407681904,
+    431923931,
+    457607465,
+    484818220,
+    513647012,
+    544190053,
+    576549277,
+    610832681,
+    647154683,
+    685636503,
+    726406571,
+    769600953,
+    815363807,
+    863847862,
+    915214929,
+    969636441,
+    1027294024,
+    1088380105,
+    1153098554,
+    1221665363,
+    1294309365,
+    1371273005,
+    1452813141,
+    1539201906,
+    1630727614,
+    1727695724,
+    1830429858,
+    1939272882,
+    2054588048,
+    2176760211,
+    2306197109,
+    2443330725};
 
 enum TWave
 {
@@ -43,14 +154,14 @@ enum TWave
 
 struct TMemoryReader
 {
-    const unsigned char* data;
+    const unsigned char *data;
     int size;
     int position;
 };
 
-int MemoryGetc(void* context)
+int MemoryGetc(void *context)
 {
-    TMemoryReader* reader = static_cast<TMemoryReader*>(context);
+    TMemoryReader *reader = static_cast<TMemoryReader *>(context);
     if (!reader || reader->position >= reader->size)
         return EOF;
     return reader->data[reader->position++];
@@ -88,7 +199,7 @@ struct TVoice
 
 class CMidiLite : public midisequencer::output
 {
-public:
+  public:
     CMidiLite(int sampleRate, int pitch)
         : iSampleRate(sampleRate),
           iPitch(pitch),
@@ -101,7 +212,7 @@ public:
         ResetState();
     }
 
-    bool Open(const unsigned char* data, int size)
+    bool Open(const unsigned char *data, int size)
     {
         if (!data || size <= 0 || iSampleRate <= 0)
             return false;
@@ -122,7 +233,7 @@ public:
         return true;
     }
 
-    int Render(short* output, int frames)
+    int Render(short *output, int frames)
     {
         if (!iLoaded || !output || frames <= 0)
             return 0;
@@ -184,40 +295,40 @@ public:
             return;
         switch (status & 0xf0)
         {
-            case 0x80:
+        case 0x80:
+            NoteOff(channel, first);
+            break;
+        case 0x90:
+            if (second == 0)
                 NoteOff(channel, first);
-                break;
-            case 0x90:
-                if (second == 0)
-                    NoteOff(channel, first);
-                else
-                    NoteOn(channel, first, second);
-                break;
-            case 0xb0:
-                ControlChange(channel, first, second);
-                break;
-            case 0xc0:
-                iChannels[channel].program = first;
-                break;
-            case 0xe0:
-                iChannels[channel].pitch = (second << 7) | first;
-                RefreshPitch(channel);
-                break;
-            default:
-                break;
+            else
+                NoteOn(channel, first, second);
+            break;
+        case 0xb0:
+            ControlChange(channel, first, second);
+            break;
+        case 0xc0:
+            iChannels[channel].program = first;
+            break;
+        case 0xe0:
+            iChannels[channel].pitch = (second << 7) | first;
+            RefreshPitch(channel);
+            break;
+        default:
+            break;
         }
     }
 
-    void sysex_message(int, const void* data, std::size_t size)
+    void sysex_message(int, const void *data, std::size_t size)
     {
         if (!data || size < 6)
             return;
-        const unsigned char* bytes = static_cast<const unsigned char*>(data);
+        const unsigned char *bytes = static_cast<const unsigned char *>(data);
         if (bytes[0] == 0xf0 && bytes[1] == 0x7e && bytes[3] == 0x09)
             ResetControllers();
     }
 
-    void meta_event(int, const void*, std::size_t)
+    void meta_event(int, const void *, std::size_t)
     {
     }
 
@@ -226,7 +337,7 @@ public:
         ResetState();
     }
 
-private:
+  private:
     static int Clamp127(int value)
     {
         if (value < 0)
@@ -301,13 +412,13 @@ private:
 
     int ComputeBaseGain(int channel, int velocity) const
     {
-        const TChannel& state = iChannels[channel];
+        const TChannel &state = iChannels[channel];
         const int64_t numerator = static_cast<int64_t>(velocity) *
                                   state.volume * state.expression * KGainScale;
         return static_cast<int>(numerator / 2048383);
     }
 
-    void SetVoicePan(TVoice& voice, int baseGain)
+    void SetVoicePan(TVoice &voice, int baseGain)
     {
         const int pan = Clamp127(iChannels[voice.channel].pan);
         int left = baseGain * (127 - pan) / 64;
@@ -358,7 +469,7 @@ private:
             return;
         NoteOff(channel, note);
         const int index = FindVoice();
-        TVoice& voice = iVoices[index];
+        TVoice &voice = iVoices[index];
         std::memset(&voice, 0, sizeof(voice));
         voice.active = true;
         voice.serial = ++iSerial;
@@ -387,7 +498,7 @@ private:
         }
     }
 
-    void BeginRelease(TVoice& voice)
+    void BeginRelease(TVoice &voice)
     {
         if (!voice.active || voice.released)
             return;
@@ -406,7 +517,7 @@ private:
     {
         for (int index = 0; index < KVoiceCount; ++index)
         {
-            TVoice& voice = iVoices[index];
+            TVoice &voice = iVoices[index];
             if (!voice.active || voice.channel != channel || voice.note != note || voice.released)
                 continue;
             if (iChannels[channel].sustain)
@@ -420,7 +531,7 @@ private:
     {
         for (int index = 0; index < KVoiceCount; ++index)
         {
-            TVoice& voice = iVoices[index];
+            TVoice &voice = iVoices[index];
             if (voice.active && voice.channel == channel && voice.sustainRelease)
                 BeginRelease(voice);
         }
@@ -430,7 +541,7 @@ private:
     {
         for (int index = 0; index < KVoiceCount; ++index)
         {
-            TVoice& voice = iVoices[index];
+            TVoice &voice = iVoices[index];
             if (!voice.active || voice.channel != channel)
                 continue;
             if (immediate)
@@ -444,7 +555,7 @@ private:
     {
         for (int index = 0; index < KVoiceCount; ++index)
         {
-            TVoice& voice = iVoices[index];
+            TVoice &voice = iVoices[index];
             if (voice.active && voice.channel == channel)
                 voice.step = PitchStep(voice.note, iChannels[channel].pitch);
         }
@@ -454,7 +565,7 @@ private:
     {
         for (int index = 0; index < KVoiceCount; ++index)
         {
-            TVoice& voice = iVoices[index];
+            TVoice &voice = iVoices[index];
             if (!voice.active || voice.channel != channel)
                 continue;
             const int oldBase = voice.gainBase;
@@ -474,11 +585,10 @@ private:
     {
         for (int index = 0; index < KVoiceCount; ++index)
         {
-            TVoice& voice = iVoices[index];
+            TVoice &voice = iVoices[index];
             if (!voice.active || voice.channel != channel)
                 continue;
-            int current = voice.gainLeftQ16 > voice.gainRightQ16 ?
-                          voice.gainLeftQ16 : voice.gainRightQ16;
+            int current = voice.gainLeftQ16 > voice.gainRightQ16 ? voice.gainLeftQ16 : voice.gainRightQ16;
             const int pan = Clamp127(iChannels[channel].pan);
             voice.gainLeftQ16 = static_cast<int32_t>(
                 static_cast<int64_t>(current) * (127 - pan) / 64);
@@ -492,49 +602,48 @@ private:
         value = Clamp127(value);
         switch (control)
         {
-            case 7:
-                iChannels[channel].volume = value;
-                RefreshGain(channel);
-                break;
-            case 10:
-                iChannels[channel].pan = value;
-                RefreshPan(channel);
-                break;
-            case 11:
-                iChannels[channel].expression = value;
-                RefreshGain(channel);
-                break;
-            case 64:
-            {
-                const bool old = iChannels[channel].sustain;
-                iChannels[channel].sustain = value >= 64;
-                if (old && !iChannels[channel].sustain)
-                    ReleaseSustain(channel);
-                break;
-            }
-            case 120:
-                AllNotesOff(channel, true);
-                break;
-            case 121:
-                iChannels[channel].volume = 100;
-                iChannels[channel].expression = 127;
-                iChannels[channel].pan = 64;
-                iChannels[channel].pitch = 8192;
-                iChannels[channel].sustain = false;
-                RefreshGain(channel);
-                RefreshPan(channel);
-                RefreshPitch(channel);
+        case 7:
+            iChannels[channel].volume = value;
+            RefreshGain(channel);
+            break;
+        case 10:
+            iChannels[channel].pan = value;
+            RefreshPan(channel);
+            break;
+        case 11:
+            iChannels[channel].expression = value;
+            RefreshGain(channel);
+            break;
+        case 64: {
+            const bool old = iChannels[channel].sustain;
+            iChannels[channel].sustain = value >= 64;
+            if (old && !iChannels[channel].sustain)
                 ReleaseSustain(channel);
-                break;
-            case 123:
-                AllNotesOff(channel, false);
-                break;
-            default:
-                break;
+            break;
+        }
+        case 120:
+            AllNotesOff(channel, true);
+            break;
+        case 121:
+            iChannels[channel].volume = 100;
+            iChannels[channel].expression = 127;
+            iChannels[channel].pan = 64;
+            iChannels[channel].pitch = 8192;
+            iChannels[channel].sustain = false;
+            RefreshGain(channel);
+            RefreshPan(channel);
+            RefreshPitch(channel);
+            ReleaseSustain(channel);
+            break;
+        case 123:
+            AllNotesOff(channel, false);
+            break;
+        default:
+            break;
         }
     }
 
-    static int WaveSample(TVoice& voice)
+    static int WaveSample(TVoice &voice)
     {
         const uint32_t phase = voice.phase;
         voice.phase += voice.step;
@@ -556,7 +665,7 @@ private:
                           : 98303 - static_cast<int>(x * 2u);
     }
 
-    void AdvanceEnvelope(TVoice& voice)
+    void AdvanceEnvelope(TVoice &voice)
     {
         if (voice.decayLeftQ16 > 0)
         {
@@ -574,7 +683,7 @@ private:
             voice.active = false;
     }
 
-    void Synthesize(short* output, int frames)
+    void Synthesize(short *output, int frames)
     {
         for (int frame = 0; frame < frames; ++frame)
         {
@@ -582,7 +691,7 @@ private:
             int32_t right = 0;
             for (int index = 0; index < KVoiceCount; ++index)
             {
-                TVoice& voice = iVoices[index];
+                TVoice &voice = iVoices[index];
                 if (!voice.active)
                     continue;
                 const int sample = WaveSample(voice);
@@ -605,7 +714,7 @@ private:
         }
     }
 
-private:
+  private:
     int iSampleRate;
     int iPitch;
     float iTime;
@@ -617,13 +726,13 @@ private:
     TVoice iVoices[KVoiceCount];
     midisequencer::sequencer iSequence;
 };
-}
+} // namespace
 
-extern "C" void* EasyRpgMidiLiteCreate(const unsigned char* data, int size, int sample_rate, int pitch)
+extern "C" void *EasyRpgMidiLiteCreate(const unsigned char *data, int size, int sample_rate, int pitch)
 {
     if (!data || size <= 0 || sample_rate <= 0 || pitch < 50 || pitch > 200)
         return NULL;
-    CMidiLite* decoder = new (std::nothrow) CMidiLite(sample_rate, pitch);
+    CMidiLite *decoder = new (std::nothrow) CMidiLite(sample_rate, pitch);
     if (!decoder)
         return NULL;
     if (!decoder->Open(data, size))
@@ -634,30 +743,30 @@ extern "C" void* EasyRpgMidiLiteCreate(const unsigned char* data, int size, int 
     return decoder;
 }
 
-extern "C" void EasyRpgMidiLiteDestroy(void* decoder)
+extern "C" void EasyRpgMidiLiteDestroy(void *decoder)
 {
-    delete static_cast<CMidiLite*>(decoder);
+    delete static_cast<CMidiLite *>(decoder);
 }
 
-extern "C" int EasyRpgMidiLiteRender(void* decoder, short* output, int frames)
+extern "C" int EasyRpgMidiLiteRender(void *decoder, short *output, int frames)
 {
     if (!decoder)
         return 0;
-    return static_cast<CMidiLite*>(decoder)->Render(output, frames);
+    return static_cast<CMidiLite *>(decoder)->Render(output, frames);
 }
 
-extern "C" void EasyRpgMidiLiteSetPitch(void* decoder, int pitch)
+extern "C" void EasyRpgMidiLiteSetPitch(void *decoder, int pitch)
 {
     if (decoder)
-        static_cast<CMidiLite*>(decoder)->SetPitch(pitch);
+        static_cast<CMidiLite *>(decoder)->SetPitch(pitch);
 }
 
-extern "C" unsigned int EasyRpgMidiLiteTicks(void* decoder)
+extern "C" unsigned int EasyRpgMidiLiteTicks(void *decoder)
 {
-    return decoder ? static_cast<CMidiLite*>(decoder)->Ticks() : 0;
+    return decoder ? static_cast<CMidiLite *>(decoder)->Ticks() : 0;
 }
 
-extern "C" unsigned int EasyRpgMidiLiteLoopCount(void* decoder)
+extern "C" unsigned int EasyRpgMidiLiteLoopCount(void *decoder)
 {
-    return decoder ? static_cast<CMidiLite*>(decoder)->LoopCount() : 0;
+    return decoder ? static_cast<CMidiLite *>(decoder)->LoopCount() : 0;
 }

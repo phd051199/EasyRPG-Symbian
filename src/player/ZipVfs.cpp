@@ -13,13 +13,13 @@ const TUint16 KExtraUnicodePath = 0x7075u;
 const TInt KEndOfCentralDirectoryBytes = 22;
 const TInt KMaxZipCommentBytes = 65535;
 
-TUint16 Read16(const TUint8* aBytes)
+TUint16 Read16(const TUint8 *aBytes)
 {
     return static_cast<TUint16>(aBytes[0]) |
            static_cast<TUint16>(static_cast<TUint16>(aBytes[1]) << 8);
 }
 
-TUint32 Read32(const TUint8* aBytes)
+TUint32 Read32(const TUint8 *aBytes)
 {
     return static_cast<TUint32>(aBytes[0]) |
            (static_cast<TUint32>(aBytes[1]) << 8) |
@@ -36,7 +36,7 @@ TUint16 FoldPathChar(TUint16 aValue)
     return aValue;
 }
 
-TBool IsDirectoryName(const TDesC8& aRawName)
+TBool IsDirectoryName(const TDesC8 &aRawName)
 {
     if (aRawName.Length() == 0)
         return EFalse;
@@ -44,14 +44,14 @@ TBool IsDirectoryName(const TDesC8& aRawName)
     return last == '/' || last == '\\';
 }
 
-TBool FindExtraField(const TDesC8& aExtra,
+TBool FindExtraField(const TDesC8 &aExtra,
                      TUint16 aWantedId,
-                     TPtrC8& aPayload)
+                     TPtrC8 &aPayload)
 {
     TInt cursor = 0;
     while (cursor <= aExtra.Length() - 4)
     {
-        const TUint8* bytes = aExtra.Ptr() + cursor;
+        const TUint8 *bytes = aExtra.Ptr() + cursor;
         const TUint16 id = Read16(bytes);
         const TUint16 size = Read16(bytes + 2);
         cursor += 4;
@@ -67,10 +67,10 @@ TBool FindExtraField(const TDesC8& aExtra,
     return EFalse;
 }
 
-void DecodeArchiveNameL(const TDesC8& aRawName,
-                        const TDesC8& aExtra,
+void DecodeArchiveNameL(const TDesC8 &aRawName,
+                        const TDesC8 &aExtra,
                         TUint16 aFlags,
-                        TDes& aDestination)
+                        TDes &aDestination)
 {
     TPtrC8 unicodePath;
     TBool usedUnicodeExtra = EFalse;
@@ -119,19 +119,19 @@ void DecodeArchiveNameL(const TDesC8& aRawName,
     }
 }
 
-}
+} // namespace
 
-CZipVfs* CZipVfs::OpenL(RFs& aFs,
-                        const TDesC& aArchivePath)
+CZipVfs *CZipVfs::OpenL(RFs &aFs,
+                        const TDesC &aArchivePath)
 {
-    CZipVfs* self = new (ELeave) CZipVfs(aFs);
+    CZipVfs *self = new (ELeave) CZipVfs(aFs);
     CleanupStack::PushL(self);
     self->ConstructL(aArchivePath);
     CleanupStack::Pop(self);
     return self;
 }
 
-CZipVfs::CZipVfs(RFs& aFs)
+CZipVfs::CZipVfs(RFs &aFs)
     : iFs(aFs),
       iProjectPrefix(NULL),
       iCentralDirectory(NULL),
@@ -139,7 +139,7 @@ CZipVfs::CZipVfs(RFs& aFs)
 {
 }
 
-void CZipVfs::ConstructL(const TDesC& aArchivePath)
+void CZipVfs::ConstructL(const TDesC &aArchivePath)
 {
     if (aArchivePath.Length() == 0 || aArchivePath.Length() > KMaxArchivePathChars)
         User::Leave(KErrArgument);
@@ -178,7 +178,7 @@ void CZipVfs::BuildIndexL()
     if (tailSize > fileSize)
         tailSize = fileSize;
 
-    HBufC8* tail = HBufC8::NewLC(tailSize);
+    HBufC8 *tail = HBufC8::NewLC(tailSize);
     TPtr8 tailBytes = tail->Des();
     User::LeaveIfError(iArchive.Read(fileSize - tailSize, tailBytes, tailSize));
     if (tailBytes.Length() != tailSize)
@@ -196,7 +196,7 @@ void CZipVfs::BuildIndexL()
     if (eocd < 0)
         User::Leave(KErrCorrupt);
 
-    const TUint8* eocdBytes = tailBytes.Ptr() + eocd;
+    const TUint8 *eocdBytes = tailBytes.Ptr() + eocd;
     const TUint16 diskNumber = Read16(eocdBytes + 4);
     const TUint16 centralDisk = Read16(eocdBytes + 6);
     const TUint16 diskEntries = Read16(eocdBytes + 8);
@@ -234,7 +234,7 @@ void CZipVfs::BuildIndexL()
     {
         if (cursor > centralSize - 46)
             User::Leave(KErrCorrupt);
-        const TUint8* header = centralBytes.Ptr() + cursor;
+        const TUint8 *header = centralBytes.Ptr() + cursor;
         if (Read32(header) != KCentralHeaderSignature)
             User::Leave(KErrCorrupt);
 
@@ -305,7 +305,7 @@ void CZipVfs::ResolveProjectRootL()
         if (prefixLength > 0 && path[prefixLength - 1] != '/')
             continue;
 
-        HBufC* prefix = path.Left(prefixLength).AllocLC();
+        HBufC *prefix = path.Left(prefixLength).AllocLC();
         TFileName treePath;
         if (prefix->Length() + KTreeName().Length() > treePath.MaxLength())
         {
@@ -356,7 +356,7 @@ void CZipVfs::PruneToProjectRootL()
     }
 }
 
-void CZipVfs::AddEntryL(const TDesC& aPath,
+void CZipVfs::AddEntryL(const TDesC &aPath,
                         TUint32 aFileSize,
                         TUint32 aLocalHeaderOffset,
                         TInt aCentralOffset)
@@ -384,16 +384,16 @@ void CZipVfs::AddEntryL(const TDesC& aPath,
     }
 }
 
-void CZipVfs::DecodeEntryPathL(const TZipVfsEntry& aEntry, TDes& aPath) const
+void CZipVfs::DecodeEntryPathL(const TZipVfsEntry &aEntry, TDes &aPath) const
 {
     if (!iCentralDirectory || aEntry.iCentralOffset < 0)
         User::Leave(KErrNotReady);
 
-    const TDesC8& central = *iCentralDirectory;
+    const TDesC8 &central = *iCentralDirectory;
     if (aEntry.iCentralOffset > central.Length() - 46)
         User::Leave(KErrCorrupt);
 
-    const TUint8* header = central.Ptr() + aEntry.iCentralOffset;
+    const TUint8 *header = central.Ptr() + aEntry.iCentralOffset;
     if (Read32(header) != KCentralHeaderSignature)
         User::Leave(KErrCorrupt);
 
@@ -415,12 +415,12 @@ void CZipVfs::DecodeEntryPathL(const TZipVfsEntry& aEntry, TDes& aPath) const
     NormalizePathInPlaceL(aPath);
 }
 
-TBool CZipVfs::Exists(const TDesC& aRelativePath) const
+TBool CZipVfs::Exists(const TDesC &aRelativePath) const
 {
     return FindEntry(aRelativePath) != NULL;
 }
 
-const TZipVfsEntry* CZipVfs::FindEntry(const TDesC& aRelativePath) const
+const TZipVfsEntry *CZipVfs::FindEntry(const TDesC &aRelativePath) const
 {
     TFileName fullPath;
     TRAPD(error, BuildFullPathL(aRelativePath, fullPath));
@@ -429,7 +429,7 @@ const TZipVfsEntry* CZipVfs::FindEntry(const TDesC& aRelativePath) const
     return FindFullPath(fullPath);
 }
 
-const TZipVfsEntry* CZipVfs::FindFullPath(const TDesC& aFullPath) const
+const TZipVfsEntry *CZipVfs::FindFullPath(const TDesC &aFullPath) const
 {
     const TUint32 hash = HashPath(aFullPath);
     const TInt bucket = static_cast<TInt>(hash & (KBucketCount - 1));
@@ -439,7 +439,7 @@ const TZipVfsEntry* CZipVfs::FindFullPath(const TDesC& aFullPath) const
         const TInt entryIndex = iBuckets[bucket][position];
         if (entryIndex < 0 || entryIndex >= iEntries.Count())
             continue;
-        const TZipVfsEntry& entry = iEntries[entryIndex];
+        const TZipVfsEntry &entry = iEntries[entryIndex];
         if (entry.iHash != hash)
             continue;
         TFileName path;
@@ -450,7 +450,7 @@ const TZipVfsEntry* CZipVfs::FindFullPath(const TDesC& aFullPath) const
     return NULL;
 }
 
-void CZipVfs::BuildFullPathL(const TDesC& aRelativePath, TDes& aFullPath) const
+void CZipVfs::BuildFullPathL(const TDesC &aRelativePath, TDes &aFullPath) const
 {
     if (!iProjectPrefix || aRelativePath.Length() == 0)
         User::Leave(KErrArgument);
@@ -467,7 +467,7 @@ void CZipVfs::BuildFullPathL(const TDesC& aRelativePath, TDes& aFullPath) const
     aFullPath.Append(relative);
 }
 
-HBufC8* CZipVfs::ReadFileLC(const TDesC& aRelativePath, TInt aMaxBytes) const
+HBufC8 *CZipVfs::ReadFileLC(const TDesC &aRelativePath, TInt aMaxBytes) const
 {
     if (aMaxBytes < 0)
         User::Leave(KErrArgument);
@@ -478,7 +478,7 @@ HBufC8* CZipVfs::ReadFileLC(const TDesC& aRelativePath, TInt aMaxBytes) const
     if (fileSize > aMaxBytes)
         User::Leave(KErrTooBig);
 
-    HBufC8* output = HBufC8::NewLC(fileSize);
+    HBufC8 *output = HBufC8::NewLC(fileSize);
     TPtr8 bytes = output->Des();
     if (fileSize > 0)
     {
@@ -489,7 +489,7 @@ HBufC8* CZipVfs::ReadFileLC(const TDesC& aRelativePath, TInt aMaxBytes) const
     return output;
 }
 
-TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry& aEntry) const
+TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry &aEntry) const
 {
     if (aEntry.iDataOffset >= 0)
         return aEntry.iDataOffset;
@@ -497,7 +497,7 @@ TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry& aEntry) const
     if (!iCentralDirectory || aEntry.iCentralOffset < 0 ||
         aEntry.iCentralOffset > iCentralDirectory->Length() - 46)
         User::Leave(KErrCorrupt);
-    const TUint8* centralHeader =
+    const TUint8 *centralHeader =
         iCentralDirectory->Ptr() + aEntry.iCentralOffset;
     if (Read32(centralHeader) != KCentralHeaderSignature)
         User::Leave(KErrCorrupt);
@@ -513,8 +513,8 @@ TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry& aEntry) const
 
     TBuf8<30> localHeader;
     User::LeaveIfError(iArchive.Read(static_cast<TInt>(aEntry.iLocalHeaderOffset),
-                                    localHeader,
-                                    localHeader.MaxLength()));
+                                     localHeader,
+                                     localHeader.MaxLength()));
     if (localHeader.Length() != localHeader.MaxLength() ||
         Read32(localHeader.Ptr()) != KLocalHeaderSignature)
         User::Leave(KErrCorrupt);
@@ -536,11 +536,11 @@ TInt CZipVfs::EntryDataOffsetL(const TZipVfsEntry& aEntry) const
     return aEntry.iDataOffset;
 }
 
-void CZipVfs::OpenStoredFileL(const TDesC& aRelativePath,
-                              TInt& aDataOffset,
-                              TInt& aFileSize) const
+void CZipVfs::OpenStoredFileL(const TDesC &aRelativePath,
+                              TInt &aDataOffset,
+                              TInt &aFileSize) const
 {
-    const TZipVfsEntry* entry = FindEntry(aRelativePath);
+    const TZipVfsEntry *entry = FindEntry(aRelativePath);
     if (entry)
     {
         if (entry->iFileSize > static_cast<TUint32>(KMaxTInt))
@@ -556,7 +556,7 @@ void CZipVfs::OpenStoredFileL(const TDesC& aRelativePath,
 void CZipVfs::ReadStoredFileL(TInt aDataOffset,
                               TInt aFileSize,
                               TInt aPosition,
-                              TDes8& aBuffer) const
+                              TDes8 &aBuffer) const
 {
     if (aFileSize < 0 || aPosition < 0)
         User::Leave(KErrArgument);
@@ -578,7 +578,7 @@ TInt CZipVfs::EntryCount() const
     return iEntries.Count();
 }
 
-void CZipVfs::EntryRelativePathL(TInt aIndex, TDes& aPath) const
+void CZipVfs::EntryRelativePathL(TInt aIndex, TDes &aPath) const
 {
     if (aIndex < 0 || !iProjectPrefix)
         User::Leave(KErrArgument);
@@ -599,7 +599,7 @@ void CZipVfs::EntryRelativePathL(TInt aIndex, TDes& aPath) const
     aPath.Copy(relative);
 }
 
-TUint32 CZipVfs::HashPath(const TDesC& aPath)
+TUint32 CZipVfs::HashPath(const TDesC &aPath)
 {
     TUint32 hash = 2166136261u;
     TInt index = 0;
@@ -614,7 +614,7 @@ TUint32 CZipVfs::HashPath(const TDesC& aPath)
     return hash;
 }
 
-TBool CZipVfs::PathEquals(const TDesC& aLeft, const TDesC& aRight)
+TBool CZipVfs::PathEquals(const TDesC &aLeft, const TDesC &aRight)
 {
     if (aLeft.Length() != aRight.Length())
         return EFalse;
@@ -627,7 +627,7 @@ TBool CZipVfs::PathEquals(const TDesC& aLeft, const TDesC& aRight)
     return ETrue;
 }
 
-TBool CZipVfs::PathEndsWith(const TDesC& aPath, const TDesC& aSuffix)
+TBool CZipVfs::PathEndsWith(const TDesC &aPath, const TDesC &aSuffix)
 {
     if (aSuffix.Length() > aPath.Length())
         return EFalse;
@@ -641,7 +641,7 @@ TBool CZipVfs::PathEndsWith(const TDesC& aPath, const TDesC& aSuffix)
     return ETrue;
 }
 
-void CZipVfs::NormalizePathInPlaceL(TDes& aPath)
+void CZipVfs::NormalizePathInPlaceL(TDes &aPath)
 {
     if (aPath.Length() == 0)
         User::Leave(KErrArgument);

@@ -6,12 +6,12 @@ namespace
 {
 _LIT(KZipPattern, "*.zip");
 _LIT(KZipExtension, ".zip");
-}
+} // namespace
 
-void TGameLocator::ListGameArchivesL(RFs& aFs,
-                                     CDesCArrayFlat& aDisplayNames,
-                                     CDesCArrayFlat& aArchivePaths,
-                                     RArray<TInt>& aArchiveSizes)
+void TGameLocator::ListGameArchivesL(RFs &aFs,
+                                     CDesCArrayFlat &aDisplayNames,
+                                     CDesCArrayFlat &aArchivePaths,
+                                     RArray<TInt> &aArchiveSizes)
 {
     aDisplayNames.Reset();
     aArchivePaths.Reset();
@@ -37,11 +37,11 @@ void TGameLocator::ListGameArchivesL(RFs& aFs,
     }
 }
 
-void TGameLocator::AppendGameArchivesL(RFs& aFs,
-                                       const TDesC& aDirectory,
-                                       CDesCArrayFlat& aDisplayNames,
-                                       CDesCArrayFlat& aArchivePaths,
-                                       RArray<TInt>& aArchiveSizes)
+void TGameLocator::AppendGameArchivesL(RFs &aFs,
+                                       const TDesC &aDirectory,
+                                       CDesCArrayFlat &aDisplayNames,
+                                       CDesCArrayFlat &aArchivePaths,
+                                       RArray<TInt> &aArchiveSizes)
 {
     TFileName pattern;
     if (aDirectory.Length() + KZipPattern().Length() > pattern.MaxLength())
@@ -50,7 +50,7 @@ void TGameLocator::AppendGameArchivesL(RFs& aFs,
     pattern.Copy(aDirectory);
     pattern.Append(KZipPattern);
 
-    CDir* directory = NULL;
+    CDir *directory = NULL;
     const TInt error = aFs.GetDir(pattern,
                                   KEntryAttNormal,
                                   ESortByName,
@@ -63,7 +63,7 @@ void TGameLocator::AppendGameArchivesL(RFs& aFs,
 
     for (TInt index = 0; index < directory->Count(); ++index)
     {
-        const TEntry& entry = (*directory)[index];
+        const TEntry &entry = (*directory)[index];
         if (entry.IsDir())
             continue;
 

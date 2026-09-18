@@ -1,7 +1,7 @@
 #include "Application.h"
 #include "Document.h"
 
-CApaDocument* CEasyRpgApplication::CreateDocumentL()
+CApaDocument *CEasyRpgApplication::CreateDocumentL()
 {
     return CEasyRpgDocument::NewL(*this);
 }

@@ -1,7 +1,8 @@
 #ifndef EASYRPG_SYMBIAN_LIBC_COMPAT_SYS_STAT_H
 #define EASYRPG_SYMBIAN_LIBC_COMPAT_SYS_STAT_H
 
-struct stat {
+struct stat
+{
     unsigned long st_mode;
 };
 
@@ -9,11 +10,12 @@ struct stat {
 #define S_ISDIR(mode) (((mode) & S_IFDIR) != 0)
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-int stat(const char* path, struct stat* buffer);
-int lstat(const char* path, struct stat* buffer);
+    int stat(const char *path, struct stat *buffer);
+    int lstat(const char *path, struct stat *buffer);
 
 #ifdef __cplusplus
 }

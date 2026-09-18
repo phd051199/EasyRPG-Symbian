@@ -43,12 +43,11 @@ void CEasyRpgAppUi::HandleCommandL(TInt aCommand)
         if (iLauncherView)
             iLauncherView->PlaySelectedGameL();
         break;
-    case EEasyRpgCmdLauncherAbout:
-        {
-            CAknInformationNote* note = new (ELeave) CAknInformationNote;
-            note->ExecuteLD(_L("EasyRPG\nSymbian port: Duy Pham"));
-        }
-        break;
+    case EEasyRpgCmdLauncherAbout: {
+        CAknInformationNote *note = new (ELeave) CAknInformationNote;
+        note->ExecuteLD(_L("EasyRPG\nSymbian port: Duy Pham"));
+    }
+    break;
     case EEikCmdExit:
     case EAknSoftkeyExit:
         Exit();

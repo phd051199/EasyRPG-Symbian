@@ -14,20 +14,20 @@ enum TGameLaunchStage
     ELaunchStageRuntimeStartup
 };
 
-const TDesC& GameLaunchStageName(TGameLaunchStage aStage);
+const TDesC &GameLaunchStageName(TGameLaunchStage aStage);
 
 class CGameLaunchWatcher : public CActive
 {
-public:
-    static CGameLaunchWatcher* NewL(CLauncherView& aOwner);
+  public:
+    static CGameLaunchWatcher *NewL(CLauncherView &aOwner);
     ~CGameLaunchWatcher();
 
-    void StartL(const TDesC& aExecutablePath, const TDesC& aArchivePath);
+    void StartL(const TDesC &aExecutablePath, const TDesC &aArchivePath);
     TGameLaunchStage FailureStage() const;
-    const TDesC& ExitCategory() const;
+    const TDesC &ExitCategory() const;
     TInt ExitReason() const;
 
-private:
+  private:
     enum TState
     {
         EIdle,
@@ -35,14 +35,14 @@ private:
         EWaitingForRuntime
     };
 
-    explicit CGameLaunchWatcher(CLauncherView& aOwner);
+    explicit CGameLaunchWatcher(CLauncherView &aOwner);
     void StartProcessL();
     void RunL();
     TInt RunError(TInt aError);
     void DoCancel();
 
-private:
-    CLauncherView& iOwner;
+  private:
+    CLauncherView &iOwner;
     RProcess iProcess;
     TFileName iExecutablePath;
     TFileName iArchivePath;

@@ -10,7 +10,7 @@
 
 namespace
 {
-void DisconnectFbs(TAny*)
+void DisconnectFbs(TAny *)
 {
     RFbsSession::Disconnect();
 }
@@ -27,7 +27,7 @@ void LaunchMainL()
         User::Leave(KErrTooBig);
     launcherPath.Append(EasyRpgApp::KLauncherExecutable);
 
-    CApaCommandLine* commandLine = CApaCommandLine::NewLC();
+    CApaCommandLine *commandLine = CApaCommandLine::NewLC();
     commandLine->SetExecutableNameL(launcherPath);
     commandLine->SetCommandL(EApaCommandRun);
     User::LeaveIfError(session.StartApp(*commandLine));
@@ -37,14 +37,14 @@ void LaunchMainL()
 
 void RunRuntimeL()
 {
-    CActiveScheduler* scheduler = new (ELeave) CActiveScheduler;
+    CActiveScheduler *scheduler = new (ELeave) CActiveScheduler;
     CleanupStack::PushL(scheduler);
     CActiveScheduler::Install(scheduler);
 
     User::LeaveIfError(RFbsSession::Connect());
     CleanupStack::PushL(TCleanupItem(DisconnectFbs, NULL));
 
-    CRuntimeEngine* runtime = CRuntimeEngine::NewL();
+    CRuntimeEngine *runtime = CRuntimeEngine::NewL();
     CleanupStack::PushL(runtime);
     RProcess::Rendezvous(KErrNone);
     runtime->Run();
@@ -57,11 +57,11 @@ void RunRuntimeL()
     CActiveScheduler::Install(NULL);
     CleanupStack::PopAndDestroy(scheduler);
 }
-}
+} // namespace
 
 GLDEF_C TInt E32Main()
 {
-    CTrapCleanup* cleanup = CTrapCleanup::New();
+    CTrapCleanup *cleanup = CTrapCleanup::New();
     if (!cleanup)
         return KErrNoMemory;
     TRAPD(error, RunRuntimeL());

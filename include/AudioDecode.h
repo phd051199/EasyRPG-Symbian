@@ -5,11 +5,11 @@
 
 class TAudioDecode
 {
-public:
-    static HBufC8* DecodeWavePcm16LC(const TDesC8& aFile,
-                                     TInt& aFrameCount,
-                                     TInt& aSampleRate,
-                                     TInt& aChannels);
+  public:
+    static HBufC8 *DecodeWavePcm16LC(const TDesC8 &aFile,
+                                     TInt &aFrameCount,
+                                     TInt &aSampleRate,
+                                     TInt &aChannels);
 };
 
 #endif

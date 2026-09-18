@@ -7,27 +7,31 @@ _LIT(KStageLaunch, "launch");
 _LIT(KStageCreate, "create");
 _LIT(KStageRendezvous, "rendezvous");
 _LIT(KStageRuntime, "runtime");
-}
+} // namespace
 
-const TDesC& GameLaunchStageName(TGameLaunchStage aStage)
+const TDesC &GameLaunchStageName(TGameLaunchStage aStage)
 {
     switch (aStage)
     {
-    case ELaunchStageCreate: return KStageCreate;
-    case ELaunchStageRendezvous: return KStageRendezvous;
-    case ELaunchStageRuntimeStartup: return KStageRuntime;
-    default: return KStageLaunch;
+    case ELaunchStageCreate:
+        return KStageCreate;
+    case ELaunchStageRendezvous:
+        return KStageRendezvous;
+    case ELaunchStageRuntimeStartup:
+        return KStageRuntime;
+    default:
+        return KStageLaunch;
     }
 }
 
-CGameLaunchWatcher* CGameLaunchWatcher::NewL(CLauncherView& aOwner)
+CGameLaunchWatcher *CGameLaunchWatcher::NewL(CLauncherView &aOwner)
 {
-    CGameLaunchWatcher* self = new (ELeave) CGameLaunchWatcher(aOwner);
+    CGameLaunchWatcher *self = new (ELeave) CGameLaunchWatcher(aOwner);
     CActiveScheduler::Add(self);
     return self;
 }
 
-CGameLaunchWatcher::CGameLaunchWatcher(CLauncherView& aOwner)
+CGameLaunchWatcher::CGameLaunchWatcher(CLauncherView &aOwner)
     : CActive(EPriorityIdle),
       iOwner(aOwner),
       iState(EIdle),
@@ -45,8 +49,8 @@ CGameLaunchWatcher::~CGameLaunchWatcher()
         iProcess.Close();
 }
 
-void CGameLaunchWatcher::StartL(const TDesC& aExecutablePath,
-                                const TDesC& aArchivePath)
+void CGameLaunchWatcher::StartL(const TDesC &aExecutablePath,
+                                const TDesC &aArchivePath)
 {
     if (IsActive() || iState != EIdle || iCreated)
         User::Leave(KErrInUse);
@@ -62,7 +66,7 @@ void CGameLaunchWatcher::StartL(const TDesC& aExecutablePath,
     iState = EDeferredStart;
     iStatus = KRequestPending;
     SetActive();
-    TRequestStatus* status = &iStatus;
+    TRequestStatus *status = &iStatus;
     User::RequestComplete(status, KErrNone);
 }
 
@@ -71,7 +75,7 @@ TGameLaunchStage CGameLaunchWatcher::FailureStage() const
     return iFailureStage;
 }
 
-const TDesC& CGameLaunchWatcher::ExitCategory() const
+const TDesC &CGameLaunchWatcher::ExitCategory() const
 {
     return iExitCategory;
 }

@@ -4,15 +4,17 @@
 #include <string>
 #include <vector>
 
-namespace EasyRpgCharsetDetector {
+namespace EasyRpgCharsetDetector
+{
 
-struct Guess {
+struct Guess
+{
     std::string encoding;
     float confidence;
 };
 
-std::vector<Guess> Detect(const std::string& sample);
+std::vector<Guess> Detect(const std::string &sample);
 
-}
+} // namespace EasyRpgCharsetDetector
 
 #endif
